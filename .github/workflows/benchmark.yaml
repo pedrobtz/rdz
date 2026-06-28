@@ -1,8 +1,20 @@
 # Runs the rdz benchmarks on Ubuntu, where the CRAN/P3M `fst` binary is built
 # with gcc OpenMP. This lets `fst` use all runner cores (threads_fst(0)), so the
 # comparison is against a genuinely multithreaded fst/qs2 rather than the
-# single-thread macOS build. Triggered manually from the Actions tab.
+# single-thread macOS build.
+#
+# Triggers:
+#   - pull_request (code/benchmark changes only): a reduced, fast run.
+#   - workflow_dispatch: a manual run with larger, configurable inputs.
+# CI runners are noisy, so treat the timings as directional, not authoritative.
 on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "R/**"
+      - "inst/benchmarks/**"
+      - "DESCRIPTION"
+      - ".github/workflows/benchmark.yaml"
   workflow_dispatch:
     inputs:
       iterations:
@@ -42,6 +54,11 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      # inputs.* is empty on pull_request, so fall back to lighter defaults.
+      RDZ_BENCH_ITERATIONS: ${{ inputs.iterations || '3' }}
+      RDZ_FST_N: ${{ inputs.fst_n || '200000' }}
+      RDZ_BENCH_N: ${{ inputs.bench_n || '200000' }}
+      RDZ_FST_THREADS: ${{ inputs.fst_threads || '0' }}
 
     steps:
       - uses: actions/checkout@v6
@@ -68,32 +85,23 @@ jobs:
 
       - name: Benchmark vs fst (all threads, OpenMP)
         env:
-          RDZ_FST_THREADS: ${{ inputs.fst_threads }}
-          RDZ_FST_N: ${{ inputs.fst_n }}
-          RDZ_BENCH_ITERATIONS: ${{ inputs.iterations }}
           RDZ_BENCH_OUTPUT: bench-results/fst-threads-all.csv
         run: Rscript inst/benchmarks/data-frames-fst.R
 
       - name: Benchmark vs fst (single thread baseline)
         env:
           RDZ_FST_THREADS: "1"
-          RDZ_FST_N: ${{ inputs.fst_n }}
-          RDZ_BENCH_ITERATIONS: ${{ inputs.iterations }}
           RDZ_BENCH_OUTPUT: bench-results/fst-threads-1.csv
         run: Rscript inst/benchmarks/data-frames-fst.R
 
       - name: Benchmark vs qs2 and qdata
-        env:
-          RDZ_BENCH_N: ${{ inputs.bench_n }}
-          RDZ_BENCH_ITERATIONS: ${{ inputs.iterations }}
         run: Rscript inst/benchmarks/benchmark.R 2>&1 | tee bench-results/qs2-benchmark.log
 
       - name: Run 27-object matrix
+        # Skipped on pull_request (inputs is empty); opt-in on manual runs.
         if: ${{ inputs.run_many_objects }}
         continue-on-error: true
         env:
-          RDZ_BENCH_N: ${{ inputs.bench_n }}
-          RDZ_BENCH_ITERATIONS: ${{ inputs.iterations }}
           RDZ_BENCH_OUTPUT: bench-results/many-objects.csv
         run: Rscript inst/benchmarks/many-objects.R
 
@@ -103,7 +111,7 @@ jobs:
           {
             echo "## rdz benchmark results"
             echo ""
-            echo "Runner cores: \`$(nproc)\`, fst threads requested: \`${{ inputs.fst_threads }}\` (0 = all)."
+            echo "Runner cores: \`$(nproc)\`, fst threads requested: \`$RDZ_FST_THREADS\` (0 = all)."
             for f in bench-results/fst-threads-all.csv bench-results/fst-threads-1.csv bench-results/many-objects.csv; do
               [ -f "$f" ] || continue
               echo ""
