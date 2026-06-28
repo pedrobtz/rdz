@@ -1,0 +1,22 @@
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+name: native-checks
+
+jobs:
+  sanitizers:
+    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@main
+
+  valgrind:
+    uses: pedrobtz/r-actions/.github/workflows/valgrind.yml@main
+
+  lto:
+    uses: pedrobtz/r-actions/.github/workflows/lto.yml@main
+
+  gctorture:
+    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@main
+
+  rchk:
+    uses: pedrobtz/r-actions/.github/workflows/rchk.yml@main
