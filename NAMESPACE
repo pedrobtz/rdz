@@ -1,0 +1,6 @@
+useDynLib(fastrds, .registration = TRUE)
+
+export(fast_read)
+export(fast_save)
+export(read_fastrds)
+export(write_fastrds)

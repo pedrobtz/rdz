@@ -1,0 +1,28 @@
+Package: fastrds
+Title: Fast Serialization of R Objects
+Version: 0.0.1
+Authors@R: person("utopp", role = c("aut", "cre"),
+    email = "uto.pampas@gmail.com")
+Description: Provides a native serialization path for common R
+    vectors, lists, matrices, and data frames. String vectors adapt between
+    dictionary and flat layouts. An optional balanced preset dictionary-encodes
+    low-cardinality numeric vectors with bit-packed and optionally LZ4-compressed
+    indexes, packs logical vectors into two bits per value, packs small-range
+    integer offsets, and stores exact constant-delta numeric sequences
+    compactly. High-cardinality doubles can use an exact XOR-delta and
+    byte-transpose transform with independent LZ4 blocks when it saves at least
+    12.5 percent. High-cardinality strings adapt between flat LZ4, positional
+    byte transposition, and prefix/suffix coding using a bounded first-block
+    selector. String lengths use run-length encoded metadata when smaller.
+    Unsupported objects automatically fall back to R's general serialization
+    format.
+License: MIT + file LICENSE
+Encoding: UTF-8
+RoxygenNote: 7.3.3
+Suggests:
+    bench,
+    fst,
+    qs2,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+NeedsCompilation: yes
