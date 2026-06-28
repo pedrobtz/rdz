@@ -56,13 +56,13 @@ static int sample_is_packable(SEXP object) {
     }
     if (!has_value) return 1;
     return range_bits(minimum, maximum, has_na) <=
-        FASTRDS_INTEGER_MAX_PACKED_BITS;
+        RDZ_INTEGER_MAX_PACKED_BITS;
 }
 
-int fastrds_integer_packed_size(R_xlen_t length, uint8_t bits, size_t *size) {
+int rdz_integer_packed_size(R_xlen_t length, uint8_t bits, size_t *size) {
     uint64_t total_bits;
     if (length < 0 || size == NULL ||
-        bits > FASTRDS_INTEGER_MAX_PACKED_BITS ||
+        bits > RDZ_INTEGER_MAX_PACKED_BITS ||
         (uint64_t) length > (UINT64_MAX - 7) / (bits == 0 ? 1 : bits)) {
         return 0;
     }
@@ -72,8 +72,8 @@ int fastrds_integer_packed_size(R_xlen_t length, uint8_t bits, size_t *size) {
     return 1;
 }
 
-int fastrds_integer_encoding_build(SEXP object,
-                                   fastrds_integer_encoding_t *encoding) {
+int rdz_integer_encoding_build(SEXP object,
+                                   rdz_integer_encoding_t *encoding) {
     const int *values;
     R_xlen_t length, i;
     int minimum = 0, maximum = 0, has_na = 0, has_value = 0;
@@ -105,10 +105,10 @@ int fastrds_integer_encoding_build(SEXP object,
         maximum = 0;
     }
     encoding->base = (int32_t) minimum;
-    encoding->flags = has_na ? FASTRDS_INTEGER_HAS_NA : 0;
+    encoding->flags = has_na ? RDZ_INTEGER_HAS_NA : 0;
     encoding->bits = has_value ? range_bits(minimum, maximum, has_na) : 0;
-    if (encoding->bits > FASTRDS_INTEGER_MAX_PACKED_BITS ||
-        !fastrds_integer_packed_size(length, encoding->bits,
+    if (encoding->bits > RDZ_INTEGER_MAX_PACKED_BITS ||
+        !rdz_integer_packed_size(length, encoding->bits,
                                      &encoding->packed_size) ||
         (uint64_t) length > SIZE_MAX / sizeof(int)) {
         memset(encoding, 0, sizeof(*encoding));
@@ -132,7 +132,7 @@ int fastrds_integer_encoding_build(SEXP object,
             uint64_t word = 0;
             unsigned item, byte;
             if (position > encoding->packed_size - encoding->bits) {
-                fastrds_integer_encoding_free(encoding);
+                rdz_integer_encoding_free(encoding);
                 return -1;
             }
             for (item = 0; item < 8; ++item) {
@@ -152,7 +152,7 @@ int fastrds_integer_encoding_build(SEXP object,
         accumulator_bits += encoding->bits;
         while (accumulator_bits >= 8) {
             if (position >= encoding->packed_size) {
-                fastrds_integer_encoding_free(encoding);
+                rdz_integer_encoding_free(encoding);
                 return -1;
             }
             encoding->packed[position++] = (unsigned char) accumulator;
@@ -162,38 +162,38 @@ int fastrds_integer_encoding_build(SEXP object,
     }
     if (accumulator_bits != 0) {
         if (position >= encoding->packed_size) {
-            fastrds_integer_encoding_free(encoding);
+            rdz_integer_encoding_free(encoding);
             return -1;
         }
         encoding->packed[position++] = (unsigned char) accumulator;
     }
     if (position != encoding->packed_size) {
-        fastrds_integer_encoding_free(encoding);
+        rdz_integer_encoding_free(encoding);
         return -1;
     }
     return 1;
 }
 
-void fastrds_integer_encoding_free(fastrds_integer_encoding_t *encoding) {
+void rdz_integer_encoding_free(rdz_integer_encoding_t *encoding) {
     free(encoding->packed);
     encoding->packed = NULL;
     encoding->packed_size = 0;
 }
 
-int fastrds_integer_decode(const unsigned char *packed, size_t packed_size,
+int rdz_integer_decode(const unsigned char *packed, size_t packed_size,
                            int32_t base, uint8_t bits, uint8_t flags,
                            R_xlen_t length, int *output) {
     uint64_t accumulator = 0;
     uint64_t mask = bits == 0 ? 0 : (UINT64_C(1) << bits) - 1;
     unsigned accumulator_bits = 0;
     size_t position = 0;
-    int has_na = (flags & FASTRDS_INTEGER_HAS_NA) != 0;
+    int has_na = (flags & RDZ_INTEGER_HAS_NA) != 0;
     int saw_na = 0;
     int64_t maximum_value;
     R_xlen_t i = 0;
 
-    if ((flags & ~FASTRDS_INTEGER_HAS_NA) != 0 ||
-        bits > FASTRDS_INTEGER_MAX_PACKED_BITS || base == NA_INTEGER ||
+    if ((flags & ~RDZ_INTEGER_HAS_NA) != 0 ||
+        bits > RDZ_INTEGER_MAX_PACKED_BITS || base == NA_INTEGER ||
         (has_na && bits == 0 && base != 0)) {
         return 0;
     }

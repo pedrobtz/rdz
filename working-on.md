@@ -1,4 +1,4 @@
-# fastrds work in progress
+# rdz work in progress
 
 Updated: 2026-06-28
 
@@ -10,8 +10,8 @@ defensible performance tradeoff.
 
 ## Completed
 
-- The `speed` preset retains the original `FASTRDS1` direct-storage format.
-- The `balanced` preset uses `FASTRDS2` and currently provides:
+- The `speed` preset retains the original `RDZFILE1` direct-storage format.
+- The `balanced` preset uses `RDZFILE2` and currently provides:
   - exact low-cardinality numeric dictionaries with bit-packed indexes and
     adaptive LZ4 blocks for compressible index streams;
   - exact constant-delta numeric sequence encoding for objects such as `Date`
@@ -30,7 +30,7 @@ defensible performance tradeoff.
 - Unsupported and compact ALTREP objects continue to use R serialization.
 - Native decoding validates encoding tags, indexes, padding, range overflow,
   truncated input, and malformed metadata.
-- The fst benchmark asserts that fastrds selected its native codec, explicitly
+- The fst benchmark asserts that rdz selected its native codec, explicitly
   configures fst's thread count, and records both requested and effective
   threads.
 
@@ -49,15 +49,15 @@ threads to one effective thread, so multithreaded fst remains unmeasured here.
 | unique strings | 1.19x | 1.01x | 0.50x |
 | wide numeric | 3.12x | 1.66x | 1.00x |
 
-- fastrds won all five writes and reads; unique-string reads were effectively
+- rdz won all five writes and reads; unique-string reads were effectively
   tied at 47.75 ms versus 48.35 ms.
 - Geometric-mean speedups were 2.07x for writes and 1.92x for reads.
 - Balanced files were 0.50x the size of default fst files geometrically.
 
 Focused results:
 
-- One million repeated strings: buffering reduced fastrds write time from
-  58.4 ms to 13.0 ms; fst took 23.5 ms. The fastrds file remained 1,001,973
+- One million repeated strings: buffering reduced rdz write time from
+  58.4 ms to 13.0 ms; fst took 23.5 ms. The rdz file remained 1,001,973
   bytes versus 2,411,875 bytes for fst.
 - One million logicals: 4,000,026 bytes became 250,027 bytes. Focused write
   time changed from 1.60 to 1.36 ms and read time from 0.81 to 0.93 ms.
@@ -65,11 +65,11 @@ Focused results:
   became 875,033 bytes. A focused one-column frame read in 1.60 ms versus
   2.77 ms for fst; packing writes took 3.33 ms versus 2.71 ms for fst.
 - One million numerics cycling through `0`, `1`, and `NA` became 1,099 bytes.
-  Balanced fastrds wrote the vector in 2.46 ms and read it in 2.18 ms; default
+  Balanced rdz wrote the vector in 2.46 ms and read it in 2.18 ms; default
   qs2 took 2.90 ms and 3.45 ms. Sampled small dictionaries pack during their
   exact validation scan; larger dictionaries capture indexes during discovery
   and avoid a second full hash-probe pass.
-- A random 64-value numeric vector retained raw packed indexes. Balanced fastrds
+- A random 64-value numeric vector retained raw packed indexes. Balanced rdz
   wrote and read it in 6.50 ms and 3.08 ms versus 32.97 ms and 12.81 ms for
   default qs2.
 - The full repeated frame is 2.03 MiB in balanced mode versus 6.40 MiB for fst.
@@ -77,15 +77,15 @@ Focused results:
   0.61x direct size, a noisy trend to 0.59x, and a random walk to 0.79x. Normal
   data with only a marginal gain and random bit patterns remain direct.
 - The mixed atomic-list benchmark is 17.40 MiB in balanced mode versus 30.52
-  MiB in speed mode and 13.87 MiB for default qs2. Balanced fastrds wrote and
+  MiB in speed mode and 13.87 MiB for default qs2. Balanced rdz wrote and
   read it in 93.1 ms and 28.9 ms versus 251.5 ms and 47.7 ms for default qs2.
 - One million structured unique strings use 0.084 MiB in balanced mode versus
   4.85 MiB before this transform, 0.362 MiB for qs2, and 0.400 MiB for qdata.
-  Balanced fastrds wrote in 120.4 ms and read in 92.9 ms versus 94.8/131.7 ms
+  Balanced rdz wrote in 120.4 ms and read in 92.9 ms versus 94.8/131.7 ms
   for qs2 and 58.5/101.9 ms for qdata.
 - The 500,000-row unique-string frame is 4.27 MiB in balanced mode versus 17.64
   MiB in speed mode and 8.47 MiB for fst. Balanced reads effectively tie fst;
-  speed-mode fastrds remains the fastest writer.
+  speed-mode rdz remains the fastest writer.
 
 Detailed results and the reproducible script are in:
 
@@ -110,7 +110,7 @@ Detailed results and the reproducible script are in:
 - A byte-for-byte comparison against commit `9e96fa8` confirms that the speed
   preset is unchanged.
 - The current reader round-trips an uncompressed numeric dictionary written by
-  commit `9e96fa8`, preserving existing `FASTRDS2` compatibility.
+  commit `9e96fa8`, preserving existing `RDZFILE2` compatibility.
 - The full fst matrix and a reduced 27-object smoke matrix pass. The full-size
   27-object run was terminated by the local environment before completion.
 - The local source-tarball `R CMD check --as-cran --no-manual` run, with remote
@@ -126,7 +126,7 @@ complete diff before committing; do not discard the uncommitted files.
 
 Key implementation files:
 
-- `src/fastrds.c`
+- `src/rdz.c`
 - `src/numeric_codec.c` and `src/numeric_codec.h`
 - `src/logical_codec.c` and `src/logical_codec.h`
 - `src/integer_codec.c` and `src/integer_codec.h`
@@ -145,7 +145,7 @@ Key implementation files:
    blocks differ from the selector's first block, then tune the bounded selector
    only if those measurements expose a systematic miss.
 
-Do not add fastrds multithreading yet. First establish the comparison against an
+Do not add rdz multithreading yet. First establish the comparison against an
 OpenMP-enabled fst build; explicit SIMD should follow profiling rather than be
 assumed to help.
 
@@ -154,57 +154,57 @@ assumed to help.
 Install the current checkout into the isolated library first:
 
 ```sh
-R CMD INSTALL --preclean --clean --library=/tmp/fastrds-r-lib .
+R CMD INSTALL --preclean --clean --library=/tmp/rdz-r-lib .
 ```
 
 Run the test suite:
 
 ```sh
-R_LIBS_USER=/tmp/fastrds-r-lib Rscript -e \
+R_LIBS_USER=/tmp/rdz-r-lib Rscript -e \
   'testthat::test_local(reporter="summary")'
 ```
 
 Run the main comparison against `qs2` and `qdata`:
 
 ```sh
-R_LIBS_USER=/tmp/fastrds-r-lib \
+R_LIBS_USER=/tmp/rdz-r-lib \
   Rscript inst/benchmarks/benchmark.R
 ```
 
 Run the 27-object correctness and performance matrix and retain its CSV:
 
 ```sh
-env R_LIBS_USER=/tmp/fastrds-r-lib \
-  FASTRDS_BENCH_OUTPUT=/tmp/fastrds-many-objects.csv \
+env R_LIBS_USER=/tmp/rdz-r-lib \
+  RDZ_BENCH_OUTPUT=/tmp/rdz-many-objects.csv \
   Rscript inst/benchmarks/many-objects.R
 ```
 
 Run the data-frame comparison against `fst` and retain its CSV:
 
 ```sh
-env R_LIBS_USER=/tmp/fastrds-r-lib \
-  FASTRDS_BENCH_OUTPUT=/tmp/fastrds-fst.csv \
+env R_LIBS_USER=/tmp/rdz-r-lib \
+  RDZ_BENCH_OUTPUT=/tmp/rdz-fst.csv \
   Rscript inst/benchmarks/data-frames-fst.R
 ```
 
 Use reduced workloads for a quick smoke run before a full benchmark:
 
 ```sh
-env R_LIBS_USER=/tmp/fastrds-r-lib \
-  FASTRDS_BENCH_N=100000 \
-  FASTRDS_BENCH_ITERATIONS=2 \
+env R_LIBS_USER=/tmp/rdz-r-lib \
+  RDZ_BENCH_N=100000 \
+  RDZ_BENCH_ITERATIONS=2 \
   Rscript inst/benchmarks/benchmark.R
 
-env R_LIBS_USER=/tmp/fastrds-r-lib \
-  FASTRDS_BENCH_N=100000 \
-  FASTRDS_BENCH_ITERATIONS=2 \
-  FASTRDS_BENCH_OUTPUT=/tmp/fastrds-many-smoke.csv \
+env R_LIBS_USER=/tmp/rdz-r-lib \
+  RDZ_BENCH_N=100000 \
+  RDZ_BENCH_ITERATIONS=2 \
+  RDZ_BENCH_OUTPUT=/tmp/rdz-many-smoke.csv \
   Rscript inst/benchmarks/many-objects.R
 
-env R_LIBS_USER=/tmp/fastrds-r-lib \
-  FASTRDS_FST_N=100000 \
-  FASTRDS_BENCH_ITERATIONS=2 \
-  FASTRDS_BENCH_OUTPUT=/tmp/fastrds-fst-smoke.csv \
+env R_LIBS_USER=/tmp/rdz-r-lib \
+  RDZ_FST_N=100000 \
+  RDZ_BENCH_ITERATIONS=2 \
+  RDZ_BENCH_OUTPUT=/tmp/rdz-fst-smoke.csv \
   Rscript inst/benchmarks/data-frames-fst.R
 ```
 
@@ -212,12 +212,12 @@ Benchmark environment variables:
 
 | variable | used by | default | purpose |
 |---|---|---:|---|
-| `FASTRDS_BENCH_ITERATIONS` | all scripts | 5 | Timed iterations per operation. |
-| `FASTRDS_BENCH_N` | qs2 and many-object scripts | 2,000,000 / 1,000,000 | Base workload size. |
-| `FASTRDS_FST_N` | fst script | 1,000,000 | Base row count for fst cases. |
-| `FASTRDS_FST_THREADS` | fst script | 1 | fst thread count; use 0 for all available threads. |
-| `FASTRDS_BENCH_OUTPUT` | many-object and fst scripts | temporary CSV | CSV output path. |
+| `RDZ_BENCH_ITERATIONS` | all scripts | 5 | Timed iterations per operation. |
+| `RDZ_BENCH_N` | qs2 and many-object scripts | 2,000,000 / 1,000,000 | Base workload size. |
+| `RDZ_FST_N` | fst script | 1,000,000 | Base row count for fst cases. |
+| `RDZ_FST_THREADS` | fst script | 1 | fst thread count; use 0 for all available threads. |
+| `RDZ_BENCH_OUTPUT` | many-object and fst scripts | temporary CSV | CSV output path. |
 
 The qs2 script prints results to the console. The other two scripts print the
-final CSV path; set `FASTRDS_BENCH_OUTPUT` explicitly if the results need to be
+final CSV path; set `RDZ_BENCH_OUTPUT` explicitly if the results need to be
 kept.

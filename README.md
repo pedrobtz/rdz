@@ -1,6 +1,10 @@
-# fastrds
+# rdz
 
-`fastrds` is an experiment in minimizing R object serialization latency. It
+<!-- badges: start -->
+[![R-CMD-check](https://github.com/pedrobtz/rdz/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/rdz/actions/workflows/R-CMD-check.yaml)
+<!-- badges: end -->
+
+`rdz` is an experiment in minimizing R object serialization latency. It
 uses two codecs:
 
 - A native codec for atomic vectors, strings, lists, matrices, and data frames.
@@ -15,8 +19,8 @@ trades file size for latency and avoids compression work when speed is the
 primary goal.
 
 ```r
-write_fastrds(object, "object.fastrds")
-object <- read_fastrds("object.fastrds")
+write_rdz(object, "object.rdz")
+object <- read_rdz("object.rdz")
 ```
 
 Use `codec = "native"` to require the fast native path, or `codec = "r"` to
@@ -28,7 +32,7 @@ and deferred representations are not materialized on disk.
 ## Balanced encoding
 
 The default `preset = "speed"` retains the original direct-storage format.
-`preset = "balanced"` writes the versioned `FASTRDS2` format. Logical vectors
+`preset = "balanced"` writes the versioned `RDZFILE2` format. Logical vectors
 use two bits per value, including `NA`. Integer vectors needing at most eight
 bits use a frame-of-reference representation with bit-packed offsets and a
 reserved `NA` code only when needed. Numeric vectors are sampled before codec selection:
@@ -51,7 +55,7 @@ beat raw storage. Incompressible strings remain raw, and the speed preset
 retains its original bytes.
 
 ```r
-write_fastrds(object, "object.fastrds", preset = "balanced")
+write_rdz(object, "object.rdz", preset = "balanced")
 ```
 
 For one million logical values cycling through `FALSE`, `TRUE`, and `NA`,
@@ -68,9 +72,9 @@ wider integer ranges.
 
 For one million values repeating `0`, `1`, and `NA`, balanced encoding reduced
 the file from 8,000,026 to 1,099 bytes. In a 40-iteration focused comparison,
-balanced fastrds wrote it in 2.46 ms and read it in 2.18 ms; default qs2 took
+balanced rdz wrote it in 2.46 ms and read it in 2.18 ms; default qs2 took
 2.90 ms and 3.45 ms. A random 64-value vector retained raw packed indexes:
-balanced fastrds wrote and read it in 6.50 ms and 3.08 ms versus 32.97 ms and
+balanced rdz wrote and read it in 6.50 ms and 3.08 ms versus 32.97 ms and
 12.81 ms for default qs2.
 
 For one million consecutive dates, constant-delta encoding reduced the file
@@ -84,20 +88,20 @@ For one million high-cardinality doubles, XOR-delta byte transposition reduced
 uniform random data to 0.61x, a noisy trend to 0.59x, and a random walk to
 0.79x of direct storage. Marginally compressible normal data and random bit
 patterns remain direct. On the mixed atomic-list qs2 benchmark, balanced
-fastrds produced a 17.40 MiB file versus 30.52 MiB for speed mode and 13.87 MiB
+rdz produced a 17.40 MiB file versus 30.52 MiB for speed mode and 13.87 MiB
 for default qs2; it wrote in 93.1 ms and read in 28.9 ms versus 251.5 ms and
 47.7 ms for default qs2.
 
 For one million structured unique strings, prefix/suffix coding reduced the
 balanced file from 4.85 MiB to 0.084 MiB, versus 0.362 MiB for default qs2 and
-0.400 MiB for qdata. Balanced fastrds wrote it in 120.4 ms versus 94.8 ms for
+0.400 MiB for qdata. Balanced rdz wrote it in 120.4 ms versus 94.8 ms for
 qs2 and 58.5 ms for qdata, then read it in 92.9 ms versus 131.7 ms and 101.9 ms.
 Random fixed-width strings remained raw.
 
 For the 500,000-row unique-string data frame in the fst benchmark, balanced
 encoding reduced the file from 17.64 MiB to 4.27 MiB, versus 8.47 MiB for fst.
 The added compression is primarily a write-time tradeoff: balanced write and
-read times were 74.7 ms and 48.1 ms. Speed-mode fastrds wrote in 28.1 ms versus
+read times were 74.7 ms and 48.1 ms. Speed-mode rdz wrote in 28.1 ms versus
 fst's fastest 33.4 ms and read in 47.8 ms versus fst's 48.4 ms.
 
 ## Benchmark
@@ -115,7 +119,7 @@ Rscript inst/benchmarks/data-frames-fst.R
 ```
 
 The script explicitly defaults fst to one thread and records both requested and
-effective counts. Set `FASTRDS_FST_THREADS=0` to request all available fst
+effective counts. Set `RDZ_FST_THREADS=0` to request all available fst
 threads; availability depends on how fst was built.
 
 Its methodology and latest results are documented in
@@ -132,15 +136,15 @@ The broader 27-object correctness and performance matrix is available in
 
 The benchmark includes default `qs2`, `qdata`, and a throughput-oriented `qs2`
 configuration (`compress_level = -1000`, byte shuffle disabled). Set
-`FASTRDS_BENCH_N` and `FASTRDS_BENCH_ITERATIONS` to control its size.
+`RDZ_BENCH_N` and `RDZ_BENCH_ITERATIONS` to control its size.
 
 On R 4.5.2, qs2 0.2.2, and an x86-64 macOS machine, a 30.5 MiB
 numeric/integer/logical list produced these medians:
 
 | format | write | read | file size |
 |---|---:|---:|---:|
-| fastrds speed | 13.6 ms | 11.2 ms | 30.52 MiB |
-| fastrds balanced | 93.1 ms | 28.9 ms | 17.40 MiB |
+| rdz speed | 13.6 ms | 11.2 ms | 30.52 MiB |
+| rdz balanced | 93.1 ms | 28.9 ms | 17.40 MiB |
 | qs2 default | 251.5 ms | 47.7 ms | 13.87 MiB |
 | qs2 throughput | 69.2 ms | 18.6 ms | 30.29 MiB |
 | qdata default | 249.1 ms | 45.4 ms | 13.87 MiB |

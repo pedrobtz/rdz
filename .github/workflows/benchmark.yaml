@@ -1,0 +1,123 @@
+# Runs the rdz benchmarks on Ubuntu, where the CRAN/P3M `fst` binary is built
+# with gcc OpenMP. This lets `fst` use all runner cores (threads_fst(0)), so the
+# comparison is against a genuinely multithreaded fst/qs2 rather than the
+# single-thread macOS build. Triggered manually from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Timed iterations per operation
+        type: string
+        default: "5"
+      fst_n:
+        description: Base row count for the fst data-frame cases
+        type: string
+        default: "1000000"
+      bench_n:
+        description: Base workload size for the qs2 and many-object scripts
+        type: string
+        default: "1000000"
+      fst_threads:
+        description: fst thread count (0 = all available / OpenMP)
+        type: string
+        default: "0"
+      run_many_objects:
+        description: Also run the broad 27-object matrix
+        type: boolean
+        default: true
+
+name: benchmark
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::bench
+            any::fst
+            any::qs2
+            local::.
+
+      - name: Report cores and effective OpenMP threads
+        run: |
+          echo "nproc=$(nproc)"
+          Rscript -e 'cat(sprintf("detectCores=%d\n", parallel::detectCores())); library(fst); invisible(fst::threads_fst(0)); cat(sprintf("fst effective threads=%d\n", fst::threads_fst()))'
+
+      - name: Create results directory
+        run: mkdir -p bench-results
+
+      - name: Benchmark vs fst (all threads, OpenMP)
+        env:
+          RDZ_FST_THREADS: ${{ inputs.fst_threads }}
+          RDZ_FST_N: ${{ inputs.fst_n }}
+          RDZ_BENCH_ITERATIONS: ${{ inputs.iterations }}
+          RDZ_BENCH_OUTPUT: bench-results/fst-threads-all.csv
+        run: Rscript inst/benchmarks/data-frames-fst.R
+
+      - name: Benchmark vs fst (single thread baseline)
+        env:
+          RDZ_FST_THREADS: "1"
+          RDZ_FST_N: ${{ inputs.fst_n }}
+          RDZ_BENCH_ITERATIONS: ${{ inputs.iterations }}
+          RDZ_BENCH_OUTPUT: bench-results/fst-threads-1.csv
+        run: Rscript inst/benchmarks/data-frames-fst.R
+
+      - name: Benchmark vs qs2 and qdata
+        env:
+          RDZ_BENCH_N: ${{ inputs.bench_n }}
+          RDZ_BENCH_ITERATIONS: ${{ inputs.iterations }}
+        run: Rscript inst/benchmarks/benchmark.R 2>&1 | tee bench-results/qs2-benchmark.log
+
+      - name: Run 27-object matrix
+        if: ${{ inputs.run_many_objects }}
+        continue-on-error: true
+        env:
+          RDZ_BENCH_N: ${{ inputs.bench_n }}
+          RDZ_BENCH_ITERATIONS: ${{ inputs.iterations }}
+          RDZ_BENCH_OUTPUT: bench-results/many-objects.csv
+        run: Rscript inst/benchmarks/many-objects.R
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## rdz benchmark results"
+            echo ""
+            echo "Runner cores: \`$(nproc)\`, fst threads requested: \`${{ inputs.fst_threads }}\` (0 = all)."
+            for f in bench-results/fst-threads-all.csv bench-results/fst-threads-1.csv bench-results/many-objects.csv; do
+              [ -f "$f" ] || continue
+              echo ""
+              echo "### $(basename "$f")"
+              echo '```'
+              column -t -s, "$f"
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: bench-results/
+          if-no-files-found: warn

@@ -1,4 +1,4 @@
 library(testthat)
-library(fastrds)
+library(rdz)
 
-test_check("fastrds")
+test_check("rdz")

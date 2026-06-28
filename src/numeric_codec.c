@@ -84,7 +84,7 @@ static int hash_find_or_add(real_hash_t *hash, uint64_t bits,
                 return 1;
             }
         }
-        if (*dictionary_size == FASTRDS_REAL_DICTIONARY_MAX) return 0;
+        if (*dictionary_size == RDZ_REAL_DICTIONARY_MAX) return 0;
         *index = *dictionary_size;
         dictionary[*dictionary_size] = bits;
         ++*dictionary_size;
@@ -104,7 +104,7 @@ static int hash_find_or_add(real_hash_t *hash, uint64_t bits,
         *index = hash->indexes[slot];
         return 1;
     }
-    if (*dictionary_size == FASTRDS_REAL_DICTIONARY_MAX) return 0;
+    if (*dictionary_size == RDZ_REAL_DICTIONARY_MAX) return 0;
     *index = *dictionary_size;
     dictionary[*dictionary_size] = bits;
     ++*dictionary_size;
@@ -126,7 +126,7 @@ static uint8_t bits_for_count(uint16_t count) {
     return bits;
 }
 
-int fastrds_real_dictionary_packed_size(R_xlen_t length, uint8_t bits,
+int rdz_real_dictionary_packed_size(R_xlen_t length, uint8_t bits,
                                         size_t *size) {
     uint64_t total_bits;
     if (bits > 8 || length < 0 ||
@@ -160,7 +160,7 @@ static int sampled_dictionary_find(const uint64_t *dictionary, uint16_t count,
  * later value requires the general builder, and -1 on allocation failure. */
 static int sampled_dictionary_build(
     SEXP object, const uint64_t *sampled, uint16_t sampled_size,
-    fastrds_real_dictionary_t *dictionary
+    rdz_real_dictionary_t *dictionary
 ) {
     const double *values = REAL_RO(object);
     R_xlen_t length = XLENGTH(object), i;
@@ -172,7 +172,7 @@ static int sampled_dictionary_build(
     memcpy(dictionary->values, sampled,
            (size_t) sampled_size * sizeof(uint64_t));
     dictionary->bits = bits_for_count(sampled_size);
-    if (!fastrds_real_dictionary_packed_size(
+    if (!rdz_real_dictionary_packed_size(
             length, dictionary->bits, &dictionary->packed_size) ||
         (uint64_t) length > SIZE_MAX / sizeof(double)) {
         memset(dictionary, 0, sizeof(*dictionary));
@@ -217,8 +217,8 @@ static int sampled_dictionary_build(
     return 1;
 }
 
-int fastrds_real_dictionary_build(SEXP object,
-                                  fastrds_real_dictionary_t *dictionary) {
+int rdz_real_dictionary_build(SEXP object,
+                                  rdz_real_dictionary_t *dictionary) {
     real_hash_t hash;
     uint64_t sampled[REAL_SAMPLE_UNIQUE_LIMIT];
     uint16_t sampled_size;
@@ -256,7 +256,7 @@ int fastrds_real_dictionary_build(SEXP object,
         indexes[i] = (unsigned char) index;
     }
     dictionary->bits = bits_for_count(dictionary->count);
-    if (!fastrds_real_dictionary_packed_size(length, dictionary->bits,
+    if (!rdz_real_dictionary_packed_size(length, dictionary->bits,
                                              &dictionary->packed_size) ||
         (uint64_t) length > SIZE_MAX / sizeof(double)) {
         free(indexes);
@@ -294,19 +294,19 @@ int fastrds_real_dictionary_build(SEXP object,
     }
     free(indexes);
     if (position != dictionary->packed_size) {
-        fastrds_real_dictionary_free(dictionary);
+        rdz_real_dictionary_free(dictionary);
         return -1;
     }
     return 1;
 }
 
-void fastrds_real_dictionary_free(fastrds_real_dictionary_t *dictionary) {
+void rdz_real_dictionary_free(rdz_real_dictionary_t *dictionary) {
     free(dictionary->packed);
     dictionary->packed = NULL;
     dictionary->packed_size = 0;
 }
 
-int fastrds_real_dictionary_decode(
+int rdz_real_dictionary_decode(
     const unsigned char *packed, size_t packed_size, uint8_t bits,
     const uint64_t *dictionary, uint16_t dictionary_size,
     R_xlen_t length, double *output
@@ -341,8 +341,8 @@ int fastrds_real_dictionary_decode(
     return position == packed_size;
 }
 
-int fastrds_real_sequence_build(SEXP object,
-                                fastrds_real_sequence_t *sequence) {
+int rdz_real_sequence_build(SEXP object,
+                                rdz_real_sequence_t *sequence) {
     const double *values;
     double base, delta;
     R_xlen_t length, i;
@@ -365,7 +365,7 @@ int fastrds_real_sequence_build(SEXP object,
     return 1;
 }
 
-int fastrds_real_sequence_decode(const fastrds_real_sequence_t *sequence,
+int rdz_real_sequence_decode(const rdz_real_sequence_t *sequence,
                                  R_xlen_t length, double *output) {
     double base = real_from_bits(sequence->base);
     double delta = real_from_bits(sequence->delta);
@@ -377,7 +377,7 @@ int fastrds_real_sequence_decode(const fastrds_real_sequence_t *sequence,
     return 1;
 }
 
-void fastrds_real_xor_encode_block(const double *input, size_t length,
+void rdz_real_xor_encode_block(const double *input, size_t length,
                                    uint64_t *previous,
                                    unsigned char *output) {
     size_t i;
@@ -397,7 +397,7 @@ void fastrds_real_xor_encode_block(const double *input, size_t length,
     }
 }
 
-void fastrds_real_xor_decode_block(const unsigned char *input, size_t length,
+void rdz_real_xor_decode_block(const unsigned char *input, size_t length,
                                    uint64_t *previous, double *output) {
     size_t i;
 

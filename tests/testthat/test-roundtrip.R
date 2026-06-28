@@ -1,8 +1,8 @@
 roundtrip <- function(x, codec = "auto", preset = "speed") {
-  path <- tempfile(fileext = ".fastrds")
+  path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path))
-  expect_identical(write_fastrds(x, path, codec, preset), invisible(path))
-  read_fastrds(path)
+  expect_identical(write_rdz(x, path, codec, preset), invisible(path))
+  read_rdz(path)
 }
 
 test_that("native atomic vectors round trip exactly", {
@@ -37,25 +37,25 @@ test_that("string dictionary index widths round trip exactly", {
   )
 
   for (width in names(cases)) {
-    path <- tempfile(fileext = ".fastrds")
-    write_fastrds(cases[[width]], path, codec = "native")
+    path <- tempfile(fileext = ".rdz")
+    write_rdz(cases[[width]], path, codec = "native")
     header <- readBin(path, "raw", n = 27L)
     expect_identical(as.integer(header[[27L]]), as.integer(width))
-    expect_identical(read_fastrds(path), cases[[width]])
+    expect_identical(read_rdz(path), cases[[width]])
   }
 })
 
 test_that("balanced flat strings use LZ4 only when smaller", {
   x <- c(sprintf("unique-value-%08d", seq_len(50000L)), NA_character_)
-  speed_path <- tempfile(fileext = ".fastrds")
-  balanced_path <- tempfile(fileext = ".fastrds")
+  speed_path <- tempfile(fileext = ".rdz")
+  balanced_path <- tempfile(fileext = ".rdz")
 
-  write_fastrds(x, speed_path)
-  write_fastrds(x, balanced_path, preset = "balanced")
+  write_rdz(x, speed_path)
+  write_rdz(x, balanced_path, preset = "balanced")
   balanced_header <- readBin(balanced_path, "raw", n = 27L)
 
   expect_identical(as.integer(balanced_header[[27L]]), 3L)
-  expect_identical(read_fastrds(balanced_path), x)
+  expect_identical(read_rdz(balanced_path), x)
   expect_lt(file.info(balanced_path)$size, file.info(speed_path)$size / 2)
 
   set.seed(20260628)
@@ -64,12 +64,12 @@ test_that("balanced flat strings use LZ4 only when smaller", {
     4000L,
     paste0(sample(alphabet, 64L, replace = TRUE), collapse = "")
   )
-  write_fastrds(random, speed_path)
-  write_fastrds(random, balanced_path, preset = "balanced")
+  write_rdz(random, speed_path)
+  write_rdz(random, balanced_path, preset = "balanced")
   balanced_header <- readBin(balanced_path, "raw", n = 27L)
 
   expect_identical(as.integer(balanced_header[[27L]]), 0L)
-  expect_identical(read_fastrds(balanced_path), random)
+  expect_identical(read_rdz(balanced_path), random)
   expect_identical(file.info(balanced_path)$size, file.info(speed_path)$size)
 })
 
@@ -80,31 +80,31 @@ test_that("balanced LZ4 strings preserve encodings and block boundaries", {
   Encoding(x[[3L]]) <- "latin1"
   x[[4L]] <- NA_character_
   x[[5L]] <- strrep("abcd", 50000L)
-  path <- tempfile(fileext = ".fastrds")
+  path <- tempfile(fileext = ".rdz")
 
-  write_fastrds(x, path, preset = "balanced")
+  write_rdz(x, path, preset = "balanced")
   header <- readBin(path, "raw", n = 27L)
 
   expect_identical(as.integer(header[[27L]]), 3L)
-  expect_identical(read_fastrds(path), x)
+  expect_identical(read_rdz(path), x)
 
   direct_lengths <- vapply(
     seq_len(100L),
     function(i) strrep("a", 20000L + i),
     character(1)
   )
-  write_fastrds(direct_lengths, path, preset = "balanced")
+  write_rdz(direct_lengths, path, preset = "balanced")
   header <- readBin(path, "raw", n = 37L)
 
   expect_identical(as.integer(header[[27L]]), 3L)
   expect_identical(as.integer(header[[37L]]), 0L)
-  expect_identical(read_fastrds(path), direct_lengths)
+  expect_identical(read_rdz(path), direct_lengths)
 })
 
 test_that("malformed balanced LZ4 string blocks fail cleanly", {
   x <- sprintf("compressible-prefix-%08d", seq_len(10000L))
-  path <- tempfile(fileext = ".fastrds")
-  write_fastrds(x, path, preset = "balanced")
+  path <- tempfile(fileext = ".rdz")
+  write_rdz(x, path, preset = "balanced")
   bytes <- readBin(path, "raw", n = file.info(path)$size)
   expect_identical(as.integer(bytes[[27L]]), 3L)
   expect_identical(as.integer(bytes[[37L]]), 1L)
@@ -117,41 +117,41 @@ test_that("malformed balanced LZ4 string blocks fail cleanly", {
   malformed <- bytes
   malformed[[37L]] <- as.raw(255L)
   writeBin(malformed, path)
-  expect_error(read_fastrds(path), "unknown string length encoding")
+  expect_error(read_rdz(path), "unknown string length encoding")
 
   malformed <- bytes
   malformed[[46L]] <- as.raw(0L)
   writeBin(malformed, path)
-  expect_error(read_fastrds(path), "invalid string length metadata")
+  expect_error(read_rdz(path), "invalid string length metadata")
 
   malformed <- bytes
   malformed[[37L]] <- as.raw(0L)
   writeBin(malformed, path)
-  expect_error(read_fastrds(path), "invalid string length metadata")
+  expect_error(read_rdz(path), "invalid string length metadata")
 
   malformed <- bytes
   malformed[block_header + 0:3] <- writeBin(
     0L, raw(), size = 4L, endian = .Platform$endian
   )
   writeBin(malformed, path)
-  expect_error(read_fastrds(path), "invalid LZ4 string block")
+  expect_error(read_rdz(path), "invalid LZ4 string block")
 
   malformed <- bytes
   malformed[block_header + 0:3] <- writeBin(
     65537L, raw(), size = 4L, endian = .Platform$endian
   )
   writeBin(malformed, path)
-  expect_error(read_fastrds(path), "invalid LZ4 string block")
+  expect_error(read_rdz(path), "invalid LZ4 string block")
 
   malformed <- bytes
   malformed[block_header + 0:3] <- writeBin(
     1L, raw(), size = 4L, endian = .Platform$endian
   )
   writeBin(malformed, path)
-  expect_error(read_fastrds(path), "invalid LZ4 string block")
+  expect_error(read_rdz(path), "invalid LZ4 string block")
 
   writeBin(bytes[-length(bytes)], path)
-  expect_error(read_fastrds(path), "truncated")
+  expect_error(read_rdz(path), "truncated")
 })
 
 test_that("attributes, matrices, lists, and data frames round trip", {
@@ -184,8 +184,8 @@ test_that("auto mode falls back for general R objects", {
 })
 
 test_that("codec selection is enforced", {
-  path <- tempfile(fileext = ".fastrds")
-  expect_error(write_fastrds(function() NULL, path, "native"),
+  path <- tempfile(fileext = ".rdz")
+  expect_error(write_rdz(function() NULL, path, "native"),
                "not supported")
   x <- list(a = 1:10, call = quote(sum(a)))
   expect_identical(roundtrip(x, "r"), x)
@@ -193,14 +193,14 @@ test_that("codec selection is enforced", {
 })
 
 test_that("ALTREP objects retain their compact R representation", {
-  path <- tempfile(fileext = ".fastrds")
+  path <- tempfile(fileext = ".rdz")
   x <- seq_len(1000000L)
-  write_fastrds(x, path)
+  write_rdz(x, path)
   header <- readBin(path, "raw", n = 9L)
 
   expect_identical(as.integer(header[[9L]]), 2L)
   expect_lt(file.info(path)$size, 10000)
-  expect_identical(read_fastrds(path), x)
+  expect_identical(read_rdz(path), x)
 })
 
 test_that("balanced preset packs logical vectors into two bits", {
@@ -210,12 +210,12 @@ test_that("balanced preset packs logical vectors into two bits", {
   }
 
   x <- rep(c(FALSE, TRUE, NA), length.out = 1000000L)
-  speed_path <- tempfile(fileext = ".fastrds")
-  balanced_path <- tempfile(fileext = ".fastrds")
-  write_fastrds(x, speed_path)
-  write_fastrds(x, balanced_path, preset = "balanced")
+  speed_path <- tempfile(fileext = ".rdz")
+  balanced_path <- tempfile(fileext = ".rdz")
+  write_rdz(x, speed_path)
+  write_rdz(x, balanced_path, preset = "balanced")
 
-  expect_identical(read_fastrds(balanced_path), x)
+  expect_identical(read_rdz(balanced_path), x)
   expect_equal(file.info(speed_path)$size, 26 + 4 * length(x))
   expect_equal(file.info(balanced_path)$size, 27 + ceiling(length(x) / 4))
   expect_lt(file.info(balanced_path)$size, file.info(speed_path)$size / 15)
@@ -230,7 +230,7 @@ test_that("balanced logical packing works inside data frames", {
 })
 
 test_that("balanced preset packs small-range integer offsets", {
-  all_na_path <- tempfile(fileext = ".fastrds")
+  all_na_path <- tempfile(fileext = ".rdz")
   cases <- list(
     rep(NA_integer_, 10000L),
     rep(.Machine$integer.max, 10000L),
@@ -240,16 +240,16 @@ test_that("balanced preset packs small-range integer offsets", {
   for (x in cases) {
     expect_identical(roundtrip(x, preset = "balanced"), x)
   }
-  write_fastrds(cases[[1L]], all_na_path, preset = "balanced")
+  write_rdz(cases[[1L]], all_na_path, preset = "balanced")
   expect_equal(file.info(all_na_path)$size, 33)
 
   x <- rep(c(1:100, NA_integer_), length.out = 1000000L)
-  speed_path <- tempfile(fileext = ".fastrds")
-  balanced_path <- tempfile(fileext = ".fastrds")
-  write_fastrds(x, speed_path)
-  write_fastrds(x, balanced_path, preset = "balanced")
+  speed_path <- tempfile(fileext = ".rdz")
+  balanced_path <- tempfile(fileext = ".rdz")
+  write_rdz(x, speed_path)
+  write_rdz(x, balanced_path, preset = "balanced")
 
-  expect_identical(read_fastrds(balanced_path), x)
+  expect_identical(read_rdz(balanced_path), x)
   expect_equal(file.info(speed_path)$size, 26 + 4 * length(x))
   expect_equal(file.info(balanced_path)$size,
                33 + ceiling(7 * length(x) / 8))
@@ -259,11 +259,11 @@ test_that("balanced preset packs small-range integer offsets", {
 test_that("integer packing reserves an NA code only when needed", {
   without_na <- rep(1:128, length.out = 10000L)
   with_na <- rep(c(1:128, NA_integer_), length.out = 10000L)
-  without_path <- tempfile(fileext = ".fastrds")
-  with_path <- tempfile(fileext = ".fastrds")
+  without_path <- tempfile(fileext = ".rdz")
+  with_path <- tempfile(fileext = ".rdz")
 
-  write_fastrds(without_na, without_path, preset = "balanced")
-  write_fastrds(with_na, with_path, preset = "balanced")
+  write_rdz(without_na, without_path, preset = "balanced")
+  write_rdz(with_na, with_path, preset = "balanced")
   without_header <- readBin(without_path, "raw", n = 33L)
   with_header <- readBin(with_path, "raw", n = 33L)
 
@@ -271,8 +271,8 @@ test_that("integer packing reserves an NA code only when needed", {
   expect_identical(as.integer(without_header[[33L]]), 0L)
   expect_identical(as.integer(with_header[[32L]]), 8L)
   expect_identical(as.integer(with_header[[33L]]), 1L)
-  expect_identical(read_fastrds(without_path), without_na)
-  expect_identical(read_fastrds(with_path), with_na)
+  expect_identical(read_rdz(without_path), without_na)
+  expect_identical(read_rdz(with_path), with_na)
 })
 
 test_that("integer packing round trips every selected bit width", {
@@ -285,23 +285,23 @@ test_that("integer packing round trips every selected bit width", {
           length.out = 1001L)
     )
     for (x in cases) {
-      path <- tempfile(fileext = ".fastrds")
-      write_fastrds(x, path, preset = "balanced")
+      path <- tempfile(fileext = ".rdz")
+      write_rdz(x, path, preset = "balanced")
       header <- readBin(path, "raw", n = 33L)
       expect_identical(as.integer(header[[32L]]), bits)
-      expect_identical(read_fastrds(path), x)
+      expect_identical(read_rdz(path), x)
     }
   }
 })
 
 test_that("balanced preset leaves wide-range integers direct", {
   x <- rep(c(-.Machine$integer.max, .Machine$integer.max), 10000L)
-  speed_path <- tempfile(fileext = ".fastrds")
-  balanced_path <- tempfile(fileext = ".fastrds")
-  write_fastrds(x, speed_path)
-  write_fastrds(x, balanced_path, preset = "balanced")
+  speed_path <- tempfile(fileext = ".rdz")
+  balanced_path <- tempfile(fileext = ".rdz")
+  write_rdz(x, speed_path)
+  write_rdz(x, balanced_path, preset = "balanced")
 
-  expect_identical(read_fastrds(balanced_path), x)
+  expect_identical(read_rdz(balanced_path), x)
   expect_equal(file.info(balanced_path)$size,
                file.info(speed_path)$size + 1)
 })
@@ -316,20 +316,20 @@ test_that("integer packing preserves factors and data frames", {
 
 test_that("balanced preset dictionary-encodes low-cardinality numerics", {
   x <- rep(c(0, -0, NA_real_, NaN, Inf, -Inf), length.out = 100000L)
-  speed_path <- tempfile(fileext = ".fastrds")
-  balanced_path <- tempfile(fileext = ".fastrds")
+  speed_path <- tempfile(fileext = ".rdz")
+  balanced_path <- tempfile(fileext = ".rdz")
 
-  write_fastrds(x, speed_path, preset = "speed")
-  write_fastrds(x, balanced_path, preset = "balanced")
+  write_rdz(x, speed_path, preset = "speed")
+  write_rdz(x, balanced_path, preset = "balanced")
 
-  expect_identical(read_fastrds(speed_path), x)
-  expect_identical(read_fastrds(balanced_path), x)
+  expect_identical(read_rdz(speed_path), x)
+  expect_identical(read_rdz(balanced_path), x)
   expect_identical(
     as.integer(readBin(balanced_path, "raw", n = 27L)[[27L]]), 3L
   )
   expect_lt(file.info(balanced_path)$size, file.info(speed_path)$size / 100)
-  expect_identical(rawToChar(readBin(speed_path, "raw", n = 8L)), "FASTRDS1")
-  expect_identical(rawToChar(readBin(balanced_path, "raw", n = 8L)), "FASTRDS2")
+  expect_identical(rawToChar(readBin(speed_path, "raw", n = 8L)), "RDZFILE1")
+  expect_identical(rawToChar(readBin(balanced_path, "raw", n = 8L)), "RDZFILE2")
 })
 
 test_that("balanced numeric bit widths round trip exactly", {
@@ -346,25 +346,25 @@ test_that("balanced numeric bit widths round trip exactly", {
 test_that("balanced numeric dictionaries retain raw packed random indexes", {
   set.seed(20260628)
   x <- sample(seq_len(64L) + 0, 100000L, replace = TRUE)
-  path <- tempfile(fileext = ".fastrds")
+  path <- tempfile(fileext = ".rdz")
 
-  write_fastrds(x, path, preset = "balanced")
+  write_rdz(x, path, preset = "balanced")
   header <- readBin(path, "raw", n = 27L)
 
   expect_identical(as.integer(header[[27L]]), 1L)
-  expect_identical(read_fastrds(path), x)
+  expect_identical(read_rdz(path), x)
 })
 
 test_that("balanced preset leaves high-cardinality numerics direct", {
   set.seed(1)
   x <- runif(10000L)
-  speed_path <- tempfile(fileext = ".fastrds")
-  balanced_path <- tempfile(fileext = ".fastrds")
+  speed_path <- tempfile(fileext = ".rdz")
+  balanced_path <- tempfile(fileext = ".rdz")
 
-  write_fastrds(x, speed_path)
-  write_fastrds(x, balanced_path, preset = "balanced")
+  write_rdz(x, speed_path)
+  write_rdz(x, balanced_path, preset = "balanced")
 
-  expect_identical(read_fastrds(balanced_path), x)
+  expect_identical(read_rdz(balanced_path), x)
   expect_lte(file.info(balanced_path)$size, file.info(speed_path)$size + 1)
 })
 
@@ -382,12 +382,12 @@ test_that("balanced preset preserves exact constant-delta sequences", {
     as.POSIXct("2000-01-01", tz = "UTC") + seq_len(100000L)
   )
   for (x in cases) {
-    speed_path <- tempfile(fileext = ".fastrds")
-    balanced_path <- tempfile(fileext = ".fastrds")
-    write_fastrds(x, speed_path)
-    write_fastrds(x, balanced_path, preset = "balanced")
+    speed_path <- tempfile(fileext = ".rdz")
+    balanced_path <- tempfile(fileext = ".rdz")
+    write_rdz(x, speed_path)
+    write_rdz(x, balanced_path, preset = "balanced")
 
-    expect_identical(read_fastrds(balanced_path), x)
+    expect_identical(read_rdz(balanced_path), x)
     expect_lt(file.info(balanced_path)$size, file.info(speed_path)$size / 100)
   }
 })
@@ -395,24 +395,24 @@ test_that("balanced preset preserves exact constant-delta sequences", {
 test_that("balanced preset leaves irregular numeric sequences direct", {
   x <- seq_len(10000L) + 0
   x[[5000L]] <- x[[5000L]] + 0.5
-  speed_path <- tempfile(fileext = ".fastrds")
-  balanced_path <- tempfile(fileext = ".fastrds")
-  write_fastrds(x, speed_path)
-  write_fastrds(x, balanced_path, preset = "balanced")
+  speed_path <- tempfile(fileext = ".rdz")
+  balanced_path <- tempfile(fileext = ".rdz")
+  write_rdz(x, speed_path)
+  write_rdz(x, balanced_path, preset = "balanced")
 
-  expect_identical(read_fastrds(balanced_path), x)
+  expect_identical(read_rdz(balanced_path), x)
   expect_lte(file.info(balanced_path)$size, file.info(speed_path)$size + 1)
 })
 
 test_that("balanced preset XOR-compresses high-cardinality numerics exactly", {
   set.seed(20260628)
   x <- c(runif(100000L), -0, NA_real_, NaN, Inf, -Inf)
-  speed_path <- tempfile(fileext = ".fastrds")
-  balanced_path <- tempfile(fileext = ".fastrds")
+  speed_path <- tempfile(fileext = ".rdz")
+  balanced_path <- tempfile(fileext = ".rdz")
 
-  write_fastrds(x, speed_path)
-  write_fastrds(x, balanced_path, preset = "balanced")
-  restored <- read_fastrds(balanced_path)
+  write_rdz(x, speed_path)
+  write_rdz(x, balanced_path, preset = "balanced")
+  restored <- read_rdz(balanced_path)
   header <- readBin(balanced_path, "raw", n = 27L)
 
   expect_identical(as.integer(header[[27L]]), 4L)
@@ -427,11 +427,11 @@ test_that("balanced XOR numerics preserve block boundaries", {
   for (length in c(8191L, 8192L, 8193L, 16385L)) {
     x <- seq_len(length) * 0.01 + rnorm(length, sd = 0.001)
     x[[length]] <- NA_real_
-    path <- tempfile(fileext = ".fastrds")
-    write_fastrds(x, path, preset = "balanced")
+    path <- tempfile(fileext = ".rdz")
+    write_rdz(x, path, preset = "balanced")
 
     expect_identical(as.integer(readBin(path, "raw", n = 27L)[[27L]]), 4L)
-    expect_identical(read_fastrds(path), x)
+    expect_identical(read_rdz(path), x)
   }
 })
 
@@ -440,15 +440,15 @@ test_that("balanced XOR numerics reject incompressible bit patterns", {
   bytes <- as.raw(sample.int(256L, 80000L, replace = TRUE) - 1L)
   x <- readBin(bytes, "double", n = 10000L, size = 8L,
                endian = .Platform$endian)
-  speed_path <- tempfile(fileext = ".fastrds")
-  balanced_path <- tempfile(fileext = ".fastrds")
+  speed_path <- tempfile(fileext = ".rdz")
+  balanced_path <- tempfile(fileext = ".rdz")
 
-  write_fastrds(x, speed_path)
-  write_fastrds(x, balanced_path, preset = "balanced")
+  write_rdz(x, speed_path)
+  write_rdz(x, balanced_path, preset = "balanced")
 
   expect_identical(as.integer(readBin(balanced_path, "raw", n = 27L)[[27L]]),
                    0L)
-  expect_identical(read_fastrds(balanced_path), x)
+  expect_identical(read_rdz(balanced_path), x)
   expect_equal(file.info(balanced_path)$size,
                file.info(speed_path)$size + 1)
 })
@@ -456,24 +456,24 @@ test_that("balanced XOR numerics reject incompressible bit patterns", {
 test_that("balanced XOR numerics reject marginal compression gains", {
   set.seed(20260628)
   x <- rnorm(100000L)
-  speed_path <- tempfile(fileext = ".fastrds")
-  balanced_path <- tempfile(fileext = ".fastrds")
+  speed_path <- tempfile(fileext = ".rdz")
+  balanced_path <- tempfile(fileext = ".rdz")
 
-  write_fastrds(x, speed_path)
-  write_fastrds(x, balanced_path, preset = "balanced")
+  write_rdz(x, speed_path)
+  write_rdz(x, balanced_path, preset = "balanced")
 
   expect_identical(as.integer(readBin(balanced_path, "raw", n = 27L)[[27L]]),
                    0L)
-  expect_identical(read_fastrds(balanced_path), x)
+  expect_identical(read_rdz(balanced_path), x)
   expect_equal(file.info(balanced_path)$size,
                file.info(speed_path)$size + 1)
 })
 
 test_that("malformed LZ4 XOR numeric blocks fail cleanly", {
-  path <- tempfile(fileext = ".fastrds")
+  path <- tempfile(fileext = ".rdz")
   set.seed(20260628)
   x <- runif(10000L)
-  write_fastrds(x, path, preset = "balanced")
+  write_rdz(x, path, preset = "balanced")
   bytes <- readBin(path, "raw", n = file.info(path)$size)
   expect_identical(as.integer(bytes[[27L]]), 4L)
 
@@ -481,50 +481,50 @@ test_that("malformed LZ4 XOR numeric blocks fail cleanly", {
   malformed[28:31] <- writeBin(0L, raw(), size = 4L,
                                endian = .Platform$endian)
   writeBin(malformed, path)
-  expect_error(read_fastrds(path), "invalid LZ4 XOR numeric block")
+  expect_error(read_rdz(path), "invalid LZ4 XOR numeric block")
 
   malformed <- bytes
   malformed[28:31] <- writeBin(65537L, raw(), size = 4L,
                                endian = .Platform$endian)
   writeBin(malformed, path)
-  expect_error(read_fastrds(path), "invalid LZ4 XOR numeric block")
+  expect_error(read_rdz(path), "invalid LZ4 XOR numeric block")
 
   malformed <- bytes
   malformed[28:31] <- writeBin(1L, raw(), size = 4L,
                                endian = .Platform$endian)
   writeBin(malformed, path)
-  expect_error(read_fastrds(path), "invalid LZ4 XOR numeric block")
+  expect_error(read_rdz(path), "invalid LZ4 XOR numeric block")
 
   writeBin(bytes[-length(bytes)], path)
-  expect_error(read_fastrds(path), "truncated")
+  expect_error(read_rdz(path), "truncated")
 })
 
 test_that("malformed balanced numeric sequences fail cleanly", {
-  path <- tempfile(fileext = ".fastrds")
+  path <- tempfile(fileext = ".rdz")
   x <- seq_len(1000L) + 0
-  write_fastrds(x, path, preset = "balanced")
+  write_rdz(x, path, preset = "balanced")
   bytes <- readBin(path, "raw", n = file.info(path)$size)
   bytes[36:43] <- writeBin(NaN, raw(), size = 8L)
   writeBin(bytes, path)
 
-  expect_error(read_fastrds(path), "invalid numeric sequence")
+  expect_error(read_rdz(path), "invalid numeric sequence")
 })
 
 test_that("malformed balanced numeric dictionaries fail cleanly", {
-  path <- tempfile(fileext = ".fastrds")
+  path <- tempfile(fileext = ".rdz")
   x <- rep(c(1, 2), 1000L)
-  write_fastrds(x, path, preset = "balanced")
+  write_rdz(x, path, preset = "balanced")
   bytes <- readBin(path, "raw", n = file.info(path)$size)
   bytes[[27L]] <- as.raw(255L)
   writeBin(bytes, path)
 
-  expect_error(read_fastrds(path), "unknown numeric encoding")
+  expect_error(read_rdz(path), "unknown numeric encoding")
 })
 
 test_that("malformed LZ4 numeric dictionary blocks fail cleanly", {
-  path <- tempfile(fileext = ".fastrds")
+  path <- tempfile(fileext = ".rdz")
   x <- rep(c(0, 1, NA_real_), length.out = 10000L)
-  write_fastrds(x, path, preset = "balanced")
+  write_rdz(x, path, preset = "balanced")
   bytes <- readBin(path, "raw", n = file.info(path)$size)
   expect_identical(as.integer(bytes[[27L]]), 3L)
 
@@ -534,84 +534,84 @@ test_that("malformed LZ4 numeric dictionary blocks fail cleanly", {
     0L, raw(), size = 4L, endian = .Platform$endian
   )
   writeBin(malformed, path)
-  expect_error(read_fastrds(path), "invalid LZ4 numeric dictionary block")
+  expect_error(read_rdz(path), "invalid LZ4 numeric dictionary block")
 
   malformed <- bytes
   malformed[block_header + 0:3] <- writeBin(
     2501L, raw(), size = 4L, endian = .Platform$endian
   )
   writeBin(malformed, path)
-  expect_error(read_fastrds(path), "invalid LZ4 numeric dictionary block")
+  expect_error(read_rdz(path), "invalid LZ4 numeric dictionary block")
 
   malformed <- bytes
   malformed[block_header + 0:3] <- writeBin(
     1L, raw(), size = 4L, endian = .Platform$endian
   )
   writeBin(malformed, path)
-  expect_error(read_fastrds(path), "invalid LZ4 numeric dictionary block")
+  expect_error(read_rdz(path), "invalid LZ4 numeric dictionary block")
 
   writeBin(bytes[-length(bytes)], path)
-  expect_error(read_fastrds(path), "truncated")
+  expect_error(read_rdz(path), "truncated")
 })
 
 test_that("malformed balanced logical vectors fail cleanly", {
-  path <- tempfile(fileext = ".fastrds")
-  write_fastrds(rep(FALSE, 5L), path, preset = "balanced")
+  path <- tempfile(fileext = ".rdz")
+  write_rdz(rep(FALSE, 5L), path, preset = "balanced")
   bytes <- readBin(path, "raw", n = file.info(path)$size)
 
   unknown_encoding <- bytes
   unknown_encoding[[27L]] <- as.raw(255L)
   writeBin(unknown_encoding, path)
-  expect_error(read_fastrds(path), "unknown logical encoding")
+  expect_error(read_rdz(path), "unknown logical encoding")
 
   invalid_code <- bytes
   invalid_code[[28L]] <- as.raw(3L)
   writeBin(invalid_code, path)
-  expect_error(read_fastrds(path), "invalid packed logical vector")
+  expect_error(read_rdz(path), "invalid packed logical vector")
 
-  write_fastrds(FALSE, path, preset = "balanced")
+  write_rdz(FALSE, path, preset = "balanced")
   invalid_padding <- readBin(path, "raw", n = file.info(path)$size)
   invalid_padding[[28L]] <- as.raw(4L)
   writeBin(invalid_padding, path)
-  expect_error(read_fastrds(path), "invalid packed logical vector")
+  expect_error(read_rdz(path), "invalid packed logical vector")
 })
 
 test_that("malformed balanced integer vectors fail cleanly", {
-  path <- tempfile(fileext = ".fastrds")
+  path <- tempfile(fileext = ".rdz")
   x <- rep(1:3, length.out = 1001L)
-  write_fastrds(x, path, preset = "balanced")
+  write_rdz(x, path, preset = "balanced")
   bytes <- readBin(path, "raw", n = file.info(path)$size)
 
   unknown_encoding <- bytes
   unknown_encoding[[27L]] <- as.raw(255L)
   writeBin(unknown_encoding, path)
-  expect_error(read_fastrds(path), "unknown integer encoding")
+  expect_error(read_rdz(path), "unknown integer encoding")
 
   invalid_bits <- bytes
   invalid_bits[[32L]] <- as.raw(25L)
   writeBin(invalid_bits, path)
-  expect_error(read_fastrds(path), "invalid packed integer metadata")
+  expect_error(read_rdz(path), "invalid packed integer metadata")
 
   invalid_flags <- bytes
   invalid_flags[[33L]] <- as.raw(2L)
   writeBin(invalid_flags, path)
-  expect_error(read_fastrds(path), "invalid packed integer vector")
+  expect_error(read_rdz(path), "invalid packed integer vector")
 
   invalid_padding <- bytes
   invalid_padding[[length(invalid_padding)]] <- as.raw(
     bitwOr(as.integer(invalid_padding[[length(invalid_padding)]]), 128L)
   )
   writeBin(invalid_padding, path)
-  expect_error(read_fastrds(path), "invalid packed integer vector")
+  expect_error(read_rdz(path), "invalid packed integer vector")
 })
 
 test_that("invalid and truncated files fail cleanly", {
-  path <- tempfile(fileext = ".fastrds")
-  writeBin(charToRaw("not fastrds"), path)
-  expect_error(read_fastrds(path), "not a fastrds file|truncated")
+  path <- tempfile(fileext = ".rdz")
+  writeBin(charToRaw("not rdz"), path)
+  expect_error(read_rdz(path), "not a rdz file|truncated")
 
-  write_fastrds(data.frame(x = 1:10), path)
+  write_rdz(data.frame(x = 1:10), path)
   bytes <- readBin(path, "raw", n = file.info(path)$size)
   writeBin(bytes[seq_len(15)], path)
-  expect_error(read_fastrds(path), "truncated")
+  expect_error(read_rdz(path), "truncated")
 })

@@ -1,11 +1,11 @@
 # Diverse R object benchmark
 
 Run on x86-64 macOS with R 4.5.2, `qs2` 0.2.2, five measured
-iterations, and `FASTRDS_BENCH_N=1000000`. Each format receives an isolated
+iterations, and `RDZ_BENCH_N=1000000`. Each format receives an isolated
 serialized clone so materializing an ALTREP object in one implementation cannot
 affect another. Garbage collection runs before, but outside, every timed call.
 
-Each fastrds result is compared with the fastest format that preserves the
+Each rdz result is compared with the fastest format that preserves the
 object: default `qs2`, throughput-oriented `qs2` (`compress_level=-1000`, byte
 shuffle disabled), or `qdata`. `qdata` is excluded for language objects,
 pairlists, closures, environments, S4 objects, and model objects it cannot
@@ -14,18 +14,18 @@ preserve.
 ## Summary
 
 - All 27 object classes passed round-trip validation.
-- fastrds won 25 of 27 write comparisons and all 27 read comparisons.
+- rdz won 25 of 27 write comparisons and all 27 read comparisons.
 - Geometric-mean speedup: 3.61x write and 1.79x read.
 - Native-codec geometric mean: 3.47x write and 2.15x read.
 - General R-serialization fallback: 4.05x write and 1.06x read.
 - The two write losses were repeated numerics (3.41 ms versus 3.05 ms) and
-  repeated strings (59.81 ms versus 52.43 ms). fastrds was still 1.62x and
+  repeated strings (59.81 ms versus 52.43 ms). rdz was still 1.62x and
   4.30x faster when reading those files.
 
 ## Per-object latency
 
-`Write x` and `Read x` compare fastrds with the fastest valid competing format;
-values above 1 mean fastrds is faster.
+`Write x` and `Read x` compare rdz with the fastest valid competing format;
+values above 1 mean rdz is faster.
 
 | Object | Codec | Write ms | Write x | Read ms | Read x |
 |---|---|---:|---:|---:|---:|
@@ -73,5 +73,5 @@ compressed mode; applying those transformations unconditionally would weaken
 the latency-first result.
 
 Compact, unmaterialized ALTREP sequences now retain R serialization. A targeted
-million-integer check produced a 145-byte fastrds file, versus 137 bytes for
+million-integer check produced a 145-byte rdz file, versus 137 bytes for
 default `qs2` and 170 bytes for throughput-oriented `qs2`.

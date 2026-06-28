@@ -1,9 +1,9 @@
-library(fastrds)
+library(rdz)
 library(qs2)
 
-iterations <- as.integer(Sys.getenv("FASTRDS_BENCH_ITERATIONS", "5"))
-n <- as.integer(Sys.getenv("FASTRDS_BENCH_N", "1000000"))
-output <- Sys.getenv("FASTRDS_BENCH_OUTPUT", tempfile(fileext = ".csv"))
+iterations <- as.integer(Sys.getenv("RDZ_BENCH_ITERATIONS", "5"))
+n <- as.integer(Sys.getenv("RDZ_BENCH_N", "1000000"))
+output <- Sys.getenv("RDZ_BENCH_OUTPUT", tempfile(fileext = ".csv"))
 
 strict <- function(original, restored) identical(original, restored)
 equivalent <- function(original, restored) {
@@ -76,11 +76,11 @@ cases <- list(
     environment
   }, validate = environment_equivalent),
   s4_object = list(group = "fallback", make = function() {
-    if (!methods::isClass("fastrds_benchmark_record")) {
-      methods::setClass("fastrds_benchmark_record",
+    if (!methods::isClass("rdz_benchmark_record")) {
+      methods::setClass("rdz_benchmark_record",
                         slots = c(values = "numeric", label = "character"))
     }
-    methods::new("fastrds_benchmark_record", values = runif(n), label = "benchmark")
+    methods::new("rdz_benchmark_record", values = runif(n), label = "benchmark")
   }, validate = equivalent),
   linear_model = list(group = "fallback", make = function() {
     rows <- n / 5L
@@ -120,23 +120,23 @@ for (case_name in names(cases)) {
   case <- cases[[case_name]]
   object <- case$make()
   validate <- function(restored) case$validate(object, restored)
-  directory <- tempfile(paste0("fastrds-", case_name, "-"))
+  directory <- tempfile(paste0("rdz-", case_name, "-"))
   dir.create(directory)
   paths <- setNames(
     file.path(directory, c(
-      "object.fastrds", "object.qs2", "object-throughput.qs2", "object.qdata"
+      "object.rdz", "object.qs2", "object-throughput.qs2", "object.qdata"
     )),
-    c("fastrds", "qs2_default", "qs2_throughput", "qdata")
+    c("rdz", "qs2_default", "qs2_throughput", "qdata")
   )
   clone <- function(x) unserialize(serialize(x, NULL, version = 3L))
   format_objects <- setNames(lapply(paths, function(path) clone(object)), names(paths))
 
-  write_fastrds(format_objects[["fastrds"]], paths[["fastrds"]])
+  write_rdz(format_objects[["rdz"]], paths[["rdz"]])
   qs_save(format_objects[["qs2_default"]], paths[["qs2_default"]])
   qs_save(format_objects[["qs2_throughput"]], paths[["qs2_throughput"]],
           compress_level = -1000L, shuffle = FALSE)
 
-  stopifnot(validate(read_fastrds(paths[["fastrds"]])))
+  stopifnot(validate(read_rdz(paths[["rdz"]])))
   stopifnot(validate(qs_read(paths[["qs2_default"]])))
   stopifnot(validate(qs_read(paths[["qs2_throughput"]])))
 
@@ -147,8 +147,8 @@ for (case_name in names(cases)) {
   }, error = function(error) FALSE)
 
   writers <- list(
-    fastrds = function() write_fastrds(format_objects[["fastrds"]],
-                                       paths[["fastrds"]]),
+    rdz = function() write_rdz(format_objects[["rdz"]],
+                                       paths[["rdz"]]),
     qs2_default = function() qs_save(format_objects[["qs2_default"]],
                                      paths[["qs2_default"]]),
     qs2_throughput = function() qs_save(
@@ -157,7 +157,7 @@ for (case_name in names(cases)) {
     )
   )
   readers <- list(
-    fastrds = function() read_fastrds(paths[["fastrds"]]),
+    rdz = function() read_rdz(paths[["rdz"]]),
     qs2_default = function() qs_read(paths[["qs2_default"]]),
     qs2_throughput = function() qs_read(paths[["qs2_throughput"]])
   )
@@ -175,20 +175,20 @@ for (case_name in names(cases)) {
   result$group <- case$group
   result$object_mib <- as.numeric(object.size(object)) / 1024^2
   result$file_mib <- as.numeric(file.info(paths[result$format])$size) / 1024^2
-  result$fastrds_codec <- if (as.integer(readBin(
-    paths[["fastrds"]], "raw", n = 9L
+  result$rdz_codec <- if (as.integer(readBin(
+    paths[["rdz"]], "raw", n = 9L
   )[[9L]]) == 1L) {
     "native"
   } else {
     "R serialization"
   }
   results[[case_name]] <- result[c(
-    "case", "group", "object_mib", "fastrds_codec", "format", "file_mib",
+    "case", "group", "object_mib", "rdz_codec", "format", "file_mib",
     "median_ms_write", "p25_ms_write", "p75_ms_write",
     "median_ms_read", "p25_ms_read", "p75_ms_read"
   )]
   cat(sprintf("%-25s codec=%-15s qdata=%s\n", case_name,
-              result$fastrds_codec[[1]], qdata_ok))
+              result$rdz_codec[[1]], qdata_ok))
 
   unlink(directory, recursive = TRUE)
   rm(object, format_objects)

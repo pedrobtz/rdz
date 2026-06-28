@@ -1,35 +1,35 @@
 library(bench)
-library(fastrds)
+library(rdz)
 library(qs2)
 
-iterations <- as.integer(Sys.getenv("FASTRDS_BENCH_ITERATIONS", "5"))
-n <- as.integer(Sys.getenv("FASTRDS_BENCH_N", "2000000"))
+iterations <- as.integer(Sys.getenv("RDZ_BENCH_ITERATIONS", "5"))
+n <- as.integer(Sys.getenv("RDZ_BENCH_N", "2000000"))
 
 run_benchmark <- function(name, object, include_qdata = TRUE) {
-  directory <- tempfile(paste0("fastrds-bench-", name, "-"))
+  directory <- tempfile(paste0("rdz-bench-", name, "-"))
   dir.create(directory)
   on.exit(unlink(directory, recursive = TRUE))
   paths <- setNames(
     file.path(directory, c(
-      "object-speed.fastrds", "object-balanced.fastrds", "object.qs2",
+      "object-speed.rdz", "object-balanced.rdz", "object.qs2",
       "object-fast.qs2", "object.qdata"
     )),
-    c("fastrds_speed", "fastrds_balanced", "qs2", "qs2_fast", "qdata")
+    c("rdz_speed", "rdz_balanced", "qs2", "qs2_fast", "qdata")
   )
 
-  write_fastrds(object, paths[["fastrds_speed"]])
-  write_fastrds(object, paths[["fastrds_balanced"]], preset = "balanced")
+  write_rdz(object, paths[["rdz_speed"]])
+  write_rdz(object, paths[["rdz_balanced"]], preset = "balanced")
   qs_save(object, paths[["qs2"]])
   qs_save(object, paths[["qs2_fast"]], compress_level = -1000L, shuffle = FALSE)
   if (include_qdata) qd_save(object, paths[["qdata"]])
-  stopifnot(identical(object, read_fastrds(paths[["fastrds_speed"]])))
-  stopifnot(identical(object, read_fastrds(paths[["fastrds_balanced"]])))
+  stopifnot(identical(object, read_rdz(paths[["rdz_speed"]])))
+  stopifnot(identical(object, read_rdz(paths[["rdz_balanced"]])))
 
   if (include_qdata) {
     writes <- mark(
-      fastrds_speed = write_fastrds(object, paths[["fastrds_speed"]]),
-      fastrds_balanced = write_fastrds(
-        object, paths[["fastrds_balanced"]], preset = "balanced"
+      rdz_speed = write_rdz(object, paths[["rdz_speed"]]),
+      rdz_balanced = write_rdz(
+        object, paths[["rdz_balanced"]], preset = "balanced"
       ),
       qs2 = qs_save(object, paths[["qs2"]]),
       qs2_fast = qs_save(object, paths[["qs2_fast"]],
@@ -38,8 +38,8 @@ run_benchmark <- function(name, object, include_qdata = TRUE) {
       iterations = iterations, check = FALSE, memory = FALSE
     )
     reads <- mark(
-      fastrds_speed = read_fastrds(paths[["fastrds_speed"]]),
-      fastrds_balanced = read_fastrds(paths[["fastrds_balanced"]]),
+      rdz_speed = read_rdz(paths[["rdz_speed"]]),
+      rdz_balanced = read_rdz(paths[["rdz_balanced"]]),
       qs2 = qs_read(paths[["qs2"]]),
       qs2_fast = qs_read(paths[["qs2_fast"]]),
       qdata = qd_read(paths[["qdata"]]),
@@ -48,9 +48,9 @@ run_benchmark <- function(name, object, include_qdata = TRUE) {
   } else {
     paths <- paths[names(paths) != "qdata"]
     writes <- mark(
-      fastrds_speed = write_fastrds(object, paths[["fastrds_speed"]]),
-      fastrds_balanced = write_fastrds(
-        object, paths[["fastrds_balanced"]], preset = "balanced"
+      rdz_speed = write_rdz(object, paths[["rdz_speed"]]),
+      rdz_balanced = write_rdz(
+        object, paths[["rdz_balanced"]], preset = "balanced"
       ),
       qs2 = qs_save(object, paths[["qs2"]]),
       qs2_fast = qs_save(object, paths[["qs2_fast"]],
@@ -58,8 +58,8 @@ run_benchmark <- function(name, object, include_qdata = TRUE) {
       iterations = iterations, check = FALSE, memory = FALSE
     )
     reads <- mark(
-      fastrds_speed = read_fastrds(paths[["fastrds_speed"]]),
-      fastrds_balanced = read_fastrds(paths[["fastrds_balanced"]]),
+      rdz_speed = read_rdz(paths[["rdz_speed"]]),
+      rdz_balanced = read_rdz(paths[["rdz_balanced"]]),
       qs2 = qs_read(paths[["qs2"]]),
       qs2_fast = qs_read(paths[["qs2_fast"]]),
       iterations = iterations, check = FALSE, memory = FALSE

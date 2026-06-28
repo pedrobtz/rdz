@@ -1,14 +1,14 @@
-library(fastrds)
+library(rdz)
 library(fst)
 
-iterations <- as.integer(Sys.getenv("FASTRDS_BENCH_ITERATIONS", "5"))
-n <- as.integer(Sys.getenv("FASTRDS_FST_N", "1000000"))
-output <- Sys.getenv("FASTRDS_BENCH_OUTPUT", tempfile(fileext = ".csv"))
-fst_threads_requested <- as.integer(Sys.getenv("FASTRDS_FST_THREADS", "1"))
+iterations <- as.integer(Sys.getenv("RDZ_BENCH_ITERATIONS", "5"))
+n <- as.integer(Sys.getenv("RDZ_FST_N", "1000000"))
+output <- Sys.getenv("RDZ_BENCH_OUTPUT", tempfile(fileext = ".csv"))
+fst_threads_requested <- as.integer(Sys.getenv("RDZ_FST_THREADS", "1"))
 
 if (length(fst_threads_requested) != 1L || is.na(fst_threads_requested) ||
     fst_threads_requested < 0L) {
-  stop("FASTRDS_FST_THREADS must be a single non-negative integer",
+  stop("RDZ_FST_THREADS must be a single non-negative integer",
        call. = FALSE)
 }
 
@@ -41,51 +41,51 @@ measure <- function(functions, validate = NULL) {
   )
 }
 
-assert_native_fastrds <- function(path) {
+assert_native_rdz <- function(path) {
   header <- readBin(path, "raw", n = 9L)
   if (length(header) != 9L ||
-      !rawToChar(header[seq_len(8L)]) %in% c("FASTRDS1", "FASTRDS2") ||
+      !rawToChar(header[seq_len(8L)]) %in% c("RDZFILE1", "RDZFILE2") ||
       as.integer(header[[9L]]) != 1L) {
-    stop("benchmark object did not use the native fastrds codec", call. = FALSE)
+    stop("benchmark object did not use the native rdz codec", call. = FALSE)
   }
 }
 
 run_benchmark <- function(name, make) {
   object <- make()
-  directory <- tempfile(paste0("fastrds-fst-", name, "-"))
+  directory <- tempfile(paste0("rdz-fst-", name, "-"))
   dir.create(directory)
   on.exit(unlink(directory, recursive = TRUE))
   paths <- setNames(
     file.path(directory, c(
-      "speed.fastrds", "balanced.fastrds", "uncompressed.fst", "default.fst"
+      "speed.rdz", "balanced.rdz", "uncompressed.fst", "default.fst"
     )),
-    c("fastrds_speed", "fastrds_balanced", "fst_uncompressed", "fst_default")
+    c("rdz_speed", "rdz_balanced", "fst_uncompressed", "fst_default")
   )
   clone <- function(x) unserialize(serialize(x, NULL, version = 3L))
   objects <- setNames(lapply(paths, function(path) clone(object)), names(paths))
   validate <- function(restored) identical(object, restored)
 
-  write_fastrds(objects[["fastrds_speed"]], paths[["fastrds_speed"]])
-  write_fastrds(objects[["fastrds_balanced"]], paths[["fastrds_balanced"]],
+  write_rdz(objects[["rdz_speed"]], paths[["rdz_speed"]])
+  write_rdz(objects[["rdz_balanced"]], paths[["rdz_balanced"]],
                 preset = "balanced")
   write_fst(objects[["fst_uncompressed"]], paths[["fst_uncompressed"]],
             compress = 0)
   write_fst(objects[["fst_default"]], paths[["fst_default"]])
 
-  assert_native_fastrds(paths[["fastrds_speed"]])
-  assert_native_fastrds(paths[["fastrds_balanced"]])
+  assert_native_rdz(paths[["rdz_speed"]])
+  assert_native_rdz(paths[["rdz_balanced"]])
 
-  stopifnot(validate(read_fastrds(paths[["fastrds_speed"]])))
-  stopifnot(validate(read_fastrds(paths[["fastrds_balanced"]])))
+  stopifnot(validate(read_rdz(paths[["rdz_speed"]])))
+  stopifnot(validate(read_rdz(paths[["rdz_balanced"]])))
   stopifnot(validate(read_fst(paths[["fst_uncompressed"]], as.data.table = FALSE)))
   stopifnot(validate(read_fst(paths[["fst_default"]], as.data.table = FALSE)))
 
   writers <- list(
-    fastrds_speed = function() write_fastrds(
-      objects[["fastrds_speed"]], paths[["fastrds_speed"]]
+    rdz_speed = function() write_rdz(
+      objects[["rdz_speed"]], paths[["rdz_speed"]]
     ),
-    fastrds_balanced = function() write_fastrds(
-      objects[["fastrds_balanced"]], paths[["fastrds_balanced"]],
+    rdz_balanced = function() write_rdz(
+      objects[["rdz_balanced"]], paths[["rdz_balanced"]],
       preset = "balanced"
     ),
     fst_uncompressed = function() write_fst(
@@ -96,8 +96,8 @@ run_benchmark <- function(name, make) {
     )
   )
   readers <- list(
-    fastrds_speed = function() read_fastrds(paths[["fastrds_speed"]]),
-    fastrds_balanced = function() read_fastrds(paths[["fastrds_balanced"]]),
+    rdz_speed = function() read_rdz(paths[["rdz_speed"]]),
+    rdz_balanced = function() read_rdz(paths[["rdz_balanced"]]),
     fst_uncompressed = function() read_fst(
       paths[["fst_uncompressed"]], as.data.table = FALSE
     ),

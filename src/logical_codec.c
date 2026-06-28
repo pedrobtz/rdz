@@ -21,7 +21,7 @@ static int logical_from_code(unsigned char code) {
     return code == 2 ? NA_LOGICAL : (int) code;
 }
 
-int fastrds_logical_packed_size(R_xlen_t length, size_t *size) {
+int rdz_logical_packed_size(R_xlen_t length, size_t *size) {
     uint64_t quotient;
     if (length < 0 || size == NULL) return 0;
     quotient = (uint64_t) length / 4;
@@ -30,7 +30,7 @@ int fastrds_logical_packed_size(R_xlen_t length, size_t *size) {
     return *size >= (size_t) quotient;
 }
 
-int fastrds_logical_pack(const int *input, R_xlen_t length,
+int rdz_logical_pack(const int *input, R_xlen_t length,
                          unsigned char *packed, size_t packed_size) {
     R_xlen_t i = 0;
     size_t position = 0;
@@ -65,7 +65,7 @@ int fastrds_logical_pack(const int *input, R_xlen_t length,
     return position == packed_size;
 }
 
-int fastrds_logical_unpack(const unsigned char *packed, size_t packed_size,
+int rdz_logical_unpack(const unsigned char *packed, size_t packed_size,
                            R_xlen_t length, int *output) {
     R_xlen_t i = 0;
     size_t position = 0;

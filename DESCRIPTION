@@ -1,4 +1,4 @@
-Package: fastrds
+Package: rdz
 Title: Fast Serialization of R Objects
 Version: 0.0.1
 Authors@R: person("utopp", role = c("aut", "cre"),

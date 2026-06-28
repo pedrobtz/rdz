@@ -22,22 +22,22 @@
 # include <unistd.h>
 #endif
 
-#define FASTRDS_CODEC_NATIVE 1
-#define FASTRDS_CODEC_R      2
-#define FASTRDS_MAX_DEPTH    10000
+#define RDZ_CODEC_NATIVE 1
+#define RDZ_CODEC_R      2
+#define RDZ_MAX_DEPTH    10000
 #define STRING_INDEX_BUFFER_SIZE (64 * 1024)
-#define FASTRDS_LZ4_BLOCK_SIZE (64 * 1024)
+#define RDZ_LZ4_BLOCK_SIZE (64 * 1024)
 #define STRING_LAYOUT_FLAT_RAW 0
 #define STRING_LAYOUT_FLAT_LZ4 3
 #define STRING_LENGTHS_DIRECT 0
 #define STRING_LENGTHS_RLE 1
 
-static const unsigned char FASTRDS_MAGIC_V1[8] = {
-    'F', 'A', 'S', 'T', 'R', 'D', 'S', '1'
+static const unsigned char RDZ_MAGIC_V1[8] = {
+    'R', 'D', 'Z', 'F', 'I', 'L', 'E', '1'
 };
 
-static const unsigned char FASTRDS_MAGIC_V2[8] = {
-    'F', 'A', 'S', 'T', 'R', 'D', 'S', '2'
+static const unsigned char RDZ_MAGIC_V2[8] = {
+    'R', 'D', 'Z', 'F', 'I', 'L', 'E', '2'
 };
 
 enum real_encoding {
@@ -144,7 +144,7 @@ static void writer_u64(writer_t *writer, uint64_t value) {
 
 static void reader_need(reader_t *reader, size_t size) {
     if (size > reader->size - reader->pos) {
-        Rf_error("invalid or truncated fastrds file");
+        Rf_error("invalid or truncated rdz file");
     }
 }
 
@@ -162,7 +162,7 @@ static void reader_payload(reader_t *reader, void *output, size_t size) {
         while (copied < size) {
             ssize_t count = pread(reader->fd, (unsigned char *) output + copied,
                                   size - copied, (off_t) (reader->pos + copied));
-            if (count <= 0) Rf_error("failed while reading fastrds payload");
+            if (count <= 0) Rf_error("failed while reading rdz payload");
             copied += (size_t) count;
         }
         reader->pos += size;
@@ -202,8 +202,8 @@ static void reader_lz4_blocks(reader_t *reader, unsigned char *output,
 
     while (output_pos < output_size) {
         size_t remaining = output_size - output_pos;
-        size_t block_size = remaining < FASTRDS_LZ4_BLOCK_SIZE ?
-            remaining : FASTRDS_LZ4_BLOCK_SIZE;
+        size_t block_size = remaining < RDZ_LZ4_BLOCK_SIZE ?
+            remaining : RDZ_LZ4_BLOCK_SIZE;
         uint32_t stored_size = reader_u32(reader);
         if (stored_size == 0 || (size_t) stored_size > block_size) {
             Rf_error("%s", error_message);
@@ -230,14 +230,14 @@ static void reader_real_xor_lz4(reader_t *reader, double *output,
     uint64_t previous = 0;
     R_xlen_t position = 0;
     const char *error_message =
-        "invalid LZ4 XOR numeric block in fastrds file";
+        "invalid LZ4 XOR numeric block in rdz file";
 
     if (length <= 0) Rf_error("%s", error_message);
-    transformed = (unsigned char *) R_alloc(FASTRDS_LZ4_BLOCK_SIZE, 1);
+    transformed = (unsigned char *) R_alloc(RDZ_LZ4_BLOCK_SIZE, 1);
     while (position < length) {
         R_xlen_t remaining = length - position;
-        size_t count = remaining < FASTRDS_REAL_XOR_BLOCK_VALUES ?
-            (size_t) remaining : FASTRDS_REAL_XOR_BLOCK_VALUES;
+        size_t count = remaining < RDZ_REAL_XOR_BLOCK_VALUES ?
+            (size_t) remaining : RDZ_REAL_XOR_BLOCK_VALUES;
         size_t block_size = count * sizeof(uint64_t);
         uint32_t stored_size = reader_u32(reader);
         if (stored_size == 0 || (size_t) stored_size > block_size) {
@@ -254,7 +254,7 @@ static void reader_real_xor_lz4(reader_t *reader, double *output,
             );
             if (decoded != (int) block_size) Rf_error("%s", error_message);
         }
-        fastrds_real_xor_decode_block(
+        rdz_real_xor_decode_block(
             transformed, count, &previous, output + position);
         reader->pos += (size_t) stored_size;
         position += (R_xlen_t) count;
@@ -305,7 +305,7 @@ static int native_supported(SEXP object, sexp_stack_t *stack, int depth) {
     R_xlen_t i;
     int type = TYPEOF(object);
 
-    if (depth > FASTRDS_MAX_DEPTH || Rf_isS4(object) ||
+    if (depth > RDZ_MAX_DEPTH || Rf_isS4(object) ||
         (object != R_NilValue && ALTREP(object) &&
          DATAPTR_OR_NULL(object) == NULL)) return 0;
     switch (type) {
@@ -480,7 +480,7 @@ static int lz4_blocks_reserve(lz4_blocks_t *blocks, size_t additional) {
     if (additional > SIZE_MAX - blocks->size) return 0;
     required = blocks->size + additional;
     if (required <= blocks->capacity) return 1;
-    capacity = blocks->capacity == 0 ? FASTRDS_LZ4_BLOCK_SIZE : blocks->capacity;
+    capacity = blocks->capacity == 0 ? RDZ_LZ4_BLOCK_SIZE : blocks->capacity;
     while (capacity < required) {
         if (capacity > SIZE_MAX / 2) {
             capacity = required;
@@ -545,13 +545,13 @@ static int lz4_blocks_flush(lz4_blocks_t *blocks) {
 static int lz4_blocks_append(lz4_blocks_t *blocks,
                              const unsigned char *data, size_t size) {
     while (size != 0 && !blocks->rejected) {
-        size_t available = FASTRDS_LZ4_BLOCK_SIZE - blocks->input_size;
+        size_t available = RDZ_LZ4_BLOCK_SIZE - blocks->input_size;
         size_t take = size < available ? size : available;
         memcpy(blocks->input + blocks->input_size, data, take);
         blocks->input_size += take;
         data += take;
         size -= take;
-        if (blocks->input_size == FASTRDS_LZ4_BLOCK_SIZE &&
+        if (blocks->input_size == RDZ_LZ4_BLOCK_SIZE &&
             !lz4_blocks_flush(blocks)) {
             return 0;
         }
@@ -566,9 +566,9 @@ static int lz4_blocks_build_strings(SEXP object, uint64_t payload_size,
 
     memset(blocks, 0, sizeof(*blocks));
     if (payload_size == 0 || payload_size > SIZE_MAX) return 0;
-    blocks->compressed_capacity = LZ4_compressBound(FASTRDS_LZ4_BLOCK_SIZE);
+    blocks->compressed_capacity = LZ4_compressBound(RDZ_LZ4_BLOCK_SIZE);
     if (blocks->compressed_capacity <= 0) return 0;
-    blocks->input = (unsigned char *) malloc(FASTRDS_LZ4_BLOCK_SIZE);
+    blocks->input = (unsigned char *) malloc(RDZ_LZ4_BLOCK_SIZE);
     blocks->compressed = (char *) malloc((size_t) blocks->compressed_capacity);
     if (blocks->input == NULL || blocks->compressed == NULL) {
         lz4_blocks_free(blocks);
@@ -605,7 +605,7 @@ static int lz4_blocks_build_buffer(const unsigned char *input,
 
     memset(blocks, 0, sizeof(*blocks));
     if (input_size == 0) return 0;
-    blocks->compressed_capacity = LZ4_compressBound(FASTRDS_LZ4_BLOCK_SIZE);
+    blocks->compressed_capacity = LZ4_compressBound(RDZ_LZ4_BLOCK_SIZE);
     if (blocks->compressed_capacity <= 0) return 0;
     blocks->compressed = (char *) malloc((size_t) blocks->compressed_capacity);
     if (blocks->compressed == NULL) {
@@ -615,8 +615,8 @@ static int lz4_blocks_build_buffer(const unsigned char *input,
 
     while (input_pos < input_size) {
         size_t remaining = input_size - input_pos;
-        size_t block_size = remaining < FASTRDS_LZ4_BLOCK_SIZE ?
-            remaining : FASTRDS_LZ4_BLOCK_SIZE;
+        size_t block_size = remaining < RDZ_LZ4_BLOCK_SIZE ?
+            remaining : RDZ_LZ4_BLOCK_SIZE;
         int compressed_size = LZ4_compress_default(
             (const char *) input + input_pos, blocks->compressed,
             (int) block_size, blocks->compressed_capacity
@@ -675,9 +675,9 @@ static int lz4_blocks_build_real_xor(SEXP object, lz4_blocks_t *blocks) {
     memset(blocks, 0, sizeof(*blocks));
     if (length <= 0 || (uint64_t) length > SIZE_MAX / sizeof(double)) return 0;
     raw_size = (size_t) length * sizeof(double);
-    blocks->compressed_capacity = LZ4_compressBound(FASTRDS_LZ4_BLOCK_SIZE);
+    blocks->compressed_capacity = LZ4_compressBound(RDZ_LZ4_BLOCK_SIZE);
     if (blocks->compressed_capacity <= 0) return 0;
-    blocks->input = (unsigned char *) malloc(FASTRDS_LZ4_BLOCK_SIZE);
+    blocks->input = (unsigned char *) malloc(RDZ_LZ4_BLOCK_SIZE);
     blocks->compressed = (char *) malloc((size_t) blocks->compressed_capacity);
     if (blocks->input == NULL || blocks->compressed == NULL) {
         lz4_blocks_free(blocks);
@@ -686,9 +686,9 @@ static int lz4_blocks_build_real_xor(SEXP object, lz4_blocks_t *blocks) {
 
     while (position < length && !blocks->rejected) {
         R_xlen_t remaining = length - position;
-        size_t count = remaining < FASTRDS_REAL_XOR_BLOCK_VALUES ?
-            (size_t) remaining : FASTRDS_REAL_XOR_BLOCK_VALUES;
-        fastrds_real_xor_encode_block(
+        size_t count = remaining < RDZ_REAL_XOR_BLOCK_VALUES ?
+            (size_t) remaining : RDZ_REAL_XOR_BLOCK_VALUES;
+        rdz_real_xor_encode_block(
             values + position, count, &previous, blocks->input);
         blocks->input_size = count * sizeof(uint64_t);
         if (!lz4_blocks_flush(blocks)) break;
@@ -1025,7 +1025,7 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
     uint8_t type;
     size_t element_size = 0;
 
-    if (writer->failed || depth > FASTRDS_MAX_DEPTH) {
+    if (writer->failed || depth > RDZ_MAX_DEPTH) {
         writer->failed = 1;
         return;
     }
@@ -1053,7 +1053,7 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
         if (type == NODE_LOGICAL && format_version >= 2) {
             size_t packed_size;
             unsigned char *packed;
-            if (!fastrds_logical_packed_size(length, &packed_size)) {
+            if (!rdz_logical_packed_size(length, &packed_size)) {
                 writer->failed = 1;
                 return;
             }
@@ -1062,7 +1062,7 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
                 writer->failed = 1;
                 return;
             }
-            if (fastrds_logical_pack(LOGICAL(object), length, packed,
+            if (rdz_logical_pack(LOGICAL(object), length, packed,
                                      packed_size)) {
                 writer_u8(writer, LOGICAL_ENCODING_PACKED);
                 writer_write(writer, packed, packed_size);
@@ -1073,8 +1073,8 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
             writer_u8(writer, LOGICAL_ENCODING_DIRECT);
         }
         if (type == NODE_INTEGER && format_version >= 2) {
-            fastrds_integer_encoding_t encoding;
-            int encoded = fastrds_integer_encoding_build(object, &encoding);
+            rdz_integer_encoding_t encoding;
+            int encoded = rdz_integer_encoding_build(object, &encoding);
             if (encoded < 0) {
                 writer->failed = 1;
                 return;
@@ -1085,15 +1085,15 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
                 writer_u8(writer, encoding.bits);
                 writer_u8(writer, encoding.flags);
                 writer_write(writer, encoding.packed, encoding.packed_size);
-                fastrds_integer_encoding_free(&encoding);
+                rdz_integer_encoding_free(&encoding);
                 return;
             }
             writer_u8(writer, INTEGER_ENCODING_DIRECT);
         }
         if (type == NODE_REAL && format_version >= 2) {
-            fastrds_real_dictionary_t dictionary;
-            fastrds_real_sequence_t sequence;
-            int encoded = fastrds_real_dictionary_build(object, &dictionary);
+            rdz_real_dictionary_t dictionary;
+            rdz_real_sequence_t sequence;
+            int encoded = rdz_real_dictionary_build(object, &dictionary);
             if (encoded < 0) {
                 writer->failed = 1;
                 return;
@@ -1115,10 +1115,10 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
                                  dictionary.packed_size);
                 }
                 lz4_blocks_free(&blocks);
-                fastrds_real_dictionary_free(&dictionary);
+                rdz_real_dictionary_free(&dictionary);
                 return;
             }
-            if (fastrds_real_sequence_build(object, &sequence)) {
+            if (rdz_real_sequence_build(object, &sequence)) {
                 writer_u8(writer, REAL_ENCODING_SEQUENCE);
                 writer_u64(writer, sequence.base);
                 writer_u64(writer, sequence.delta);
@@ -1180,7 +1180,7 @@ static cetype_t decode_encoding(uint8_t value) {
         value == CE_LATIN1 || value == CE_BYTES) {
         return (cetype_t) value;
     }
-    Rf_error("invalid character encoding in fastrds file");
+    Rf_error("invalid character encoding in rdz file");
     return CE_NATIVE;
 }
 
@@ -1219,7 +1219,7 @@ static void decode_strings(reader_t *reader, SEXP object, R_xlen_t length,
             metadata_end = metadata_cursor + (size_t) encoded_size64;
             if (length_encoding == STRING_LENGTHS_DIRECT) {
                 if (encoded_size64 != (uint64_t) lengths_size) {
-                    Rf_error("invalid string length metadata in fastrds file");
+                    Rf_error("invalid string length metadata in rdz file");
                 }
                 lengths = metadata_cursor;
             } else if (length_encoding == STRING_LENGTHS_RLE) {
@@ -1234,7 +1234,7 @@ static void decode_strings(reader_t *reader, SEXP object, R_xlen_t length,
                         !buffer_varint(&metadata_cursor, metadata_end, &code) ||
                         run == 0 || run > (uint64_t) (length - output) ||
                         code > (uint64_t) INT_MAX + 1) {
-                        Rf_error("invalid string length metadata in fastrds file");
+                        Rf_error("invalid string length metadata in rdz file");
                     }
                     value = code == 0 ? -1 : (int32_t) (code - 1);
                     for (j = 0; j < (R_xlen_t) run; ++j) {
@@ -1242,10 +1242,10 @@ static void decode_strings(reader_t *reader, SEXP object, R_xlen_t length,
                     }
                 }
                 if (output != length || metadata_cursor != metadata_end) {
-                    Rf_error("invalid string length metadata in fastrds file");
+                    Rf_error("invalid string length metadata in rdz file");
                 }
             } else {
-                Rf_error("unknown string length encoding in fastrds file");
+                Rf_error("unknown string length encoding in rdz file");
             }
             reader->pos += (size_t) encoded_size64;
         } else {
@@ -1271,7 +1271,7 @@ static void decode_strings(reader_t *reader, SEXP object, R_xlen_t length,
             payload = RAW(payload_buffer);
             reader_lz4_blocks(
                 reader, (unsigned char *) payload, (size_t) payload_size64,
-                "invalid LZ4 string block in fastrds file"
+                "invalid LZ4 string block in rdz file"
             );
         } else {
             reader_need(reader, (size_t) payload_size64);
@@ -1295,7 +1295,7 @@ static void decode_strings(reader_t *reader, SEXP object, R_xlen_t length,
             }
             if (string_length < 0 ||
                 (size_t) string_length > (size_t) (end - cursor)) {
-                Rf_error("invalid string length in fastrds file");
+                Rf_error("invalid string length in rdz file");
             }
             encoding = decode_encoding(
                 encodings == NULL ? common_encoding : encodings[i]);
@@ -1303,7 +1303,7 @@ static void decode_strings(reader_t *reader, SEXP object, R_xlen_t length,
                 Rf_mkCharLenCE((const char *) cursor, string_length, encoding));
             cursor += string_length;
         }
-        if (cursor != end) Rf_error("invalid string payload in fastrds file");
+        if (cursor != end) Rf_error("invalid string payload in rdz file");
         if (layout == STRING_LAYOUT_FLAT_RAW) {
             reader->pos += (size_t) payload_size64;
         }
@@ -1312,7 +1312,7 @@ static void decode_strings(reader_t *reader, SEXP object, R_xlen_t length,
     }
 
     if (layout != 1 && layout != 2 && layout != 4) {
-        Rf_error("invalid string layout in fastrds file");
+        Rf_error("invalid string layout in rdz file");
     }
     dict_size64 = reader_u64(reader);
     if (dict_size64 > (uint64_t) R_XLEN_T_MAX ||
@@ -1343,7 +1343,7 @@ static void decode_strings(reader_t *reader, SEXP object, R_xlen_t length,
         } else {
             index = reader_u32(reader);
         }
-        if (index > dict_size64) Rf_error("invalid string index in fastrds file");
+        if (index > dict_size64) Rf_error("invalid string index in rdz file");
         SET_STRING_ELT(object, i,
                        index == 0 ? NA_STRING : STRING_ELT(dictionary, index - 1));
     }
@@ -1360,17 +1360,17 @@ static void decode_logical_v2(reader_t *reader, SEXP object,
         reader_payload(reader, LOGICAL(object), (size_t) length * sizeof(int));
     } else if (encoding == LOGICAL_ENCODING_PACKED) {
         size_t packed_size;
-        if (!fastrds_logical_packed_size(length, &packed_size)) {
+        if (!rdz_logical_packed_size(length, &packed_size)) {
             Rf_error("logical vector is too large");
         }
         reader_need(reader, packed_size);
-        if (!fastrds_logical_unpack(reader->data + reader->pos, packed_size,
+        if (!rdz_logical_unpack(reader->data + reader->pos, packed_size,
                                     length, LOGICAL(object))) {
-            Rf_error("invalid packed logical vector in fastrds file");
+            Rf_error("invalid packed logical vector in rdz file");
         }
         reader->pos += packed_size;
     } else {
-        Rf_error("unknown logical encoding in fastrds file");
+        Rf_error("unknown logical encoding in rdz file");
     }
 }
 
@@ -1387,18 +1387,18 @@ static void decode_integer_v2(reader_t *reader, SEXP object,
         uint8_t bits = reader_u8(reader);
         uint8_t flags = reader_u8(reader);
         size_t packed_size;
-        if (!fastrds_integer_packed_size(length, bits, &packed_size)) {
-            Rf_error("invalid packed integer metadata in fastrds file");
+        if (!rdz_integer_packed_size(length, bits, &packed_size)) {
+            Rf_error("invalid packed integer metadata in rdz file");
         }
         reader_need(reader, packed_size);
-        if (!fastrds_integer_decode(reader->data + reader->pos, packed_size,
+        if (!rdz_integer_decode(reader->data + reader->pos, packed_size,
                                     base, bits, flags, length,
                                     INTEGER(object))) {
-            Rf_error("invalid packed integer vector in fastrds file");
+            Rf_error("invalid packed integer vector in rdz file");
         }
         reader->pos += packed_size;
     } else {
-        Rf_error("unknown integer encoding in fastrds file");
+        Rf_error("unknown integer encoding in rdz file");
     }
 }
 
@@ -1413,12 +1413,12 @@ static void decode_real_v2(reader_t *reader, SEXP object, R_xlen_t length) {
                encoding == REAL_ENCODING_DICTIONARY_LZ4) {
         uint8_t bits = reader_u8(reader);
         uint16_t count = reader_u16(reader);
-        uint64_t dictionary[FASTRDS_REAL_DICTIONARY_MAX];
+        uint64_t dictionary[RDZ_REAL_DICTIONARY_MAX];
         const unsigned char *packed;
         size_t packed_size;
-        if (count == 0 || count > FASTRDS_REAL_DICTIONARY_MAX ||
-            !fastrds_real_dictionary_packed_size(length, bits, &packed_size)) {
-            Rf_error("invalid numeric dictionary in fastrds file");
+        if (count == 0 || count > RDZ_REAL_DICTIONARY_MAX ||
+            !rdz_real_dictionary_packed_size(length, bits, &packed_size)) {
+            Rf_error("invalid numeric dictionary in rdz file");
         }
         reader_read(reader, dictionary, (size_t) count * sizeof(uint64_t));
         if (encoding == REAL_ENCODING_DICTIONARY_LZ4) {
@@ -1426,30 +1426,30 @@ static void decode_real_v2(reader_t *reader, SEXP object, R_xlen_t length) {
                 packed_size == 0 ? 1 : packed_size, 1);
             reader_lz4_blocks(
                 reader, decoded, packed_size,
-                "invalid LZ4 numeric dictionary block in fastrds file"
+                "invalid LZ4 numeric dictionary block in rdz file"
             );
             packed = decoded;
         } else {
             reader_need(reader, packed_size);
             packed = reader->data + reader->pos;
         }
-        if (!fastrds_real_dictionary_decode(
+        if (!rdz_real_dictionary_decode(
                 packed, packed_size, bits, dictionary, count,
                 length, REAL(object))) {
-            Rf_error("invalid numeric dictionary indexes in fastrds file");
+            Rf_error("invalid numeric dictionary indexes in rdz file");
         }
         if (encoding == REAL_ENCODING_DICTIONARY) reader->pos += packed_size;
     } else if (encoding == REAL_ENCODING_SEQUENCE) {
-        fastrds_real_sequence_t sequence;
+        rdz_real_sequence_t sequence;
         sequence.base = reader_u64(reader);
         sequence.delta = reader_u64(reader);
-        if (!fastrds_real_sequence_decode(&sequence, length, REAL(object))) {
-            Rf_error("invalid numeric sequence in fastrds file");
+        if (!rdz_real_sequence_decode(&sequence, length, REAL(object))) {
+            Rf_error("invalid numeric sequence in rdz file");
         }
     } else if (encoding == REAL_ENCODING_XOR_LZ4) {
         reader_real_xor_lz4(reader, REAL(object), length);
     } else {
-        Rf_error("unknown numeric encoding in fastrds file");
+        Rf_error("unknown numeric encoding in rdz file");
     }
 }
 
@@ -1462,7 +1462,7 @@ static SEXP decode_node(reader_t *reader, int depth, int format_version) {
     R_xlen_t length, i;
     SEXP object;
 
-    if (depth > FASTRDS_MAX_DEPTH) Rf_error("fastrds nesting is too deep");
+    if (depth > RDZ_MAX_DEPTH) Rf_error("rdz nesting is too deep");
     type = reader_u8(reader);
     object_bit = reader_u8(reader);
     length64 = reader_u64(reader);
@@ -1481,7 +1481,7 @@ static SEXP decode_node(reader_t *reader, int depth, int format_version) {
     case NODE_RAW: sexptype = RAWSXP; element_size = sizeof(Rbyte); break;
     case NODE_STRING: sexptype = STRSXP; break;
     case NODE_LIST: sexptype = VECSXP; break;
-    default: Rf_error("unknown node type in fastrds file");
+    default: Rf_error("unknown node type in rdz file");
     }
 
     object = PROTECT(Rf_allocVector(sexptype, length));
@@ -1555,15 +1555,15 @@ static SEXP save_body(void *data) {
     unsigned char architecture[3];
 
     const unsigned char *magic = context->format_version >= 2 ?
-        FASTRDS_MAGIC_V2 : FASTRDS_MAGIC_V1;
-    writer_write(&context->writer, magic, sizeof(FASTRDS_MAGIC_V1));
+        RDZ_MAGIC_V2 : RDZ_MAGIC_V1;
+    writer_write(&context->writer, magic, sizeof(RDZ_MAGIC_V1));
     writer_u8(&context->writer, (uint8_t) context->codec);
     architecture[0] = host_endian();
     architecture[1] = (unsigned char) sizeof(int);
     architecture[2] = (unsigned char) sizeof(double);
     writer_write(&context->writer, architecture, sizeof(architecture));
 
-    if (context->codec == FASTRDS_CODEC_NATIVE) {
+    if (context->codec == RDZ_CODEC_NATIVE) {
         encode_node(&context->writer, context->object, 0,
                     context->format_version);
     } else {
@@ -1585,7 +1585,7 @@ static void save_cleanup(void *data, Rboolean jump) {
     }
 }
 
-SEXP C_fastrds_save(SEXP object, SEXP path, SEXP mode_sexp, SEXP preset_sexp) {
+SEXP C_rdz_save(SEXP object, SEXP path, SEXP mode_sexp, SEXP preset_sexp) {
     const char *filename;
     int mode, preset, supported, codec;
     sexp_stack_t stack;
@@ -1599,14 +1599,14 @@ SEXP C_fastrds_save(SEXP object, SEXP path, SEXP mode_sexp, SEXP preset_sexp) {
     mode = Rf_asInteger(mode_sexp);
     if (mode < 0 || mode > 2) Rf_error("invalid codec mode");
     preset = Rf_asInteger(preset_sexp);
-    if (preset < 0 || preset > 1) Rf_error("invalid fastrds preset");
+    if (preset < 0 || preset > 1) Rf_error("invalid rdz preset");
     memset(&stack, 0, sizeof(stack));
     supported = native_supported(object, &stack, 0);
     free(stack.items);
     if (mode == 1 && !supported) {
         Rf_error("object is not supported by the native codec");
     }
-    codec = mode == 2 || !supported ? FASTRDS_CODEC_R : FASTRDS_CODEC_NATIVE;
+    codec = mode == 2 || !supported ? RDZ_CODEC_R : RDZ_CODEC_NATIVE;
 
     memset(&context, 0, sizeof(context));
     context.object = object;
@@ -1637,39 +1637,39 @@ typedef struct {
 static SEXP read_body(void *data) {
     read_context_t *context = (read_context_t *) data;
     reader_t *reader = &context->reader;
-    unsigned char magic[sizeof(FASTRDS_MAGIC_V1)];
+    unsigned char magic[sizeof(RDZ_MAGIC_V1)];
     uint8_t codec;
     int format_version;
     unsigned char architecture[3];
     SEXP result;
 
     reader_read(reader, magic, sizeof(magic));
-    if (memcmp(magic, FASTRDS_MAGIC_V1, sizeof(magic)) == 0) {
+    if (memcmp(magic, RDZ_MAGIC_V1, sizeof(magic)) == 0) {
         format_version = 1;
-    } else if (memcmp(magic, FASTRDS_MAGIC_V2, sizeof(magic)) == 0) {
+    } else if (memcmp(magic, RDZ_MAGIC_V2, sizeof(magic)) == 0) {
         format_version = 2;
     } else {
-        Rf_error("not a fastrds file");
+        Rf_error("not a rdz file");
     }
     codec = reader_u8(reader);
     reader_read(reader, architecture, sizeof(architecture));
     if (architecture[0] != host_endian() ||
         architecture[1] != sizeof(int) || architecture[2] != sizeof(double)) {
-        Rf_error("fastrds file was written for an incompatible architecture");
+        Rf_error("rdz file was written for an incompatible architecture");
     }
 
-    if (codec == FASTRDS_CODEC_NATIVE) {
+    if (codec == RDZ_CODEC_NATIVE) {
         result = decode_node(reader, 0, format_version);
-    } else if (codec == FASTRDS_CODEC_R) {
+    } else if (codec == RDZ_CODEC_R) {
         struct R_inpstream_st stream;
         R_InitInPStream(&stream, (R_pstream_data_t) reader,
                         R_pstream_any_format, r_in_char, r_in_bytes,
                         NULL, R_NilValue);
         result = R_Unserialize(&stream);
     } else {
-        Rf_error("unknown fastrds codec");
+        Rf_error("unknown rdz codec");
     }
-    if (reader->pos != reader->size) Rf_error("trailing data in fastrds file");
+    if (reader->pos != reader->size) Rf_error("trailing data in rdz file");
     return result;
 }
 
@@ -1691,7 +1691,7 @@ static void read_cleanup(void *data, Rboolean jump) {
 #endif
 }
 
-SEXP C_fastrds_read(SEXP path) {
+SEXP C_rdz_read(SEXP path) {
     const char *filename;
     read_context_t context;
     SEXP continuation, result;

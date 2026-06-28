@@ -1,4 +1,4 @@
-#' Write an R object using the fastrds format
+#' Write an R object using the rdz format
 #'
 #' Common atomic vectors, lists, matrices, and data frames use a native codec.
 #' Other objects automatically use R's general serialization codec.
@@ -15,7 +15,7 @@
 #'   their selection criteria are satisfied.
 #' @return `file`, invisibly.
 #' @export
-write_fastrds <- function(object, file, codec = c("auto", "native", "r"),
+write_rdz <- function(object, file, codec = c("auto", "native", "r"),
                           preset = c("speed", "balanced")) {
   codec <- match.arg(codec)
   preset <- match.arg(preset)
@@ -24,7 +24,7 @@ write_fastrds <- function(object, file, codec = c("auto", "native", "r"),
   }
   file <- path.expand(as.character(file))
   .Call(
-    C_fastrds_save,
+    C_rdz_save,
     object,
     file,
     match(codec, c("auto", "native", "r")) - 1L,
@@ -33,22 +33,22 @@ write_fastrds <- function(object, file, codec = c("auto", "native", "r"),
   invisible(file)
 }
 
-#' Read an object written by fastrds
+#' Read an object written by rdz
 #'
 #' @param file A file path.
 #' @return The stored R object.
 #' @export
-read_fastrds <- function(file) {
+read_rdz <- function(file) {
   if (length(file) != 1L || is.na(file)) {
     stop("`file` must be one non-missing path", call. = FALSE)
   }
-  .Call(C_fastrds_read, path.expand(as.character(file)))
+  .Call(C_rdz_read, path.expand(as.character(file)))
 }
 
-#' @rdname write_fastrds
+#' @rdname write_rdz
 #' @export
-fast_save <- write_fastrds
+fast_save <- write_rdz
 
-#' @rdname read_fastrds
+#' @rdname read_rdz
 #' @export
-fast_read <- read_fastrds
+fast_read <- read_rdz

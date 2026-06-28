@@ -1,3 +1,10 @@
-^fastrds_.*[.]tar[.]gz$
-^fastrds[.]Rcheck$
+^rdz_.*[.]tar[.]gz$
+^rdz[.]Rcheck$
 ^working-on[.]md$
+^review[.]md$
+^rdz[.]Rproj$
+^\.Rproj\.user$
+\.DS_Store$
+^\.git$
+^\.gitignore$
+^\.github$

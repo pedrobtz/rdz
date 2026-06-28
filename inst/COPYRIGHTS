@@ -1,4 +1,4 @@
-fastrds includes LZ4 1.10.0 (`src/lz4.c` and `src/lz4.h`), available from
+rdz includes LZ4 1.10.0 (`src/lz4.c` and `src/lz4.h`), available from
 https://github.com/lz4/lz4 and distributed under the following license:
 
 LZ4 Library
