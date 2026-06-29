@@ -135,6 +135,9 @@ Detailed results and the reproducible script are in:
   warnings, or notes.
 - The vendored LZ4 sources compile from their subdirectory on macOS, and the
   resulting shared library contains the expected compression symbols.
+- Git push access to `pedrobtz/rdz` works, but the active GitHub CLI token for
+  account `utopp` cannot resolve the repository through the API. Draft PR
+  creation and PR-triggered CI remain blocked until that token has access.
 - `git diff --check` passes.
 
 ## Current working-tree state
