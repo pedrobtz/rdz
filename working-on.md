@@ -27,8 +27,8 @@ defensible performance tradeoff.
   - 64 KiB buffered output for 1-, 2-, and 4-byte string dictionary indexes.
 - Unsupported and compact ALTREP objects continue to use R serialization.
 - The package and primary API are named `rdz`, and `.rdz` is the conventional
-  extension. The existing binary tags and legacy function aliases are retained
-  for backward compatibility.
+  extension. The existing binary tags are retained for backward compatibility;
+  the legacy R function aliases have been removed.
 - `explain_rdz()` runs the production serializer into a temporary stream
   and reports the exact codec, per-node strategy, hierarchy, and encoded byte
   counts without retaining a file.
@@ -37,6 +37,9 @@ defensible performance tradeoff.
 - The fst benchmark asserts that rdz selected its native codec, explicitly
   configures fst's thread count, and records both requested and effective
   threads.
+- LZ4 1.10.0 is isolated under `src/vendor/lz4`, with its version, upstream,
+  license, and local-modification status documented beside the sources.
+- The qs2 benchmark size table reports the package that provides each format.
 
 ## Latest performance results
 
@@ -100,7 +103,7 @@ Detailed results and the reproducible script are in:
 
 ## Verification status
 
-- All testthat tests pass.
+- All 266 testthat expectations pass.
 - Integer tests cover every selected width from one through eight bits, missing
   values, signed ranges, `INT_MAX`, factors, direct fallback, invalid padding,
   invalid flags, and malformed metadata.
@@ -130,15 +133,17 @@ Detailed results and the reproducible script are in:
 - The local source-tarball `R CMD check --as-cran --no-manual` run, with remote
   incoming checks disabled, installs and checks package `rdz` with no errors,
   warnings, or notes.
+- The vendored LZ4 sources compile from their subdirectory on macOS, and the
+  resulting shared library contains the expected compression symbols.
 - `git diff --check` passes.
 
 ## Current working-tree state
 
-The balanced codecs, fst thread-control fix, and XOR-delta numeric transform are
-committed through `8e55d6f`. The `explain_rdz()` API, native reporting
-instrumentation, package/API rename to `rdz`, `.rdz` extension migration,
-tests, and documentation are not committed. Review the complete diff before
-committing; do not discard the uncommitted files.
+The serializer, `explain_rdz()` API, package/API rename, attribute-API cleanup,
+vendored LZ4 layout, tests, documentation, and benchmark table update are
+committed on `feature/init`. The latest cleanup removes an accidentally tracked
+generated LZ4 object file, ignores nested object files, and refreshes this
+tracking document.
 
 Key implementation files:
 
@@ -151,8 +156,8 @@ Key implementation files:
 
 ## What to do next
 
-1. Run `R CMD check --as-cran --no-manual` on the final diff and verify the
-   vendored LZ4 build on Linux and Windows CI.
+1. Verify the vendored LZ4 build and the R-version-gated attribute behavior on
+   the Linux, macOS, Windows, R-devel, release, and old-release CI matrix.
 2. Repeat the fst thread-scaling comparison on a Linux host to validate the
    macOS OpenMP results across runtimes and hardware.
 3. Run the complete 27-object matrix in an environment with enough memory and

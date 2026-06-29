@@ -1,5 +1,6 @@
 *.Rcheck/
 *.tar.gz
 src/*.o
+src/**/*.o
 src/*.so
 src/*.dll
