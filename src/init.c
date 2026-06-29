@@ -6,11 +6,13 @@
 extern SEXP C_rdz_save(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_rdz_read(SEXP);
 extern SEXP C_rdz_explain(SEXP, SEXP, SEXP);
+extern SEXP C_rdz_threads(void);
 
 static const R_CallMethodDef call_methods[] = {
     {"C_rdz_save", (DL_FUNC) &C_rdz_save, 4},
     {"C_rdz_read", (DL_FUNC) &C_rdz_read, 1},
     {"C_rdz_explain", (DL_FUNC) &C_rdz_explain, 3},
+    {"C_rdz_threads", (DL_FUNC) &C_rdz_threads, 0},
     {NULL, NULL, 0}
 };
 

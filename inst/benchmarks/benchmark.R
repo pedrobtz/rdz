@@ -17,21 +17,32 @@ run_benchmark <- function(name, object, include_qdata = TRUE) {
         "object-balanced.rdz",
         "object.qs2",
         "object-fast.qs2",
+        "object.rds",
         "object.qdata"
       )
     ),
-    c("rdz_speed", "rdz_balanced", "qs2", "qs2_fast", "qdata")
+    c("rdz_speed", "rdz_balanced", "qs2", "qs2_fast", "rds", "qdata")
+  )
+  packages <- c(
+    rdz_speed = "rdz",
+    rdz_balanced = "rdz",
+    qs2 = "qs2",
+    qs2_fast = "qs2",
+    rds = "base",
+    qdata = "qs2"
   )
 
   write_rdz(object, paths[["rdz_speed"]])
   write_rdz(object, paths[["rdz_balanced"]], preset = "balanced")
   qs_save(object, paths[["qs2"]])
   qs_save(object, paths[["qs2_fast"]], compress_level = -1000L, shuffle = FALSE)
+  saveRDS(object, paths[["rds"]])
   if (include_qdata) {
     qd_save(object, paths[["qdata"]])
   }
   stopifnot(identical(object, read_rdz(paths[["rdz_speed"]])))
   stopifnot(identical(object, read_rdz(paths[["rdz_balanced"]])))
+  stopifnot(identical(object, readRDS(paths[["rds"]])))
 
   if (include_qdata) {
     writes <- mark(
@@ -48,6 +59,7 @@ run_benchmark <- function(name, object, include_qdata = TRUE) {
         compress_level = -1000L,
         shuffle = FALSE
       ),
+      rds = saveRDS(object, paths[["rds"]]),
       qdata = qd_save(object, paths[["qdata"]]),
       iterations = iterations,
       check = FALSE,
@@ -58,6 +70,7 @@ run_benchmark <- function(name, object, include_qdata = TRUE) {
       rdz_balanced = read_rdz(paths[["rdz_balanced"]]),
       qs2 = qs_read(paths[["qs2"]]),
       qs2_fast = qs_read(paths[["qs2_fast"]]),
+      rds = readRDS(paths[["rds"]]),
       qdata = qd_read(paths[["qdata"]]),
       iterations = iterations,
       check = FALSE,
@@ -79,6 +92,7 @@ run_benchmark <- function(name, object, include_qdata = TRUE) {
         compress_level = -1000L,
         shuffle = FALSE
       ),
+      rds = saveRDS(object, paths[["rds"]]),
       iterations = iterations,
       check = FALSE,
       memory = FALSE
@@ -88,6 +102,7 @@ run_benchmark <- function(name, object, include_qdata = TRUE) {
       rdz_balanced = read_rdz(paths[["rdz_balanced"]]),
       qs2 = qs_read(paths[["qs2"]]),
       qs2_fast = qs_read(paths[["qs2_fast"]]),
+      rds = readRDS(paths[["rds"]]),
       iterations = iterations,
       check = FALSE,
       memory = FALSE
@@ -104,7 +119,7 @@ run_benchmark <- function(name, object, include_qdata = TRUE) {
   )
   print(
     data.frame(
-      package = ifelse(startsWith(names(paths), "rdz"), "rdz", "qs2"),
+      package = unname(packages[names(paths)]),
       format = names(paths),
       size_mib = unname(file.info(paths)$size / 1024^2)
     ),

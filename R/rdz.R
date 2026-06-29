@@ -49,6 +49,21 @@ read_rdz <- function(file) {
   .Call(C_rdz_read, path.expand(as.character(file)))
 }
 
+#' Report rdz's automatic worker-thread count
+#'
+#' Returns the maximum number of worker threads that rdz may use for
+#' automatically parallelized operations. The value is based on the number of
+#' online logical processors and capped at rdz's internal maximum. Individual
+#' operations may use fewer workers. On Linux, process CPU affinity and cgroup
+#' v1 or v2 CPU quotas, including container limits, can reduce the reported
+#' value. This informational getter does not change the thread count.
+#'
+#' @return A length-one integer.
+#' @export
+rdz_threads <- function() {
+  .Call(C_rdz_threads)
+}
+
 #' Explain how an object would be serialized
 #'
 #' Runs the same codec-selection path as [write_rdz()] and returns one row

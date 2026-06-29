@@ -29,6 +29,12 @@ when it can preserve the object and otherwise falls back automatically.
 ALTREP vectors deliberately use the R serialization path so compact sequences
 and deferred representations are not materialized on disk.
 
+Use `rdz_threads()` to report the maximum number of worker threads that rdz may
+use for automatically parallelized operations. It reports online logical
+processors, capped at rdz's internal maximum; small workloads may use fewer.
+On Linux, the result also respects process CPU affinity and cgroup v1 or v2 CPU
+quotas, including limits applied to containers and Kubernetes pods.
+
 Use `explain_rdz()` to inspect the codec and exact strategy that would be
 selected without retaining an output file:
 
@@ -147,9 +153,10 @@ The broader 27-object correctness and performance matrix is available in
 `inst/benchmarks/many-objects.R`; its latest methodology and results are in
 `inst/benchmarks/many-objects-results.md`.
 
-The benchmark includes default `qs2`, `qdata`, and a throughput-oriented `qs2`
-configuration (`compress_level = -1000`, byte shuffle disabled). Set
-`RDZ_BENCH_N` and `RDZ_BENCH_ITERATIONS` to control its size.
+The benchmark includes base R's default `saveRDS()` and `readRDS()`, default
+`qs2`, `qdata`, and a throughput-oriented `qs2` configuration
+(`compress_level = -1000`, byte shuffle disabled). Set `RDZ_BENCH_N` and
+`RDZ_BENCH_ITERATIONS` to control its size.
 
 On R 4.5.2, qs2 0.2.2, and an x86-64 macOS machine, a 30.5 MiB
 numeric/integer/logical list produced these medians:

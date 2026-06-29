@@ -206,6 +206,26 @@ test_that("codec selection is enforced", {
   expect_identical(roundtrip(x, "r", "balanced"), x)
 })
 
+test_that("automatic worker-thread count is reported", {
+  threads <- rdz_threads()
+
+  expect_type(threads, "integer")
+  expect_length(threads, 1L)
+  expect_gte(threads, 1L)
+  expect_lte(threads, 64L)
+
+  cpu_max <- "/sys/fs/cgroup/cpu.max"
+  if (file.exists(cpu_max)) {
+    limit <- scan(cpu_max, what = character(), quiet = TRUE)
+    if (length(limit) == 2L && limit[[1L]] != "max") {
+      quota_threads <- ceiling(
+        as.numeric(limit[[1L]]) / as.numeric(limit[[2L]])
+      )
+      expect_lte(threads, quota_threads)
+    }
+  }
+})
+
 test_that("serialization plans describe native node strategies", {
   sequence <- numeric(3000L)
   sequence[] <- seq_len(3000L)

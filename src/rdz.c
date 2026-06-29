@@ -2116,6 +2116,10 @@ static void reporter_dataframe_cleanup(void *data, Rboolean jump) {
     if (jump) reporter_free(context->reporter);
 }
 
+SEXP C_rdz_threads(void) {
+    return Rf_ScalarInteger(rdz_resolve_threads(0));
+}
+
 SEXP C_rdz_explain(SEXP object, SEXP mode_sexp, SEXP preset_sexp) {
     int mode = Rf_asInteger(mode_sexp);
     int preset = Rf_asInteger(preset_sexp);
