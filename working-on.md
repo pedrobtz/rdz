@@ -146,7 +146,7 @@ Key implementation files:
 - `src/numeric_codec.c` and `src/numeric_codec.h`
 - `src/logical_codec.c` and `src/logical_codec.h`
 - `src/integer_codec.c` and `src/integer_codec.h`
-- `src/lz4.c` and `src/lz4.h` (vendored LZ4 1.10.0)
+- `src/vendor/lz4/lz4.c` and `src/vendor/lz4/lz4.h` (vendored LZ4 1.10.0)
 - `tests/testthat/test-roundtrip.R`
 
 ## What to do next

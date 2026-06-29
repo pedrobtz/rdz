@@ -1,2 +1,5 @@
+OBJECTS = init.o integer_codec.o logical_codec.o numeric_codec.o rdz.o \
+  threading.o vendor/lz4/lz4.o
+
 PKG_CFLAGS = -pthread
 PKG_LIBS = -pthread

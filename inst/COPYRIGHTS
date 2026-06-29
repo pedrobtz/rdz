@@ -1,5 +1,6 @@
-rdz includes LZ4 1.10.0 (`src/lz4.c` and `src/lz4.h`), available from
-https://github.com/lz4/lz4 and distributed under the following license:
+rdz includes LZ4 1.10.0 (`src/vendor/lz4/lz4.c` and
+`src/vendor/lz4/lz4.h`), available from https://github.com/lz4/lz4 and
+distributed under the following license:
 
 LZ4 Library
 Copyright (c) 2011-2020, Yann Collet

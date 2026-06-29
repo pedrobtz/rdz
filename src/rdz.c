@@ -3,7 +3,7 @@
 #include <Rversion.h>
 
 #include "integer_codec.h"
-#include "lz4.h"
+#include "vendor/lz4/lz4.h"
 #include "logical_codec.h"
 #include "numeric_codec.h"
 #include "threading.h"
