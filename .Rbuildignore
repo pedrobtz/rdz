@@ -1,7 +1,8 @@
 ^rdz_.*[.]tar[.]gz$
 ^rdz[.]Rcheck$
 ^working-on[.]md$
-^azr\.Rproj$
+^rdz\.Rproj$
+^review\.md$
 ^\.Rproj\.user$
 ^LICENSE\.md$
 ^\.github$

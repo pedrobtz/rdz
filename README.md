@@ -21,8 +21,7 @@ object <- read_rdz("object.rdz")
 
 `.rdz` is the conventional file extension. The on-disk version tags remain
 `FASTRDS1` and `FASTRDS2`, so files created before the package rename remain
-readable. `write_fastrds()`, `read_fastrds()`, and `explain_fastrds()` are
-retained as compatibility aliases.
+readable.
 
 Use `codec = "native"` to require the fast native path, or `codec = "r"` to
 force general R serialization. The default `"auto"` selects the native path

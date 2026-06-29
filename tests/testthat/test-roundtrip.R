@@ -18,7 +18,9 @@ test_that("native atomic vectors round trip exactly", {
     c("repeated", NA, "repeated", enc2utf8("Grüezi")),
     c(sprintf("unique-%06d", 1:2000), NA_character_)
   )
-  for (x in cases) expect_identical(roundtrip(x, "native"), x)
+  for (x in cases) {
+    expect_identical(roundtrip(x, "native"), x)
+  }
 })
 
 test_that("string dictionary index widths round trip exactly", {
@@ -110,7 +112,9 @@ test_that("malformed balanced LZ4 string blocks fail cleanly", {
   expect_identical(as.integer(bytes[[37L]]), 1L)
 
   length_size_bytes <- as.integer(bytes[38:45])
-  if (.Platform$endian == "big") length_size_bytes <- rev(length_size_bytes)
+  if (.Platform$endian == "big") {
+    length_size_bytes <- rev(length_size_bytes)
+  }
   length_metadata_size <- sum(length_size_bytes * 256^(0:7))
   block_header <- 46L + as.integer(length_metadata_size)
 
@@ -131,21 +135,30 @@ test_that("malformed balanced LZ4 string blocks fail cleanly", {
 
   malformed <- bytes
   malformed[block_header + 0:3] <- writeBin(
-    0L, raw(), size = 4L, endian = .Platform$endian
+    0L,
+    raw(),
+    size = 4L,
+    endian = .Platform$endian
   )
   writeBin(malformed, path)
   expect_error(read_rdz(path), "invalid LZ4 string block")
 
   malformed <- bytes
   malformed[block_header + 0:3] <- writeBin(
-    65537L, raw(), size = 4L, endian = .Platform$endian
+    65537L,
+    raw(),
+    size = 4L,
+    endian = .Platform$endian
   )
   writeBin(malformed, path)
   expect_error(read_rdz(path), "invalid LZ4 string block")
 
   malformed <- bytes
   malformed[block_header + 0:3] <- writeBin(
-    1L, raw(), size = 4L, endian = .Platform$endian
+    1L,
+    raw(),
+    size = 4L,
+    endian = .Platform$endian
   )
   writeBin(malformed, path)
   expect_error(read_rdz(path), "invalid LZ4 string block")
@@ -167,7 +180,9 @@ test_that("attributes, matrices, lists, and data frames round trip", {
     ),
     structure(as.double(1:3), class = "Date")
   )
-  for (x in cases) expect_identical(roundtrip(x, "native"), x)
+  for (x in cases) {
+    expect_identical(roundtrip(x, "native"), x)
+  }
 })
 
 test_that("auto mode falls back for general R objects", {
@@ -185,22 +200,10 @@ test_that("auto mode falls back for general R objects", {
 
 test_that("codec selection is enforced", {
   path <- tempfile(fileext = ".rdz")
-  expect_error(write_rdz(function() NULL, path, "native"),
-               "not supported")
+  expect_error(write_rdz(function() NULL, path, "native"), "not supported")
   x <- list(a = 1:10, call = quote(sum(a)))
   expect_identical(roundtrip(x, "r"), x)
   expect_identical(roundtrip(x, "r", "balanced"), x)
-})
-
-test_that("legacy function names remain compatible aliases", {
-  expect_identical(write_fastrds, write_rdz)
-  expect_identical(read_fastrds, read_rdz)
-  expect_identical(explain_fastrds, explain_rdz)
-
-  path <- tempfile(fileext = ".rdz")
-  x <- c(1L, 2L, NA_integer_)
-  expect_identical(write_fastrds(x, path), invisible(path))
-  expect_identical(read_fastrds(path), x)
 })
 
 test_that("serialization plans describe native node strategies", {
@@ -220,22 +223,53 @@ test_that("serialization plans describe native node strategies", {
   write_rdz(x, path, preset = "balanced")
 
   expect_s3_class(plan, "data.frame")
-  expect_named(plan, c(
-    "path", "relation", "name", "index", "depth", "type", "length",
-    "codec", "strategy", "encoded_bytes"
-  ))
-  expect_identical(plan$path, c(
-    "$", "$@names", "$[[1]]", "$[[2]]", "$[[3]]", "$[[4]]",
-    "$[[5]]", "$[[6]]"
-  ))
-  expect_identical(plan$name, c(
-    NA_character_, "names", names(x)
-  ))
+  expect_named(
+    plan,
+    c(
+      "path",
+      "relation",
+      "name",
+      "index",
+      "depth",
+      "type",
+      "length",
+      "codec",
+      "strategy",
+      "encoded_bytes"
+    )
+  )
+  expect_identical(
+    plan$path,
+    c(
+      "$",
+      "$@names",
+      "$[[1]]",
+      "$[[2]]",
+      "$[[3]]",
+      "$[[4]]",
+      "$[[5]]",
+      "$[[6]]"
+    )
+  )
+  expect_identical(
+    plan$name,
+    c(
+      NA_character_,
+      "names",
+      names(x)
+    )
+  )
   expect_true(all(plan$codec == "native"))
   expect_identical(plan$encoded_bytes[[1L]], as.numeric(file.info(path)$size))
   expect_match(plan$strategy[which(plan$name == "logical")], "two-bit")
-  expect_match(plan$strategy[which(plan$name == "integer")], "frame-of-reference")
-  expect_match(plan$strategy[which(plan$name == "repeated")], "numeric dictionary")
+  expect_match(
+    plan$strategy[which(plan$name == "integer")],
+    "frame-of-reference"
+  )
+  expect_match(
+    plan$strategy[which(plan$name == "repeated")],
+    "numeric dictionary"
+  )
   expect_match(plan$strategy[which(plan$name == "sequence")], "constant-delta")
   expect_match(plan$strategy[which(plan$name == "random")], "XOR-delta")
   expect_identical(
@@ -281,8 +315,7 @@ test_that("serialization plans explain fallback and forced codecs", {
     unname(as.numeric(file.info(forced_path)$size))
   )
 
-  expect_error(explain_rdz(function() NULL, codec = "native"),
-               "not supported")
+  expect_error(explain_rdz(function() NULL, codec = "native"), "not supported")
 })
 
 test_that("serialization plans preserve nested paths and names", {
@@ -292,9 +325,16 @@ test_that("serialization plans preserve nested paths and names", {
   x <- setNames(list(list(inner = values)), outer_name)
   plan <- explain_rdz(x)
 
-  expect_identical(plan$path, c(
-    "$", "$@names", "$[[1]]", "$[[1]]@names", "$[[1]][[1]]"
-  ))
+  expect_identical(
+    plan$path,
+    c(
+      "$",
+      "$@names",
+      "$[[1]]",
+      "$[[1]]@names",
+      "$[[1]][[1]]"
+    )
+  )
   expect_identical(
     plan$name[which(plan$relation == "element")],
     c(outer_name, "inner")
@@ -368,8 +408,7 @@ test_that("balanced preset packs small-range integer offsets", {
 
   expect_identical(read_rdz(balanced_path), x)
   expect_equal(file.info(speed_path)$size, 26 + 4 * length(x))
-  expect_equal(file.info(balanced_path)$size,
-               33 + ceiling(7 * length(x) / 8))
+  expect_equal(file.info(balanced_path)$size, 33 + ceiling(7 * length(x) / 8))
   expect_lt(file.info(balanced_path)$size, file.info(speed_path)$size / 4)
 })
 
@@ -398,8 +437,7 @@ test_that("integer packing round trips every selected bit width", {
     maximum_code <- as.integer(2^bits - 1)
     cases <- list(
       rep(c(base, base + maximum_code), length.out = 1001L),
-      rep(c(base, base + maximum_code - 1L, NA_integer_),
-          length.out = 1001L)
+      rep(c(base, base + maximum_code - 1L, NA_integer_), length.out = 1001L)
     )
     for (x in cases) {
       path <- tempfile(fileext = ".rdz")
@@ -419,8 +457,7 @@ test_that("balanced preset leaves wide-range integers direct", {
   write_rdz(x, balanced_path, preset = "balanced")
 
   expect_identical(read_rdz(balanced_path), x)
-  expect_equal(file.info(balanced_path)$size,
-               file.info(speed_path)$size + 1)
+  expect_equal(file.info(balanced_path)$size, file.info(speed_path)$size + 1)
 })
 
 test_that("integer packing preserves factors and data frames", {
@@ -442,7 +479,8 @@ test_that("balanced preset dictionary-encodes low-cardinality numerics", {
   expect_identical(read_rdz(speed_path), x)
   expect_identical(read_rdz(balanced_path), x)
   expect_identical(
-    as.integer(readBin(balanced_path, "raw", n = 27L)[[27L]]), 3L
+    as.integer(readBin(balanced_path, "raw", n = 27L)[[27L]]),
+    3L
   )
   expect_lt(file.info(balanced_path)$size, file.info(speed_path)$size / 100)
   expect_identical(rawToChar(readBin(speed_path, "raw", n = 8L)), "FASTRDS1")
@@ -534,8 +572,10 @@ test_that("balanced preset XOR-compresses high-cardinality numerics exactly", {
 
   expect_identical(as.integer(header[[27L]]), 4L)
   expect_identical(restored, x)
-  expect_identical(writeBin(restored, raw(), size = 8L),
-                   writeBin(x, raw(), size = 8L))
+  expect_identical(
+    writeBin(restored, raw(), size = 8L),
+    writeBin(x, raw(), size = 8L)
+  )
   expect_lt(file.info(balanced_path)$size, file.info(speed_path)$size * 0.7)
 })
 
@@ -555,19 +595,25 @@ test_that("balanced XOR numerics preserve block boundaries", {
 test_that("balanced XOR numerics reject incompressible bit patterns", {
   set.seed(20260628)
   bytes <- as.raw(sample.int(256L, 80000L, replace = TRUE) - 1L)
-  x <- readBin(bytes, "double", n = 10000L, size = 8L,
-               endian = .Platform$endian)
+  x <- readBin(
+    bytes,
+    "double",
+    n = 10000L,
+    size = 8L,
+    endian = .Platform$endian
+  )
   speed_path <- tempfile(fileext = ".rdz")
   balanced_path <- tempfile(fileext = ".rdz")
 
   write_rdz(x, speed_path)
   write_rdz(x, balanced_path, preset = "balanced")
 
-  expect_identical(as.integer(readBin(balanced_path, "raw", n = 27L)[[27L]]),
-                   0L)
+  expect_identical(
+    as.integer(readBin(balanced_path, "raw", n = 27L)[[27L]]),
+    0L
+  )
   expect_identical(read_rdz(balanced_path), x)
-  expect_equal(file.info(balanced_path)$size,
-               file.info(speed_path)$size + 1)
+  expect_equal(file.info(balanced_path)$size, file.info(speed_path)$size + 1)
 })
 
 test_that("balanced XOR numerics reject marginal compression gains", {
@@ -579,11 +625,12 @@ test_that("balanced XOR numerics reject marginal compression gains", {
   write_rdz(x, speed_path)
   write_rdz(x, balanced_path, preset = "balanced")
 
-  expect_identical(as.integer(readBin(balanced_path, "raw", n = 27L)[[27L]]),
-                   0L)
+  expect_identical(
+    as.integer(readBin(balanced_path, "raw", n = 27L)[[27L]]),
+    0L
+  )
   expect_identical(read_rdz(balanced_path), x)
-  expect_equal(file.info(balanced_path)$size,
-               file.info(speed_path)$size + 1)
+  expect_equal(file.info(balanced_path)$size, file.info(speed_path)$size + 1)
 })
 
 test_that("malformed LZ4 XOR numeric blocks fail cleanly", {
@@ -595,20 +642,22 @@ test_that("malformed LZ4 XOR numeric blocks fail cleanly", {
   expect_identical(as.integer(bytes[[27L]]), 4L)
 
   malformed <- bytes
-  malformed[28:31] <- writeBin(0L, raw(), size = 4L,
-                               endian = .Platform$endian)
+  malformed[28:31] <- writeBin(0L, raw(), size = 4L, endian = .Platform$endian)
   writeBin(malformed, path)
   expect_error(read_rdz(path), "invalid LZ4 XOR numeric block")
 
   malformed <- bytes
-  malformed[28:31] <- writeBin(65537L, raw(), size = 4L,
-                               endian = .Platform$endian)
+  malformed[28:31] <- writeBin(
+    65537L,
+    raw(),
+    size = 4L,
+    endian = .Platform$endian
+  )
   writeBin(malformed, path)
   expect_error(read_rdz(path), "invalid LZ4 XOR numeric block")
 
   malformed <- bytes
-  malformed[28:31] <- writeBin(1L, raw(), size = 4L,
-                               endian = .Platform$endian)
+  malformed[28:31] <- writeBin(1L, raw(), size = 4L, endian = .Platform$endian)
   writeBin(malformed, path)
   expect_error(read_rdz(path), "invalid LZ4 XOR numeric block")
 
@@ -648,21 +697,30 @@ test_that("malformed LZ4 numeric dictionary blocks fail cleanly", {
   block_header <- 31L + 3L * 8L
   malformed <- bytes
   malformed[block_header + 0:3] <- writeBin(
-    0L, raw(), size = 4L, endian = .Platform$endian
+    0L,
+    raw(),
+    size = 4L,
+    endian = .Platform$endian
   )
   writeBin(malformed, path)
   expect_error(read_rdz(path), "invalid LZ4 numeric dictionary block")
 
   malformed <- bytes
   malformed[block_header + 0:3] <- writeBin(
-    2501L, raw(), size = 4L, endian = .Platform$endian
+    2501L,
+    raw(),
+    size = 4L,
+    endian = .Platform$endian
   )
   writeBin(malformed, path)
   expect_error(read_rdz(path), "invalid LZ4 numeric dictionary block")
 
   malformed <- bytes
   malformed[block_header + 0:3] <- writeBin(
-    1L, raw(), size = 4L, endian = .Platform$endian
+    1L,
+    raw(),
+    size = 4L,
+    endian = .Platform$endian
   )
   writeBin(malformed, path)
   expect_error(read_rdz(path), "invalid LZ4 numeric dictionary block")

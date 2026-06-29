@@ -15,8 +15,12 @@
 #'   their selection criteria are satisfied.
 #' @return `file`, invisibly.
 #' @export
-write_rdz <- function(object, file, codec = c("auto", "native", "r"),
-                      preset = c("speed", "balanced")) {
+write_rdz <- function(
+  object,
+  file,
+  codec = c("auto", "native", "r"),
+  preset = c("speed", "balanced")
+) {
   codec <- match.arg(codec)
   preset <- match.arg(preset)
   if (length(file) != 1L || is.na(file)) {
@@ -63,8 +67,11 @@ read_rdz <- function(file) {
 #'   descendants, and the root count is the complete file size. R-serialization
 #'   fallback is represented by one root row.
 #' @export
-explain_rdz <- function(object, codec = c("auto", "native", "r"),
-                        preset = c("speed", "balanced")) {
+explain_rdz <- function(
+  object,
+  codec = c("auto", "native", "r"),
+  preset = c("speed", "balanced")
+) {
   codec <- match.arg(codec)
   preset <- match.arg(preset)
   .Call(
@@ -74,23 +81,3 @@ explain_rdz <- function(object, codec = c("auto", "native", "r"),
     match(preset, c("speed", "balanced")) - 1L
   )
 }
-
-#' @rdname write_rdz
-#' @export
-write_fastrds <- write_rdz
-
-#' @rdname read_rdz
-#' @export
-read_fastrds <- read_rdz
-
-#' @rdname explain_rdz
-#' @export
-explain_fastrds <- explain_rdz
-
-#' @rdname write_rdz
-#' @export
-fast_save <- write_rdz
-
-#' @rdname read_rdz
-#' @export
-fast_read <- read_rdz

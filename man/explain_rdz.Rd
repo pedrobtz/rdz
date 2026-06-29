@@ -2,16 +2,9 @@
 % Please edit documentation in R/rdz.R
 \name{explain_rdz}
 \alias{explain_rdz}
-\alias{explain_fastrds}
 \title{Explain how an object would be serialized}
 \usage{
 explain_rdz(
-  object,
-  codec = c("auto", "native", "r"),
-  preset = c("speed", "balanced")
-)
-
-explain_fastrds(
   object,
   codec = c("auto", "native", "r"),
   preset = c("speed", "balanced")

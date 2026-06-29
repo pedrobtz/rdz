@@ -1,5 +1,6 @@
 #include <R.h>
 #include <Rinternals.h>
+#include <Rversion.h>
 
 #include "integer_codec.h"
 #include "lz4.h"
@@ -392,8 +393,28 @@ static int stack_push(sexp_stack_t *stack, SEXP object) {
     return 1;
 }
 
+static int native_supported(SEXP object, sexp_stack_t *stack, int depth);
+
+#if R_VERSION >= R_Version(4, 6, 0)
+typedef struct {
+    sexp_stack_t *stack;
+    int depth;
+    int supported;
+} attribute_support_context_t;
+
+static SEXP attribute_supported(SEXP tag, SEXP value, void *data) {
+    attribute_support_context_t *context =
+        (attribute_support_context_t *) data;
+    if (TYPEOF(tag) != SYMSXP ||
+        !native_supported(value, context->stack, context->depth + 1)) {
+        context->supported = 0;
+        return R_NilValue;
+    }
+    return NULL;
+}
+#endif
+
 static int native_supported(SEXP object, sexp_stack_t *stack, int depth) {
-    SEXP attribute;
     R_xlen_t i;
     int type = TYPEOF(object);
 
@@ -418,14 +439,24 @@ static int native_supported(SEXP object, sexp_stack_t *stack, int depth) {
         if (stack_contains(stack, object) || !stack_push(stack, object)) return 0;
     }
 
-    for (attribute = ATTRIB(object); attribute != R_NilValue;
-         attribute = CDR(attribute)) {
-        if (TYPEOF(TAG(attribute)) != SYMSXP ||
-            !native_supported(CAR(attribute), stack, depth + 1)) {
+#if R_VERSION >= R_Version(4, 6, 0)
+    {
+        attribute_support_context_t context = { stack, depth, 1 };
+        R_mapAttrib(object, attribute_supported, &context);
+        if (!context.supported) {
             if (object != R_NilValue) --stack->size;
             return 0;
         }
     }
+#elif R_VERSION >= R_Version(4, 5, 0)
+    if (object != R_NilValue && ANY_ATTRIB(object)) {
+        --stack->size;
+        return 0;
+    }
+#else
+    if (object != R_NilValue) --stack->size;
+    return 0;
+#endif
 
     if (type == VECSXP) {
         for (i = 0; i < XLENGTH(object); ++i) {
@@ -1171,28 +1202,48 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
                         int format_version, int parent, uint8_t relation,
                         uint64_t index, SEXP name);
 
+#if R_VERSION >= R_Version(4, 6, 0)
+typedef struct {
+    writer_t *writer;
+    int depth;
+    int format_version;
+    int parent;
+} attribute_encode_context_t;
+
+static SEXP encode_attribute(SEXP tag, SEXP value, void *data) {
+    attribute_encode_context_t *context =
+        (attribute_encode_context_t *) data;
+    SEXP name = PRINTNAME(tag);
+    uint32_t length = (uint32_t) LENGTH(name);
+    writer_u32(context->writer, length);
+    writer_write(context->writer, CHAR(name), length);
+    encode_node(context->writer, value, context->depth + 1,
+                context->format_version, context->parent,
+                REPORT_ATTRIBUTE, 0, name);
+    return context->writer->failed ? R_NilValue : NULL;
+}
+#endif
+
 static void encode_attributes(writer_t *writer, SEXP object, int depth,
                               int format_version, int parent) {
-    SEXP attribute;
-    uint32_t count = 0;
-    for (attribute = ATTRIB(object); attribute != R_NilValue;
-         attribute = CDR(attribute)) {
-        if (count == UINT32_MAX) {
-            writer->failed = 1;
-            return;
-        }
-        ++count;
+#if R_VERSION >= R_Version(4, 6, 0)
+    R_xlen_t count = R_getAttribCount(object);
+    attribute_encode_context_t context = {
+        writer, depth, format_version, parent
+    };
+    if ((uint64_t) count > UINT32_MAX) {
+        writer->failed = 1;
+        return;
     }
-    writer_u32(writer, count);
-    for (attribute = ATTRIB(object); attribute != R_NilValue;
-         attribute = CDR(attribute)) {
-        SEXP name = PRINTNAME(TAG(attribute));
-        uint32_t length = (uint32_t) LENGTH(name);
-        writer_u32(writer, length);
-        writer_write(writer, CHAR(name), length);
-        encode_node(writer, CAR(attribute), depth + 1, format_version,
-                    parent, REPORT_ATTRIBUTE, 0, name);
-    }
+    writer_u32(writer, (uint32_t) count);
+    R_mapAttrib(object, encode_attribute, &context);
+#else
+    (void) object;
+    (void) depth;
+    (void) format_version;
+    (void) parent;
+    writer_u32(writer, 0);
+#endif
 }
 
 static const char *encode_strings(writer_t *writer, SEXP object,
@@ -1782,7 +1833,9 @@ static SEXP decode_node(reader_t *reader, int depth, int format_version) {
             UNPROTECT(1);
         }
     }
-    SET_OBJECT(object, object_bit != 0);
+    if ((object_bit != 0) != Rf_isObject(object)) {
+        Rf_error("inconsistent object class in rdz file");
+    }
     UNPROTECT(1);
     return object;
 }

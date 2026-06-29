@@ -2,15 +2,9 @@
 % Please edit documentation in R/rdz.R
 \name{read_rdz}
 \alias{read_rdz}
-\alias{read_fastrds}
-\alias{fast_read}
 \title{Read an object written by rdz}
 \usage{
 read_rdz(file)
-
-read_fastrds(file)
-
-fast_read(file)
 }
 \arguments{
 \item{file}{A file path, conventionally ending in `.rdz`.}
