@@ -5,6 +5,7 @@
 #include "lz4.h"
 #include "logical_codec.h"
 #include "numeric_codec.h"
+#include "threading.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -27,17 +28,18 @@
 #define RDZ_MAX_DEPTH    10000
 #define STRING_INDEX_BUFFER_SIZE (64 * 1024)
 #define RDZ_LZ4_BLOCK_SIZE (64 * 1024)
+#define RDZ_PARALLEL_XOR_MIN_BLOCKS 16
 #define STRING_LAYOUT_FLAT_RAW 0
 #define STRING_LAYOUT_FLAT_LZ4 3
 #define STRING_LENGTHS_DIRECT 0
 #define STRING_LENGTHS_RLE 1
 
 static const unsigned char RDZ_MAGIC_V1[8] = {
-    'R', 'D', 'Z', 'F', 'I', 'L', 'E', '1'
+    'F', 'A', 'S', 'T', 'R', 'D', 'S', '1'
 };
 
 static const unsigned char RDZ_MAGIC_V2[8] = {
-    'R', 'D', 'Z', 'F', 'I', 'L', 'E', '2'
+    'F', 'A', 'S', 'T', 'R', 'D', 'S', '2'
 };
 
 enum real_encoding {
@@ -69,9 +71,35 @@ enum node_type {
     NODE_LIST = 7
 };
 
+enum report_relation {
+    REPORT_ROOT = 0,
+    REPORT_ATTRIBUTE = 1,
+    REPORT_ELEMENT = 2
+};
+
+typedef struct {
+    int parent;
+    int depth;
+    uint8_t relation;
+    uint64_t index;
+    SEXP name;
+    const char *type;
+    uint64_t length;
+    const char *strategy;
+    uint64_t encoded_bytes;
+} report_row_t;
+
+typedef struct {
+    report_row_t *rows;
+    size_t size;
+    size_t capacity;
+} reporter_t;
+
 typedef struct {
     FILE *file;
     int failed;
+    uint64_t position;
+    reporter_t *reporter;
 } writer_t;
 
 typedef struct {
@@ -108,6 +136,7 @@ typedef struct {
     size_t block_count;
     int compressed_capacity;
     int rejected;
+    int parallel_used;
 } lz4_blocks_t;
 
 typedef struct {
@@ -116,6 +145,59 @@ typedef struct {
     size_t capacity;
 } byte_buffer_t;
 
+static int reporter_add(writer_t *writer, int parent, int depth,
+                        uint8_t relation, uint64_t index, SEXP name,
+                        const char *type, uint64_t length) {
+    reporter_t *reporter = writer->reporter;
+    report_row_t *row;
+
+    if (reporter == NULL) return -1;
+    if (reporter->size == reporter->capacity) {
+        size_t capacity = reporter->capacity == 0 ? 16 : reporter->capacity * 2;
+        report_row_t *rows;
+        if (capacity < reporter->capacity || capacity > (size_t) INT_MAX ||
+            capacity > SIZE_MAX / sizeof(report_row_t)) {
+            writer->failed = 1;
+            return -1;
+        }
+        rows = (report_row_t *) realloc(
+            reporter->rows, capacity * sizeof(report_row_t));
+        if (rows == NULL) {
+            writer->failed = 1;
+            return -1;
+        }
+        reporter->rows = rows;
+        reporter->capacity = capacity;
+    }
+    row = &reporter->rows[reporter->size];
+    memset(row, 0, sizeof(*row));
+    row->parent = parent;
+    row->depth = depth;
+    row->relation = relation;
+    row->index = index;
+    row->name = name;
+    row->type = type;
+    row->length = length;
+    row->strategy = "pending";
+    ++reporter->size;
+    return (int) (reporter->size - 1);
+}
+
+static void reporter_finish(writer_t *writer, int row, const char *strategy,
+                            uint64_t start) {
+    if (writer->reporter == NULL || row < 0 ||
+        (size_t) row >= writer->reporter->size) {
+        return;
+    }
+    writer->reporter->rows[row].strategy = strategy;
+    writer->reporter->rows[row].encoded_bytes = writer->position - start;
+}
+
+static void reporter_free(reporter_t *reporter) {
+    free(reporter->rows);
+    memset(reporter, 0, sizeof(*reporter));
+}
+
 static unsigned char host_endian(void) {
     const uint16_t x = 1;
     return *((const unsigned char *) &x) == 1 ? 1 : 2;
@@ -123,7 +205,17 @@ static unsigned char host_endian(void) {
 
 static void writer_write(writer_t *writer, const void *data, size_t size) {
     if (writer->failed || size == 0) return;
-    if (fwrite(data, 1, size, writer->file) != size) writer->failed = 1;
+    if (fwrite(data, 1, size, writer->file) != size) {
+        writer->failed = 1;
+        return;
+    }
+    if (writer->reporter != NULL) {
+        if ((uint64_t) size > UINT64_MAX - writer->position) {
+            writer->failed = 1;
+            return;
+        }
+        writer->position += (uint64_t) size;
+    }
 }
 
 static void writer_u8(writer_t *writer, uint8_t value) {
@@ -665,52 +757,169 @@ static int lz4_blocks_build_buffer(const unsigned char *input,
     return 1;
 }
 
-static int lz4_blocks_build_real_xor(SEXP object, lz4_blocks_t *blocks) {
-    const double *values = REAL_RO(object);
-    R_xlen_t length = XLENGTH(object), position = 0;
+typedef struct {
+    const double *values;
+    size_t length;
+    size_t block_count;
+    size_t slot_size;
+    unsigned char *slots;
+    size_t *sizes;
+    int compressed_capacity;
+} real_xor_parallel_context_t;
+
+static int real_xor_compress_block(
+        const real_xor_parallel_context_t *context, size_t block,
+        unsigned char *transformed, char *compressed, size_t *record_size) {
+    size_t position = block * RDZ_REAL_XOR_BLOCK_VALUES;
+    size_t remaining = context->length - position;
+    size_t count = remaining < RDZ_REAL_XOR_BLOCK_VALUES ?
+        remaining : RDZ_REAL_XOR_BLOCK_VALUES;
+    size_t transformed_size = count * sizeof(uint64_t), stored_size;
+    const unsigned char *stored;
+    unsigned char *destination = context->slots + block * context->slot_size;
+    uint32_t stored_size32;
     uint64_t previous = 0;
-    size_t raw_size;
-    int built;
+    int compressed_size;
+
+    if (position != 0) {
+        memcpy(&previous, context->values + position - 1, sizeof(previous));
+    }
+    rdz_real_xor_encode_block(
+        context->values + position, count, &previous, transformed);
+    compressed_size = LZ4_compress_default(
+        (const char *) transformed, compressed, (int) transformed_size,
+        context->compressed_capacity);
+    if (compressed_size <= 0) return 0;
+    if ((size_t) compressed_size < transformed_size) {
+        stored_size = (size_t) compressed_size;
+        stored = (const unsigned char *) compressed;
+    } else {
+        stored_size = transformed_size;
+        stored = transformed;
+    }
+    stored_size32 = (uint32_t) stored_size;
+    memcpy(destination, &stored_size32, sizeof(stored_size32));
+    memcpy(destination + sizeof(stored_size32), stored, stored_size);
+    *record_size = sizeof(stored_size32) + stored_size;
+    return 1;
+}
+
+static void real_xor_parallel_worker(size_t worker_index,
+                                     size_t worker_count, void *data) {
+    real_xor_parallel_context_t *context =
+        (real_xor_parallel_context_t *) data;
+    unsigned char *transformed =
+        (unsigned char *) malloc(RDZ_LZ4_BLOCK_SIZE);
+    char *compressed = (char *) malloc((size_t) context->compressed_capacity);
+    size_t task;
+
+    if (transformed == NULL || compressed == NULL) {
+        for (task = worker_index; task + 1 < context->block_count;
+             task += worker_count) {
+            context->sizes[task + 1] = SIZE_MAX;
+        }
+        free(transformed);
+        free(compressed);
+        return;
+    }
+    for (task = worker_index; task + 1 < context->block_count;
+         task += worker_count) {
+        size_t block = task + 1;
+        if (!real_xor_compress_block(
+                context, block, transformed, compressed,
+                &context->sizes[block])) {
+            context->sizes[block] = SIZE_MAX;
+        }
+    }
+    free(transformed);
+    free(compressed);
+}
+
+static int lz4_blocks_build_real_xor(SEXP object, lz4_blocks_t *blocks,
+                                      int requested_threads) {
+    real_xor_parallel_context_t context;
+    const double *values = REAL_RO(object);
+    R_xlen_t object_length = XLENGTH(object);
+    unsigned char *transformed = NULL;
+    char *compressed = NULL;
+    size_t raw_size, allocation_size, first_raw_size, output_size = 0, i;
+    int concurrent = 1, built = 0;
 
     memset(blocks, 0, sizeof(*blocks));
-    if (length <= 0 || (uint64_t) length > SIZE_MAX / sizeof(double)) return 0;
-    raw_size = (size_t) length * sizeof(double);
-    blocks->compressed_capacity = LZ4_compressBound(RDZ_LZ4_BLOCK_SIZE);
-    if (blocks->compressed_capacity <= 0) return 0;
-    blocks->input = (unsigned char *) malloc(RDZ_LZ4_BLOCK_SIZE);
-    blocks->compressed = (char *) malloc((size_t) blocks->compressed_capacity);
-    if (blocks->input == NULL || blocks->compressed == NULL) {
-        lz4_blocks_free(blocks);
+    memset(&context, 0, sizeof(context));
+    if (object_length <= 0 ||
+        (uint64_t) object_length > SIZE_MAX / sizeof(double)) {
         return 0;
     }
+    context.values = values;
+    context.length = (size_t) object_length;
+    raw_size = context.length * sizeof(double);
+    context.block_count =
+        (context.length + RDZ_REAL_XOR_BLOCK_VALUES - 1) /
+        RDZ_REAL_XOR_BLOCK_VALUES;
+    context.slot_size = RDZ_LZ4_BLOCK_SIZE + sizeof(uint32_t);
+    if (context.block_count > SIZE_MAX / context.slot_size) return 0;
+    allocation_size = context.block_count * context.slot_size;
+    context.compressed_capacity = LZ4_compressBound(RDZ_LZ4_BLOCK_SIZE);
+    if (context.compressed_capacity <= 0) return 0;
+    context.slots = (unsigned char *) malloc(allocation_size);
+    context.sizes = (size_t *) calloc(context.block_count, sizeof(size_t));
+    transformed = (unsigned char *) malloc(RDZ_LZ4_BLOCK_SIZE);
+    compressed = (char *) malloc((size_t) context.compressed_capacity);
+    if (context.slots == NULL || context.sizes == NULL ||
+        transformed == NULL || compressed == NULL) {
+        goto cleanup;
+    }
 
-    while (position < length && !blocks->rejected) {
-        R_xlen_t remaining = length - position;
-        size_t count = remaining < RDZ_REAL_XOR_BLOCK_VALUES ?
-            (size_t) remaining : RDZ_REAL_XOR_BLOCK_VALUES;
-        rdz_real_xor_encode_block(
-            values + position, count, &previous, blocks->input);
-        blocks->input_size = count * sizeof(uint64_t);
-        if (!lz4_blocks_flush(blocks)) break;
-        if (blocks->block_count == 1 &&
-            blocks->size > count * sizeof(uint64_t) * 7 / 8) {
-            blocks->rejected = 1;
-            break;
+    if (!real_xor_compress_block(
+            &context, 0, transformed, compressed, &context.sizes[0])) {
+        goto cleanup;
+    }
+    first_raw_size = context.length < RDZ_REAL_XOR_BLOCK_VALUES ?
+        context.length * sizeof(uint64_t) : RDZ_LZ4_BLOCK_SIZE;
+    if (context.sizes[0] > first_raw_size * 7 / 8) goto cleanup;
+    free(transformed);
+    free(compressed);
+    transformed = NULL;
+    compressed = NULL;
+
+    if (context.block_count > 1) {
+        if (context.block_count >= RDZ_PARALLEL_XOR_MIN_BLOCKS &&
+            rdz_resolve_threads(requested_threads) > 1) {
+            concurrent = rdz_parallel_run(
+                requested_threads, context.block_count - 1,
+                real_xor_parallel_worker, &context);
+        } else {
+            real_xor_parallel_worker(0, 1, &context);
         }
-        position += (R_xlen_t) count;
     }
-    built = !blocks->rejected && position == length &&
-        blocks->size <= raw_size - raw_size / 8;
-    free(blocks->input);
-    free(blocks->compressed);
-    blocks->input = NULL;
-    blocks->compressed = NULL;
-    if (!built) {
-        free(blocks->data);
-        blocks->data = NULL;
-        blocks->size = 0;
-        blocks->capacity = 0;
+    for (i = 0; i < context.block_count; ++i) {
+        if (context.sizes[i] == 0 || context.sizes[i] == SIZE_MAX ||
+            context.sizes[i] > allocation_size - output_size) {
+            goto cleanup;
+        }
+        output_size += context.sizes[i];
     }
+    if (output_size > raw_size - raw_size / 8) goto cleanup;
+    output_size = 0;
+    for (i = 0; i < context.block_count; ++i) {
+        memmove(context.slots + output_size,
+                context.slots + i * context.slot_size, context.sizes[i]);
+        output_size += context.sizes[i];
+    }
+    blocks->data = context.slots;
+    blocks->size = output_size;
+    blocks->capacity = allocation_size;
+    blocks->block_count = context.block_count;
+    blocks->parallel_used = concurrent > 1;
+    context.slots = NULL;
+    built = 1;
+
+cleanup:
+    free(transformed);
+    free(compressed);
+    free(context.slots);
+    free(context.sizes);
     return built;
 }
 
@@ -822,8 +1031,8 @@ static void write_string_payload_raw(writer_t *writer, SEXP object) {
     free(chunk);
 }
 
-static void encode_strings_flat(writer_t *writer, SEXP object,
-                                int format_version) {
+static uint8_t encode_strings_flat(writer_t *writer, SEXP object,
+                                   int format_version) {
     R_xlen_t i, length = XLENGTH(object);
     uint64_t payload_size = 0;
     uint8_t common_encoding = UINT8_MAX;
@@ -848,7 +1057,7 @@ static void encode_strings_flat(writer_t *writer, SEXP object,
             uint8_t encoding = (uint8_t) normalized_encoding(string);
             if (UINT64_MAX - payload_size < string_length) {
                 writer->failed = 1;
-                return;
+                return STRING_LAYOUT_FLAT_RAW;
             }
             payload_size += string_length;
             if (common_encoding == UINT8_MAX) common_encoding = encoding;
@@ -858,21 +1067,21 @@ static void encode_strings_flat(writer_t *writer, SEXP object,
     if (common_encoding == UINT8_MAX) common_encoding = CE_NATIVE;
     if ((uint64_t) length > SIZE_MAX / sizeof(int32_t)) {
         writer->failed = 1;
-        return;
+        return STRING_LAYOUT_FLAT_RAW;
     }
     raw_lengths_size = (size_t) length * sizeof(int32_t);
     metadata_size = raw_lengths_size;
     if (mixed_encoding) {
         if ((uint64_t) length > SIZE_MAX - metadata_size) {
             writer->failed = 1;
-            return;
+            return STRING_LAYOUT_FLAT_RAW;
         }
         metadata_size += (size_t) length;
     }
     metadata = (unsigned char *) malloc(metadata_size == 0 ? 1 : metadata_size);
     if (metadata == NULL) {
         writer->failed = 1;
-        return;
+        return STRING_LAYOUT_FLAT_RAW;
     }
     lengths = metadata;
     if (mixed_encoding) encodings = metadata + (size_t) length * sizeof(int32_t);
@@ -955,13 +1164,15 @@ static void encode_strings_flat(writer_t *writer, SEXP object,
     free(metadata);
     byte_buffer_free(&rle);
     lz4_blocks_free(&blocks);
+    return use_lz4 ? STRING_LAYOUT_FLAT_LZ4 : STRING_LAYOUT_FLAT_RAW;
 }
 
 static void encode_node(writer_t *writer, SEXP object, int depth,
-                        int format_version);
+                        int format_version, int parent, uint8_t relation,
+                        uint64_t index, SEXP name);
 
 static void encode_attributes(writer_t *writer, SEXP object, int depth,
-                              int format_version) {
+                              int format_version, int parent) {
     SEXP attribute;
     uint32_t count = 0;
     for (attribute = ATTRIB(object); attribute != R_NilValue;
@@ -979,27 +1190,29 @@ static void encode_attributes(writer_t *writer, SEXP object, int depth,
         uint32_t length = (uint32_t) LENGTH(name);
         writer_u32(writer, length);
         writer_write(writer, CHAR(name), length);
-        encode_node(writer, CAR(attribute), depth + 1, format_version);
+        encode_node(writer, CAR(attribute), depth + 1, format_version,
+                    parent, REPORT_ATTRIBUTE, 0, name);
     }
 }
 
-static void encode_strings(writer_t *writer, SEXP object,
-                           int format_version) {
+static const char *encode_strings(writer_t *writer, SEXP object,
+                                  int format_version) {
     string_dict_t dict;
     R_xlen_t i, length = XLENGTH(object);
     uint8_t width;
     memset(&dict, 0, sizeof(dict));
 
     if (strings_should_use_flat(object)) {
-        encode_strings_flat(writer, object, format_version);
-        return;
+        return encode_strings_flat(writer, object, format_version) ==
+            STRING_LAYOUT_FLAT_LZ4 ? "flat strings + LZ4" :
+                                     "flat strings (raw)";
     }
 
     for (i = 0; i < length; ++i) {
         if (dict_index(&dict, STRING_ELT(object, i), 1) == UINT64_MAX) {
             writer->failed = 1;
             dict_free(&dict);
-            return;
+            return "string dictionary allocation failure";
         }
     }
 
@@ -1017,37 +1230,62 @@ static void encode_strings(writer_t *writer, SEXP object,
 
     encode_string_indexes(writer, object, &dict, width);
     dict_free(&dict);
+    if (width == 1) return "string dictionary (1-byte indexes)";
+    if (width == 2) return "string dictionary (2-byte indexes)";
+    return "string dictionary (4-byte indexes)";
 }
 
 static void encode_node(writer_t *writer, SEXP object, int depth,
-                        int format_version) {
+                        int format_version, int parent, uint8_t relation,
+                        uint64_t index, SEXP name) {
     R_xlen_t i, length;
     uint8_t type;
     size_t element_size = 0;
+    const char *type_name, *strategy;
+    uint64_t report_start = writer->position;
+    int report_row;
 
     if (writer->failed || depth > RDZ_MAX_DEPTH) {
         writer->failed = 1;
         return;
     }
     switch (TYPEOF(object)) {
-    case NILSXP: type = NODE_NIL; break;
-    case LGLSXP: type = NODE_LOGICAL; element_size = sizeof(int); break;
-    case INTSXP: type = NODE_INTEGER; element_size = sizeof(int); break;
-    case REALSXP: type = NODE_REAL; element_size = sizeof(double); break;
-    case CPLXSXP: type = NODE_COMPLEX; element_size = sizeof(Rcomplex); break;
-    case RAWSXP: type = NODE_RAW; element_size = sizeof(Rbyte); break;
-    case STRSXP: type = NODE_STRING; break;
-    case VECSXP: type = NODE_LIST; break;
+    case NILSXP:
+        type = NODE_NIL; type_name = "NULL"; strategy = "NULL"; break;
+    case LGLSXP:
+        type = NODE_LOGICAL; type_name = "logical";
+        strategy = "logical values (direct)"; element_size = sizeof(int); break;
+    case INTSXP:
+        type = NODE_INTEGER; type_name = "integer";
+        strategy = "integer values (direct)"; element_size = sizeof(int); break;
+    case REALSXP:
+        type = NODE_REAL; type_name = "double";
+        strategy = "numeric values (direct)"; element_size = sizeof(double); break;
+    case CPLXSXP:
+        type = NODE_COMPLEX; type_name = "complex";
+        strategy = "complex values (direct)"; element_size = sizeof(Rcomplex); break;
+    case RAWSXP:
+        type = NODE_RAW; type_name = "raw";
+        strategy = "raw bytes (direct)"; element_size = sizeof(Rbyte); break;
+    case STRSXP:
+        type = NODE_STRING; type_name = "character";
+        strategy = "character values"; break;
+    case VECSXP:
+        type = NODE_LIST; type_name = "list"; strategy = "list of nodes"; break;
     default:
         writer->failed = 1;
         return;
     }
 
     length = object == R_NilValue ? 0 : XLENGTH(object);
+    report_row = reporter_add(
+        writer, parent, depth, relation, index, name, type_name,
+        (uint64_t) length);
+    if (writer->failed) return;
     writer_u8(writer, type);
     writer_u8(writer, object == R_NilValue ? 0 : (uint8_t) Rf_isObject(object));
     writer_u64(writer, (uint64_t) length);
-    encode_attributes(writer, object, depth, format_version);
+    encode_attributes(writer, object, depth, format_version, report_row);
 
     if (element_size != 0) {
         if (type == NODE_LOGICAL && format_version >= 2) {
@@ -1067,6 +1305,8 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
                 writer_u8(writer, LOGICAL_ENCODING_PACKED);
                 writer_write(writer, packed, packed_size);
                 free(packed);
+                reporter_finish(writer, report_row,
+                                "logical two-bit packing", report_start);
                 return;
             }
             free(packed);
@@ -1086,6 +1326,9 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
                 writer_u8(writer, encoding.flags);
                 writer_write(writer, encoding.packed, encoding.packed_size);
                 rdz_integer_encoding_free(&encoding);
+                reporter_finish(
+                    writer, report_row,
+                    "integer frame-of-reference bit packing", report_start);
                 return;
             }
             writer_u8(writer, INTEGER_ENCODING_DIRECT);
@@ -1116,20 +1359,33 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
                 }
                 lz4_blocks_free(&blocks);
                 rdz_real_dictionary_free(&dictionary);
+                reporter_finish(
+                    writer, report_row,
+                    use_lz4 ?
+                        "numeric dictionary + bit-packed indexes + LZ4" :
+                        "numeric dictionary + bit-packed indexes",
+                    report_start);
                 return;
             }
             if (rdz_real_sequence_build(object, &sequence)) {
                 writer_u8(writer, REAL_ENCODING_SEQUENCE);
                 writer_u64(writer, sequence.base);
                 writer_u64(writer, sequence.delta);
+                reporter_finish(writer, report_row,
+                                "exact constant-delta numeric sequence",
+                                report_start);
                 return;
             }
             {
                 lz4_blocks_t blocks;
-                if (lz4_blocks_build_real_xor(object, &blocks)) {
+                if (lz4_blocks_build_real_xor(object, &blocks, 0)) {
                     writer_u8(writer, REAL_ENCODING_XOR_LZ4);
                     writer_write(writer, blocks.data, blocks.size);
                     lz4_blocks_free(&blocks);
+                    reporter_finish(
+                        writer, report_row,
+                        "numeric XOR-delta + byte transpose + LZ4",
+                        report_start);
                     return;
                 }
                 lz4_blocks_free(&blocks);
@@ -1142,13 +1398,22 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
         }
         writer_write(writer, DATAPTR_RO(object), (size_t) length * element_size);
     } else if (type == NODE_STRING) {
-        encode_strings(writer, object, format_version);
+        strategy = encode_strings(writer, object, format_version);
     } else if (type == NODE_LIST) {
+        SEXP names = Rf_getAttrib(object, R_NamesSymbol);
         for (i = 0; i < length; ++i) {
+            SEXP child_name = R_NilValue;
+            if (TYPEOF(names) == STRSXP && XLENGTH(names) == length &&
+                STRING_ELT(names, i) != NA_STRING &&
+                LENGTH(STRING_ELT(names, i)) != 0) {
+                child_name = STRING_ELT(names, i);
+            }
             encode_node(writer, VECTOR_ELT(object, i), depth + 1,
-                        format_version);
+                        format_version, report_row, REPORT_ELEMENT,
+                        (uint64_t) i + 1, child_name);
         }
     }
+    reporter_finish(writer, report_row, strategy, report_start);
 }
 
 static SEXP decode_node(reader_t *reader, int depth, int format_version);
@@ -1565,7 +1830,7 @@ static SEXP save_body(void *data) {
 
     if (context->codec == RDZ_CODEC_NATIVE) {
         encode_node(&context->writer, context->object, 0,
-                    context->format_version);
+                    context->format_version, -1, REPORT_ROOT, 0, R_NilValue);
     } else {
         R_InitOutPStream(&stream, (R_pstream_data_t) &context->writer,
                          R_pstream_binary_format, 3,
@@ -1626,6 +1891,232 @@ SEXP C_rdz_save(SEXP object, SEXP path, SEXP mode_sexp, SEXP preset_sexp) {
 }
 
 typedef struct {
+    save_context_t save;
+    reporter_t reporter;
+    const char *fallback_strategy;
+} explain_context_t;
+
+static uint64_t report_object_length(SEXP object) {
+    switch (TYPEOF(object)) {
+    case LGLSXP:
+    case INTSXP:
+    case REALSXP:
+    case CPLXSXP:
+    case STRSXP:
+    case VECSXP:
+    case EXPRSXP:
+    case RAWSXP:
+        return (uint64_t) XLENGTH(object);
+    default:
+        return UINT64_MAX;
+    }
+}
+
+static SEXP explain_body(void *data) {
+    explain_context_t *context = (explain_context_t *) data;
+    int row;
+
+    (void) save_body(&context->save);
+    if (context->save.codec == RDZ_CODEC_NATIVE) {
+        if (context->reporter.size != 0) {
+            context->reporter.rows[0].encoded_bytes +=
+                sizeof(RDZ_MAGIC_V1) + 4;
+        }
+    } else {
+        row = reporter_add(
+            &context->save.writer, -1, 0, REPORT_ROOT, 0, R_NilValue,
+            type2char(TYPEOF(context->save.object)),
+            report_object_length(context->save.object));
+        reporter_finish(
+            &context->save.writer, row, context->fallback_strategy, 0);
+    }
+    return R_NilValue;
+}
+
+static void explain_cleanup(void *data, Rboolean jump) {
+    explain_context_t *context = (explain_context_t *) data;
+    save_cleanup(&context->save, jump);
+    if (jump) reporter_free(&context->reporter);
+}
+
+static const char *report_relation_name(uint8_t relation) {
+    if (relation == REPORT_ATTRIBUTE) return "attribute";
+    if (relation == REPORT_ELEMENT) return "element";
+    return "root";
+}
+
+static SEXP reporter_dataframe(const reporter_t *reporter, const char *codec) {
+    const int column_count = 10;
+    const char *column_labels[] = {
+        "path", "relation", "name", "index", "depth", "type", "length",
+        "codec", "strategy", "encoded_bytes"
+    };
+    R_xlen_t count = (R_xlen_t) reporter->size, i;
+    SEXP result = PROTECT(Rf_allocVector(VECSXP, column_count));
+    SEXP paths = PROTECT(Rf_allocVector(STRSXP, count));
+    SEXP relations = PROTECT(Rf_allocVector(STRSXP, count));
+    SEXP names = PROTECT(Rf_allocVector(STRSXP, count));
+    SEXP indexes = PROTECT(Rf_allocVector(REALSXP, count));
+    SEXP depths = PROTECT(Rf_allocVector(INTSXP, count));
+    SEXP types = PROTECT(Rf_allocVector(STRSXP, count));
+    SEXP lengths = PROTECT(Rf_allocVector(REALSXP, count));
+    SEXP codecs = PROTECT(Rf_allocVector(STRSXP, count));
+    SEXP strategies = PROTECT(Rf_allocVector(STRSXP, count));
+    SEXP bytes = PROTECT(Rf_allocVector(REALSXP, count));
+    SEXP column_names = PROTECT(Rf_allocVector(STRSXP, column_count));
+    SEXP row_names = PROTECT(Rf_allocVector(INTSXP, 2));
+    SEXP data_frame_class = PROTECT(Rf_mkString("data.frame"));
+
+    for (i = 0; i < count; ++i) {
+        const report_row_t *row = &reporter->rows[i];
+        char *path;
+
+        if (row->parent < 0) {
+            path = (char *) R_alloc(2, sizeof(char));
+            memcpy(path, "$", 2);
+        } else {
+            const char *parent_path;
+            size_t path_size;
+            if (row->parent >= (int) i) {
+                Rf_error("invalid serialization report hierarchy");
+            }
+            parent_path = CHAR(STRING_ELT(paths, row->parent));
+            if (row->relation == REPORT_ATTRIBUTE) {
+                const char *attribute_name = row->name == R_NilValue ? "" :
+                    Rf_translateCharUTF8(row->name);
+                size_t parent_length = strlen(parent_path);
+                size_t attribute_length = strlen(attribute_name);
+                if (parent_length > SIZE_MAX - 2 ||
+                    attribute_length > SIZE_MAX - parent_length - 2) {
+                    Rf_error("serialization report path is too long");
+                }
+                path_size = parent_length + attribute_length + 2;
+                path = (char *) R_alloc(path_size, sizeof(char));
+                snprintf(path, path_size, "%s@%s",
+                         parent_path, attribute_name);
+            } else {
+                char suffix[64];
+                size_t parent_length, suffix_length;
+                snprintf(suffix, sizeof(suffix), "[[%llu]]",
+                         (unsigned long long) row->index);
+                parent_length = strlen(parent_path);
+                suffix_length = strlen(suffix);
+                if (parent_length > SIZE_MAX - 1 ||
+                    suffix_length > SIZE_MAX - parent_length - 1) {
+                    Rf_error("serialization report path is too long");
+                }
+                path_size = parent_length + suffix_length + 1;
+                path = (char *) R_alloc(path_size, sizeof(char));
+                snprintf(path, path_size, "%s%s", parent_path, suffix);
+            }
+        }
+        SET_STRING_ELT(paths, i, Rf_mkCharCE(path, CE_UTF8));
+        SET_STRING_ELT(relations, i, Rf_mkChar(report_relation_name(row->relation)));
+        SET_STRING_ELT(names, i, row->name == R_NilValue ? NA_STRING :
+                       row->name);
+        REAL(indexes)[i] = row->relation == REPORT_ELEMENT ?
+            (double) row->index : NA_REAL;
+        INTEGER(depths)[i] = row->depth;
+        SET_STRING_ELT(types, i, Rf_mkChar(row->type));
+        REAL(lengths)[i] = row->length == UINT64_MAX ?
+            NA_REAL : (double) row->length;
+        SET_STRING_ELT(codecs, i, Rf_mkChar(codec));
+        SET_STRING_ELT(strategies, i, Rf_mkChar(row->strategy));
+        REAL(bytes)[i] = (double) row->encoded_bytes;
+    }
+    SET_VECTOR_ELT(result, 0, paths);
+    SET_VECTOR_ELT(result, 1, relations);
+    SET_VECTOR_ELT(result, 2, names);
+    SET_VECTOR_ELT(result, 3, indexes);
+    SET_VECTOR_ELT(result, 4, depths);
+    SET_VECTOR_ELT(result, 5, types);
+    SET_VECTOR_ELT(result, 6, lengths);
+    SET_VECTOR_ELT(result, 7, codecs);
+    SET_VECTOR_ELT(result, 8, strategies);
+    SET_VECTOR_ELT(result, 9, bytes);
+    for (i = 0; i < column_count; ++i) {
+        SET_STRING_ELT(column_names, i, Rf_mkChar(column_labels[i]));
+    }
+    INTEGER(row_names)[0] = NA_INTEGER;
+    INTEGER(row_names)[1] = -(int) count;
+    Rf_setAttrib(result, R_NamesSymbol, column_names);
+    Rf_setAttrib(result, R_RowNamesSymbol, row_names);
+    Rf_setAttrib(result, R_ClassSymbol, data_frame_class);
+    UNPROTECT(14);
+    return result;
+}
+
+typedef struct {
+    reporter_t *reporter;
+    const char *codec;
+} reporter_dataframe_context_t;
+
+static SEXP reporter_dataframe_body(void *data) {
+    reporter_dataframe_context_t *context =
+        (reporter_dataframe_context_t *) data;
+    return reporter_dataframe(context->reporter, context->codec);
+}
+
+static void reporter_dataframe_cleanup(void *data, Rboolean jump) {
+    reporter_dataframe_context_t *context =
+        (reporter_dataframe_context_t *) data;
+    if (jump) reporter_free(context->reporter);
+}
+
+SEXP C_rdz_explain(SEXP object, SEXP mode_sexp, SEXP preset_sexp) {
+    int mode = Rf_asInteger(mode_sexp);
+    int preset = Rf_asInteger(preset_sexp);
+    int supported, codec;
+    sexp_stack_t stack;
+    explain_context_t context;
+    reporter_dataframe_context_t dataframe_context;
+    SEXP continuation, result;
+
+    if (mode < 0 || mode > 2) Rf_error("invalid codec mode");
+    if (preset < 0 || preset > 1) Rf_error("invalid rdz preset");
+    memset(&stack, 0, sizeof(stack));
+    supported = native_supported(object, &stack, 0);
+    free(stack.items);
+    if (mode == 1 && !supported) {
+        Rf_error("object is not supported by the native codec");
+    }
+    codec = mode == 2 || !supported ? RDZ_CODEC_R : RDZ_CODEC_NATIVE;
+
+    memset(&context, 0, sizeof(context));
+    context.save.object = object;
+    context.save.codec = codec;
+    context.save.format_version = preset == 1 ? 2 : 1;
+    context.fallback_strategy = mode == 2 ?
+        "R serialization stream (forced)" :
+        "R serialization stream (native codec unsupported or ALTREP)";
+    context.save.writer.reporter = &context.reporter;
+    context.save.writer.file = tmpfile();
+    if (context.save.writer.file == NULL) {
+        Rf_error("cannot create temporary serialization stream: %s",
+                 strerror(errno));
+    }
+    (void) setvbuf(context.save.writer.file, NULL, _IOFBF, 1024 * 1024);
+    continuation = PROTECT(R_MakeUnwindCont());
+    R_UnwindProtect(
+        explain_body, &context, explain_cleanup, &context, continuation);
+    UNPROTECT(1);
+    if (context.save.writer.failed) {
+        reporter_free(&context.reporter);
+        Rf_error("failed while planning rdz serialization");
+    }
+    dataframe_context.reporter = &context.reporter;
+    dataframe_context.codec = codec == RDZ_CODEC_NATIVE ?
+        "native" : "R serialization";
+    continuation = PROTECT(R_MakeUnwindCont());
+    result = PROTECT(R_UnwindProtect(
+        reporter_dataframe_body, &dataframe_context,
+        reporter_dataframe_cleanup, &dataframe_context, continuation));
+    reporter_free(&context.reporter);
+    UNPROTECT(2);
+    return result;
+}
+
+typedef struct {
     reader_t reader;
 #ifdef _WIN32
     unsigned char *allocation;
@@ -1649,7 +2140,7 @@ static SEXP read_body(void *data) {
     } else if (memcmp(magic, RDZ_MAGIC_V2, sizeof(magic)) == 0) {
         format_version = 2;
     } else {
-        Rf_error("not a rdz file");
+        Rf_error("not an rdz file");
     }
     codec = reader_u8(reader);
     reader_read(reader, architecture, sizeof(architecture));

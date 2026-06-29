@@ -2,10 +2,18 @@
 % Please edit documentation in R/rdz.R
 \name{write_rdz}
 \alias{write_rdz}
+\alias{write_fastrds}
 \alias{fast_save}
 \title{Write an R object using the rdz format}
 \usage{
 write_rdz(
+  object,
+  file,
+  codec = c("auto", "native", "r"),
+  preset = c("speed", "balanced")
+)
+
+write_fastrds(
   object,
   file,
   codec = c("auto", "native", "r"),
@@ -22,7 +30,7 @@ fast_save(
 \arguments{
 \item{object}{An R object.}
 
-\item{file}{A file path.}
+\item{file}{A file path, conventionally ending in `.rdz`.}
 
 \item{codec}{One of `"auto"`, `"native"`, or `"r"`. `"native"` errors
 rather than falling back when the object is unsupported.}

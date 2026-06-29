@@ -1,17 +1,13 @@
 # rdz
 
-<!-- badges: start -->
-[![R-CMD-check](https://github.com/pedrobtz/rdz/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/rdz/actions/workflows/R-CMD-check.yaml)
-<!-- badges: end -->
-
 `rdz` is an experiment in minimizing R object serialization latency. It
 uses two codecs:
 
 - A native codec for atomic vectors, strings, lists, matrices, and data frames.
   The speed preset stores values directly; the balanced preset adds selective
-  bit-packing, dictionaries, sequences, XOR-delta and string byte transforms,
-  and LZ4 blocks. Sampled cardinality selects dictionary encoding for repeated
-  strings and a batched flat layout for mostly unique strings.
+  bit-packing, dictionaries, sequences, XOR-delta byte transforms, and LZ4
+  blocks. Sampled cardinality selects dictionary encoding for repeated strings
+  and a batched flat layout for mostly unique strings.
 - A direct, uncompressed R serialization stream for everything else.
 
 The native reader memory-maps files on POSIX systems. The design intentionally
@@ -23,16 +19,35 @@ write_rdz(object, "object.rdz")
 object <- read_rdz("object.rdz")
 ```
 
+`.rdz` is the conventional file extension. The on-disk version tags remain
+`FASTRDS1` and `FASTRDS2`, so files created before the package rename remain
+readable. `write_fastrds()`, `read_fastrds()`, and `explain_fastrds()` are
+retained as compatibility aliases.
+
 Use `codec = "native"` to require the fast native path, or `codec = "r"` to
 force general R serialization. The default `"auto"` selects the native path
 when it can preserve the object and otherwise falls back automatically.
 ALTREP vectors deliberately use the R serialization path so compact sequences
 and deferred representations are not materialized on disk.
 
+Use `explain_rdz()` to inspect the codec and exact strategy that would be
+selected without retaining an output file:
+
+```r
+explain_rdz(object, preset = "balanced")
+```
+
+The result is a data frame with rows for the root, attributes, and list
+elements. It reports types, lengths, selected strategies, and encoded byte
+counts; the root byte count equals the complete file size. The function runs
+the real serializer into a temporary stream, so it has approximately the same
+scanning and compression cost as writing the object.
+
 ## Balanced encoding
 
 The default `preset = "speed"` retains the original direct-storage format.
-`preset = "balanced"` writes the versioned `RDZFILE2` format. Logical vectors
+`preset = "balanced"` writes the versioned `FASTRDS2` format tag retained for
+backward compatibility. Logical vectors
 use two bits per value, including `NA`. Integer vectors needing at most eight
 bits use a frame-of-reference representation with bit-packed offsets and a
 reserved `NA` code only when needed. Numeric vectors are sampled before codec selection:
@@ -45,14 +60,12 @@ byte-transposed in fixed 8,192-value blocks before LZ4 compression. A cheap
 first-block control point and the complete payload must both save at least
 12.5%; otherwise the vector remains direct and pays only a one-byte format tag.
 
-High-cardinality character vectors use the flat layout. Balanced mode samples
-one bounded block and chooses among ordinary LZ4, positional byte transposition,
-and prefix/suffix coding. The selected transform uses blocks of at most 2,048
-strings and 64 KiB of source bytes; strings wider than 1,024 bytes retain the
-ordinary layout. String lengths use run-length encoded varints when smaller.
-The selected complete layout, including block framing and length metadata, must
-beat raw storage. Incompressible strings remain raw, and the speed preset
-retains its original bytes.
+High-cardinality character vectors use the flat layout. In balanced mode, the
+flat payload is split into independent 64 KiB LZ4 blocks and string lengths use
+run-length encoded varints when that representation is smaller. Compression is
+selected only when the complete encoded layout, including block framing and
+length metadata, is smaller than the raw layout. Incompressible strings remain
+raw, and the speed preset retains its original bytes.
 
 ```r
 write_rdz(object, "object.rdz", preset = "balanced")
@@ -92,17 +105,11 @@ rdz produced a 17.40 MiB file versus 30.52 MiB for speed mode and 13.87 MiB
 for default qs2; it wrote in 93.1 ms and read in 28.9 ms versus 251.5 ms and
 47.7 ms for default qs2.
 
-For one million structured unique strings, prefix/suffix coding reduced the
-balanced file from 4.85 MiB to 0.084 MiB, versus 0.362 MiB for default qs2 and
-0.400 MiB for qdata. Balanced rdz wrote it in 120.4 ms versus 94.8 ms for
-qs2 and 58.5 ms for qdata, then read it in 92.9 ms versus 131.7 ms and 101.9 ms.
-Random fixed-width strings remained raw.
-
 For the 500,000-row unique-string data frame in the fst benchmark, balanced
-encoding reduced the file from 17.64 MiB to 4.27 MiB, versus 8.47 MiB for fst.
-The added compression is primarily a write-time tradeoff: balanced write and
-read times were 74.7 ms and 48.1 ms. Speed-mode rdz wrote in 28.1 ms versus
-fst's fastest 33.4 ms and read in 47.8 ms versus fst's 48.4 ms.
+encoding reduced the file from 17.64 MiB to 6.66 MiB, versus 8.47 MiB for fst.
+The added compression is a size/latency tradeoff. In the OpenMP comparison,
+speed-mode rdz wrote in 26.44 ms versus fst's fastest 32.18 ms and read in
+47.95 ms versus fst's fastest 49.18 ms.
 
 ## Benchmark
 
@@ -118,12 +125,19 @@ For the data-frame comparison against `fst`, run:
 Rscript inst/benchmarks/data-frames-fst.R
 ```
 
-The script explicitly defaults fst to one thread and records both requested and
-effective counts. Set `RDZ_FST_THREADS=0` to request all available fst
-threads; availability depends on how fst was built.
+The script requests all available fst threads by default and records both the
+requested and effective counts. Set `RDZ_FST_THREADS=1` for a single-threaded
+control; availability depends on how fst was built.
 
 Its methodology and latest results are documented in
 `inst/benchmarks/data-frames-fst-results.md`.
+
+With an OpenMP-enabled fst build on six cores, compressed fst improved by 1.24x
+for writes and 1.44x for reads geometrically when each workload could use its
+best thread count. The effect ranged from negligible for unique strings to
+1.81x writes and 2.83x reads for temporal data. Uncompressed fst did not scale
+materially. Against each workload's fastest fst mode and thread count, rdz
+remained 2.00x faster for writes and 1.73x for reads geometrically.
 
 Dictionary indexes are emitted through a 64 KiB buffer. For a one-million-row
 column cycling through 100 strings, buffering reduced median write time from

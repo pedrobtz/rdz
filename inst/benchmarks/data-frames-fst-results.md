@@ -1,46 +1,67 @@
 # Data-frame benchmark against fst
 
-This benchmark compares `rdz` speed and balanced presets with `fst` 0.9.8
-at compression levels 0 and 50. It uses `fstcore` 0.10.0, R 4.5.2, one
-explicitly configured and recorded fst thread, five seeded iterations, and
-strict `identical()` validation. Every rdz file is checked to ensure it used
-the native codec rather than the R serialization fallback. The installed macOS
-fst binary exposes only one effective thread on this host: requesting either
-one or all available threads reports one. Multithreaded fst therefore remains
-unmeasured here.
+This benchmark compares `rdz` speed and balanced presets with `fst` 0.9.8 at
+compression levels 0 and 50. It uses `fstcore` 0.10.0 rebuilt with OpenMP,
+libomp 22.1.8, R 4.5.2, and an x86-64 macOS host with six physical and six
+logical cores. The benchmark ran with 1, 2, 4, and 6 effective fst threads,
+seven seeded iterations per configuration, strict `identical()` validation,
+and one million rows except for the 500,000-row unique-string case. Every rdz
+file was checked to ensure it used the native codec.
 
-The table compares the fastest rdz and fst mode for each operation. A
-speedup above one favors rdz. The size ratio compares rdz balanced with
-fst compression level 50; a ratio below one favors rdz.
+The CRAN macOS fst binary used previously was not linked to OpenMP and resolved
+every thread request to one. These results therefore use a temporary source
+build linked to libomp; both requested and effective thread counts were checked
+before every run.
 
-| case | write speedup | read speedup | size ratio |
+## Importance of fst parallelism
+
+The table reports fst's default compressed mode because that is where OpenMP
+has the largest effect. The best time is selected from the 1-, 2-, 4-, and
+6-thread runs. Speedup is the one-thread time divided by that best time.
+
+| case | write 1t | best write | write scaling | read 1t | best read | read scaling |
+|---|---:|---:|---:|---:|---:|---:|
+| mixed | 77.33 ms | 60.41 ms (4t) | 1.28x | 67.56 ms | 58.11 ms (4t) | 1.16x |
+| wide numeric | 41.78 ms | 41.78 ms (1t) | 1.00x | 23.02 ms | 15.63 ms (6t) | 1.47x |
+| repeated | 39.85 ms | 32.13 ms (4t) | 1.24x | 48.26 ms | 38.32 ms (4t) | 1.26x |
+| unique strings | 32.95 ms | 32.18 ms (2t) | 1.02x | 53.69 ms | 52.43 ms (4t) | 1.02x |
+| temporal | 42.20 ms | 23.27 ms (4t) | 1.81x | 25.49 ms | 9.01 ms (6t) | 2.83x |
+
+Geometric-mean best scaling was 1.24x for compressed writes and 1.44x for
+compressed reads. Uncompressed fst did not scale materially: comparing one
+with six threads gave geometric-mean factors of 1.02x for writes and 0.98x for
+reads. Parallelism is therefore important for selected compression-heavy
+workloads, but it is not the primary explanation for fst performance on every
+data shape. Four threads were usually best for compressed writes; six threads
+sometimes added overhead.
+
+## Comparison with rdz
+
+The table compares the fastest rdz preset with the fastest fst combination of
+compression mode and thread count. rdz timings are the median of the four
+per-thread-run medians, making them independent of fst's selected thread count.
+A speedup above one favors rdz. The size ratio compares rdz balanced with fst
+compression level 50.
+
+| case | write speedup | read speedup | balanced/fst size |
 |---|---:|---:|---:|
-| mixed | 2.17x | 2.85x | 0.63x |
-| repeated | 1.81x | 2.84x | 0.32x |
-| temporal | 5.47x | 2.04x | 0.30x |
-| unique strings | 1.16x | 0.99x | 0.79x |
-| wide numeric | 4.22x | 1.70x | 1.00x |
+| mixed | 2.11x | 2.80x | 0.63x |
+| wide numeric | 3.24x | 1.26x | 1.00x |
+| repeated | 1.62x | 2.57x | 0.32x |
+| unique strings | 1.22x | 1.03x | 0.79x |
+| temporal | 2.41x | 1.69x | 0.30x |
 
-Across the five workloads, rdz won all writes and four of five reads; the
-unique-string read result was effectively tied at 51.49 ms versus 51.03 ms. The
-geometric-mean speedups were 2.53x for writes and 1.95x for reads. The
-geometric-mean balanced/default-fst size ratio was 0.54x.
+rdz won all five writes and reads, although the unique-string read was
+effectively tied at 47.95 ms versus 49.18 ms. Geometric-mean rdz speedups were
+2.00x for writes and 1.73x for reads. With fst restricted to one thread, the
+corresponding controlled speedups were 2.37x and 1.93x. Allowing fst its best
+thread count therefore reduced rdz's aggregate lead by about 16% for writes and
+10% for reads, without changing the winner.
 
-fst applies type-specific block codecs: 16 KB blocks for fixed-width columns
-and 2047-value blocks for strings, with two-bit logical packing, byte-shuffled
-integer compression, compact factor indexes, and LZ4 or ZSTD over numeric and
-flattened string payloads. rdz packs logicals and integer ranges requiring
-at most eight bits and buffers dictionary index output. Balanced flat strings
-use independent 64 KiB LZ4 blocks and run-length encoded varints for the length
-vector, selecting the compressed layout only when its complete stored size is
-smaller. XOR-delta byte transposition reduced the unique-string frame, which
-contains a uniform numeric column, to 6.66 MiB versus 8.47 MiB for default fst.
-This is a size/latency tradeoff: balanced rdz wrote it in 78.09 ms and read
-it in 61.31 ms, while speed-mode rdz and the fastest fst modes took 29.18 ms
-versus 33.72 ms to write and 51.49 ms versus 51.03 ms to read. Compressible
-numeric dictionary indexes use the same block codec; this reduced the repeated
-frame from 2.27 to 2.03 MiB. The temporal frame fell to 4.65 MiB versus 15.60
-MiB for default fst.
+Balanced rdz files remained 0.54x the size of default fst files geometrically.
+The repeated frame was 2.03 MiB versus 6.40 MiB, the temporal frame was 4.65
+MiB versus 15.60 MiB, and the unique-string frame was 6.66 MiB versus 8.47 MiB.
 
 These results are specific to this machine and warm local storage. Run
-`data-frames-fst.R` to measure the current checkout on other systems.
+`data-frames-fst.R` with `RDZ_FST_THREADS` set to the desired thread count to
+measure the current checkout on other systems.

@@ -1,4 +1,0 @@
-# Mirror of src/Makevars for Windows builds. C_VISIBILITY is typically empty on
-# Windows (symbol export is controlled by registration), so this is a no-op that
-# keeps the two configurations in parity.
-PKG_CFLAGS = $(C_VISIBILITY)

@@ -1,17 +1,5 @@
-# R build artifacts
 *.Rcheck/
 *.tar.gz
 src/*.o
 src/*.so
 src/*.dll
-src/*.dylib
-src/symbols.rds
-
-# R session / project files
-.Rhistory
-.RData
-.Rproj.user/
-.Ruserdata
-
-# OS junk
-.DS_Store

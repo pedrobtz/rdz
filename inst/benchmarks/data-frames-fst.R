@@ -4,7 +4,7 @@ library(fst)
 iterations <- as.integer(Sys.getenv("RDZ_BENCH_ITERATIONS", "5"))
 n <- as.integer(Sys.getenv("RDZ_FST_N", "1000000"))
 output <- Sys.getenv("RDZ_BENCH_OUTPUT", tempfile(fileext = ".csv"))
-fst_threads_requested <- as.integer(Sys.getenv("RDZ_FST_THREADS", "1"))
+fst_threads_requested <- as.integer(Sys.getenv("RDZ_FST_THREADS", "0"))
 
 if (length(fst_threads_requested) != 1L || is.na(fst_threads_requested) ||
     fst_threads_requested < 0L) {
@@ -44,7 +44,7 @@ measure <- function(functions, validate = NULL) {
 assert_native_rdz <- function(path) {
   header <- readBin(path, "raw", n = 9L)
   if (length(header) != 9L ||
-      !rawToChar(header[seq_len(8L)]) %in% c("RDZFILE1", "RDZFILE2") ||
+      !rawToChar(header[seq_len(8L)]) %in% c("FASTRDS1", "FASTRDS2") ||
       as.integer(header[[9L]]) != 1L) {
     stop("benchmark object did not use the native rdz codec", call. = FALSE)
   }

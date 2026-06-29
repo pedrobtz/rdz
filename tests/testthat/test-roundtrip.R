@@ -192,6 +192,123 @@ test_that("codec selection is enforced", {
   expect_identical(roundtrip(x, "r", "balanced"), x)
 })
 
+test_that("legacy function names remain compatible aliases", {
+  expect_identical(write_fastrds, write_rdz)
+  expect_identical(read_fastrds, read_rdz)
+  expect_identical(explain_fastrds, explain_rdz)
+
+  path <- tempfile(fileext = ".rdz")
+  x <- c(1L, 2L, NA_integer_)
+  expect_identical(write_fastrds(x, path), invisible(path))
+  expect_identical(read_fastrds(path), x)
+})
+
+test_that("serialization plans describe native node strategies", {
+  sequence <- numeric(3000L)
+  sequence[] <- seq_len(3000L)
+  set.seed(20260629)
+  x <- list(
+    logical = rep(c(TRUE, FALSE, NA), 1000L),
+    integer = rep(seq_len(100L), 30L),
+    repeated = rep(c(0, 1, NA_real_), 1000L),
+    sequence = sequence,
+    random = runif(3000L),
+    strings = sprintf("unique-%06d", seq_len(3000L))
+  )
+  plan <- explain_rdz(x, preset = "balanced")
+  path <- tempfile(fileext = ".rdz")
+  write_rdz(x, path, preset = "balanced")
+
+  expect_s3_class(plan, "data.frame")
+  expect_named(plan, c(
+    "path", "relation", "name", "index", "depth", "type", "length",
+    "codec", "strategy", "encoded_bytes"
+  ))
+  expect_identical(plan$path, c(
+    "$", "$@names", "$[[1]]", "$[[2]]", "$[[3]]", "$[[4]]",
+    "$[[5]]", "$[[6]]"
+  ))
+  expect_identical(plan$name, c(
+    NA_character_, "names", names(x)
+  ))
+  expect_true(all(plan$codec == "native"))
+  expect_identical(plan$encoded_bytes[[1L]], as.numeric(file.info(path)$size))
+  expect_match(plan$strategy[which(plan$name == "logical")], "two-bit")
+  expect_match(plan$strategy[which(plan$name == "integer")], "frame-of-reference")
+  expect_match(plan$strategy[which(plan$name == "repeated")], "numeric dictionary")
+  expect_match(plan$strategy[which(plan$name == "sequence")], "constant-delta")
+  expect_match(plan$strategy[which(plan$name == "random")], "XOR-delta")
+  expect_identical(
+    plan$strategy[which(plan$name == "strings")],
+    "flat strings + LZ4"
+  )
+
+  speed <- explain_rdz(x, preset = "speed")
+  expect_match(speed$strategy[which(speed$name == "logical")], "direct")
+  expect_match(speed$strategy[which(speed$name == "integer")], "direct")
+  expect_match(speed$strategy[which(speed$name == "random")], "direct")
+  expect_match(speed$strategy[which(speed$name == "strings")], "raw")
+})
+
+test_that("serialization plans explain fallback and forced codecs", {
+  fn <- function(x) x + 1
+  environment(fn) <- emptyenv()
+  fallback <- explain_rdz(fn)
+  fallback_path <- tempfile(fileext = ".rdz")
+  write_rdz(fn, fallback_path)
+  expect_equal(nrow(fallback), 1L)
+  expect_identical(fallback$codec, "R serialization")
+  expect_match(fallback$strategy, "native codec unsupported or ALTREP")
+  expect_true(is.na(fallback$length))
+  expect_identical(
+    fallback$encoded_bytes,
+    unname(as.numeric(file.info(fallback_path)$size))
+  )
+
+  altrep <- explain_rdz(seq_len(1000L))
+  expect_identical(altrep$codec, "R serialization")
+  expect_equal(altrep$length, 1000)
+  expect_match(altrep$strategy, "ALTREP")
+
+  forced <- explain_rdz(c(1, 2, 3), codec = "r")
+  forced_path <- tempfile(fileext = ".rdz")
+  write_rdz(c(1, 2, 3), forced_path, codec = "r")
+  expect_identical(forced$codec, "R serialization")
+  expect_equal(forced$length, 3)
+  expect_match(forced$strategy, "forced")
+  expect_identical(
+    forced$encoded_bytes,
+    unname(as.numeric(file.info(forced_path)$size))
+  )
+
+  expect_error(explain_rdz(function() NULL, codec = "native"),
+               "not supported")
+})
+
+test_that("serialization plans preserve nested paths and names", {
+  outer_name <- enc2utf8("gr\u00f6sse")
+  values <- integer(3L)
+  values[] <- seq_len(3L)
+  x <- setNames(list(list(inner = values)), outer_name)
+  plan <- explain_rdz(x)
+
+  expect_identical(plan$path, c(
+    "$", "$@names", "$[[1]]", "$[[1]]@names", "$[[1]][[1]]"
+  ))
+  expect_identical(
+    plan$name[which(plan$relation == "element")],
+    c(outer_name, "inner")
+  )
+  expect_identical(
+    plan$index[which(plan$relation == "element")],
+    c(1, 1)
+  )
+  expect_identical(
+    plan$depth[which(plan$relation == "element")],
+    c(1L, 2L)
+  )
+})
+
 test_that("ALTREP objects retain their compact R representation", {
   path <- tempfile(fileext = ".rdz")
   x <- seq_len(1000000L)
@@ -328,8 +445,8 @@ test_that("balanced preset dictionary-encodes low-cardinality numerics", {
     as.integer(readBin(balanced_path, "raw", n = 27L)[[27L]]), 3L
   )
   expect_lt(file.info(balanced_path)$size, file.info(speed_path)$size / 100)
-  expect_identical(rawToChar(readBin(speed_path, "raw", n = 8L)), "RDZFILE1")
-  expect_identical(rawToChar(readBin(balanced_path, "raw", n = 8L)), "RDZFILE2")
+  expect_identical(rawToChar(readBin(speed_path, "raw", n = 8L)), "FASTRDS1")
+  expect_identical(rawToChar(readBin(balanced_path, "raw", n = 8L)), "FASTRDS2")
 })
 
 test_that("balanced numeric bit widths round trip exactly", {

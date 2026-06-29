@@ -11,9 +11,8 @@ Description: Provides a native serialization path for common R
     integer offsets, and stores exact constant-delta numeric sequences
     compactly. High-cardinality doubles can use an exact XOR-delta and
     byte-transpose transform with independent LZ4 blocks when it saves at least
-    12.5 percent. High-cardinality strings adapt between flat LZ4, positional
-    byte transposition, and prefix/suffix coding using a bounded first-block
-    selector. String lengths use run-length encoded metadata when smaller.
+    12.5 percent. Flat string payloads use independent LZ4 blocks and run-length
+    encoded metadata only when the combined representation is smaller.
     Unsupported objects automatically fall back to R's general serialization
     format.
 License: MIT + file LICENSE

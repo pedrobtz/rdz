@@ -1,8 +1,2 @@
-# Hide internal symbols so the shared object exports only the registered entry
-# point (R_init_rdz, marked attribute_visible in init.c). This keeps the
-# vendored LZ4 symbols and the codec helpers private to the package.
-#
-# Optimization flags are intentionally left to R's configuration ($(CFLAGS)).
-# CRAN policy forbids overriding them here (e.g. -O3 / -march=native), so any
-# vectorization gains must come from code that the default -O2 can optimize.
-PKG_CFLAGS = $(C_VISIBILITY)
+PKG_CFLAGS = -pthread
+PKG_LIBS = -pthread
