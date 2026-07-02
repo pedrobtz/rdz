@@ -21,4 +21,5 @@
 ^\.claude$
 ^tests/testthat/_problems$
 ^AGENTS\.md$
+^CLAUDE[.]md$
 ^src/vendor/lz4/.*[.](o|a|so|dll)$

@@ -1,12 +1,37 @@
 # rdz work in progress
 
-Updated: 2026-06-29
+Updated: 2026-07-02
 
 ## Goal
 
 Build a low-latency R object serializer with a stable speed-first format and an
 optional balanced format that reduces file size only where the transform has a
 defensible performance tradeoff.
+
+## Active implementation — 2026-07-02
+
+1. **Completed:** top-level data tables use the native codec by omitting only
+   their runtime `.internal.selfref` attribute and rebuilding it with `setDT()`.
+   Class, columns, and key metadata are preserved; nested data tables remain on
+   the safe fallback path.
+2. **Completed:** integer and real ALTREP vectors stream through bounded region
+   reads using the existing direct file layouts. Other ALTREP types continue to
+   fall back.
+3. **Completed locally:** source-package detritus and inaccessible repository
+   links are excluded, the strict macOS source check is clean apart from the
+   expected new-submission note, and the Linux threading source cross-compiles
+   with strict warnings. A Linux container runtime was not available for the
+   cgroup runtime assertion.
+4. **Completed locally:** R 4.1--4.5 now enumerate arbitrary attributes through
+   base R's public `attributes()` interface, while R 4.6 retains the faster C
+   iteration API. The package declares R 4.1 as its minimum and CI includes an
+   explicit R 4.1 job.
+5. **Completed locally:** balanced integer and double ALTREP sequences are
+   detected through bounded region scans and stored as exact constant-delta
+   sequences. Speed mode and irregular balanced vectors remain streamed direct.
+
+The executable plan is in
+`docs/superpowers/plans/2026-07-02-data-table-altrep-portability.md`.
 
 ## Completed
 
@@ -25,7 +50,10 @@ defensible performance tradeoff.
   - independent 64 KiB LZ4 blocks for compressible flat string payloads;
   - run-length encoded varints for flat string lengths when smaller;
   - 64 KiB buffered output for 1-, 2-, and 4-byte string dictionary indexes.
-- Unsupported and compact ALTREP objects continue to use R serialization.
+- Integer and real ALTREP vectors stream through bounded region reads. Exact
+  balanced sequences use compact constant-delta encodings; speed mode and
+  irregular balanced vectors remain direct. Other ALTREP objects continue to
+  use R serialization.
 - The package and primary API are named `rdz`, and `.rdz` is the conventional
   extension. The existing binary tags are retained for backward compatibility;
   the legacy R function aliases have been removed.
@@ -103,7 +131,14 @@ Detailed results and the reproducible script are in:
 
 ## Verification status
 
-- All 266 testthat expectations pass.
+- All 348 testthat expectations pass.
+- The forced R 4.1--4.5 attribute path also passes all 348 expectations with
+  balanced ALTREP sequence encoding enabled.
+- The R 4.1--4.5 attribute implementation also passes all 317 expectations
+  when forced on R 4.6, and emits byte-identical files to the R 4.6 C API for
+  custom attributes, matrices, tibbles, and keyed data tables. Its required
+  functions and ALTREP region APIs are present in the official R 4.1 headers;
+  the actual R 4.1 runner remains delegated to the new CI matrix entry.
 - Integer tests cover every selected width from one through eight bits, missing
   values, signed ranges, `INT_MAX`, factors, direct fallback, invalid padding,
   invalid flags, and malformed metadata.
@@ -130,9 +165,12 @@ Detailed results and the reproducible script are in:
   27-object run was terminated by the local environment before completion.
 - All three benchmark entry points pass reduced smoke runs using the renamed
   package, `.rdz` paths, and `RDZ_*` environment variables.
-- The local source-tarball `R CMD check --as-cran --no-manual` run, with remote
-  incoming checks disabled, installs and checks package `rdz` with no errors,
-  warnings, or notes.
+- The local R 4.6.1 source-tarball `R CMD check --as-cran --no-manual` run
+  installs and checks package `rdz` with zero errors and warnings. Its only
+  note is CRAN's expected `New submission` note.
+- `src/threading.c` cross-compiles for `aarch64-linux-gnu` with Zig under
+  `-Wall -Wextra -Werror`. Docker, Colima, and Podman had no running VM, so the
+  `--cpus=1.5` cgroup runtime assertion remains for CI or a Linux host.
 - The vendored LZ4 sources compile from their subdirectory on macOS, and the
   resulting shared library contains the expected compression symbols.
 - Git push access to `pedrobtz/rdz` works, but the active GitHub CLI token for
@@ -142,11 +180,10 @@ Detailed results and the reproducible script are in:
 
 ## Current working-tree state
 
-The serializer, `explain_rdz()` API, package/API rename, attribute-API cleanup,
-vendored LZ4 layout, tests, documentation, and benchmark table update are
-committed on `feature/init`. The latest cleanup removes an accidentally tracked
-generated LZ4 object file, ignores nested object files, and refreshes this
-tracking document.
+The established serializer work is committed on `feature/init`. Native
+top-level data-table support, ALTREP region streaming, their tests and docs,
+and the release hardening described above are currently uncommitted working
+tree changes.
 
 Key implementation files:
 
@@ -157,17 +194,15 @@ Key implementation files:
 - `src/vendor/lz4/lz4.c` and `src/vendor/lz4/lz4.h` (vendored LZ4 1.10.0)
 - `tests/testthat/test-roundtrip.R`
 
-## What to do next
+## TODO
 
-1. Verify the vendored LZ4 build and the R-version-gated attribute behavior on
-   the Linux, macOS, Windows, R-devel, release, and old-release CI matrix.
-2. Repeat the fst thread-scaling comparison on a Linux host to validate the
-   macOS OpenMP results across runtimes and hardware.
-3. Run the complete 27-object matrix in an environment with enough memory and
-   retain its CSV. The reduced smoke matrix already passes all object types.
-4. After portability verification, add broader string distributions to the
-   benchmark: random bytes, mixed short and long values, missing-heavy data,
-   and payloads whose later blocks differ from the first block.
+- [ ] Commit and push the current changes, then run the R 4.1, release, devel,
+  Windows, and Linux CI matrix.
+- [ ] Add deterministic cgroup v1 and v2 tests covering nested quotas,
+  fractional CPU limits, malformed files, and interaction with CPU affinity.
+- [ ] Add a Linux container CI assertion that a `--cpus=1.5` limit produces
+  `rdz_threads() == 2L`.
+- [ ] Add malformed-file fuzzing under ASAN and UBSAN.
 
 Do not add rdz multithreading solely because compressed fst benefits from it.
 Profile rdz's remaining write and read phases first; explicit SIMD should also

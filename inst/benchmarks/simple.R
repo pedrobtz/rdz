@@ -12,7 +12,10 @@ if (!file.exists(taxi_csv)) {
     paste0(base, "?$limit=500000&$offset=0&$order=:id"),
     paste0(base, "?$limit=500000&$offset=500000&$order=:id")
   )
-  chunk_files <- file.path(cache_dir, paste0("taxi_chunk_", seq_along(urls), ".csv"))
+  chunk_files <- file.path(
+    cache_dir,
+    paste0("taxi_chunk_", seq_along(urls), ".csv")
+  )
   curl::multi_download(urls, chunk_files)
   chunks <- lapply(chunk_files, data.table::fread)
   data.table::fwrite(data.table::rbindlist(chunks), taxi_csv)
@@ -20,6 +23,7 @@ if (!file.exists(taxi_csv)) {
 }
 
 taxi <- data.table::fread(taxi_csv)
+stopifnot(rdz::explain_rdz(taxi, codec = "native")$codec[[1L]] == "native")
 
 files <- list(
   rds = file.path(folder, "taxi.rds"),

@@ -10,6 +10,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,11 +30,19 @@
 #define RDZ_MAX_DEPTH    10000
 #define STRING_INDEX_BUFFER_SIZE (64 * 1024)
 #define RDZ_LZ4_BLOCK_SIZE (64 * 1024)
+#define RDZ_ALTREP_BUFFER_SIZE (64 * 1024)
 #define RDZ_PARALLEL_XOR_MIN_BLOCKS 16
 #define STRING_LAYOUT_FLAT_RAW 0
 #define STRING_LAYOUT_FLAT_LZ4 3
 #define STRING_LENGTHS_DIRECT 0
 #define STRING_LENGTHS_RLE 1
+
+#if R_VERSION >= R_Version(4, 6, 0) && \
+    !defined(RDZ_FORCE_R_LEVEL_ATTRIBUTES)
+# define RDZ_HAS_ATTRIBUTE_ITERATION_API 1
+#else
+# define RDZ_HAS_ATTRIBUTE_ITERATION_API 0
+#endif
 
 static const unsigned char RDZ_MAGIC_V1[8] = {
     'F', 'A', 'S', 'T', 'R', 'D', 'S', '1'
@@ -58,7 +67,8 @@ enum logical_encoding {
 
 enum integer_encoding {
     INTEGER_ENCODING_DIRECT = 0,
-    INTEGER_ENCODING_PACKED = 1
+    INTEGER_ENCODING_PACKED = 1,
+    INTEGER_ENCODING_SEQUENCE = 2
 };
 
 enum node_type {
@@ -395,16 +405,26 @@ static int stack_push(sexp_stack_t *stack, SEXP object) {
 
 static int native_supported(SEXP object, sexp_stack_t *stack, int depth);
 
-#if R_VERSION >= R_Version(4, 6, 0)
+static int is_data_table_selfref(SEXP name, SEXP value) {
+    if (TYPEOF(value) != EXTPTRSXP) return 0;
+    if (TYPEOF(name) == SYMSXP) name = PRINTNAME(name);
+    return TYPEOF(name) == CHARSXP &&
+        strcmp(CHAR(name), ".internal.selfref") == 0;
+}
+
+#if RDZ_HAS_ATTRIBUTE_ITERATION_API
 typedef struct {
     sexp_stack_t *stack;
     int depth;
     int supported;
+    int skip_data_table_selfref;
 } attribute_support_context_t;
 
 static SEXP attribute_supported(SEXP tag, SEXP value, void *data) {
     attribute_support_context_t *context =
         (attribute_support_context_t *) data;
+    if (context->skip_data_table_selfref &&
+        is_data_table_selfref(tag, value)) return NULL;
     if (TYPEOF(tag) != SYMSXP ||
         !native_supported(value, context->stack, context->depth + 1)) {
         context->supported = 0;
@@ -414,13 +434,58 @@ static SEXP attribute_supported(SEXP tag, SEXP value, void *data) {
 }
 #endif
 
+#if !RDZ_HAS_ATTRIBUTE_ITERATION_API
+static void compact_automatic_row_names(SEXP attributes, SEXP names) {
+    R_xlen_t i, count = XLENGTH(attributes);
+    int buffer[256];
+
+    for (i = 0; i < count; ++i) {
+        SEXP name = STRING_ELT(names, i);
+        SEXP value = VECTOR_ELT(attributes, i);
+        R_xlen_t length, offset;
+        int automatic = 1;
+
+        if (name == NA_STRING || Rf_installChar(name) != R_RowNamesSymbol ||
+            TYPEOF(value) != INTSXP || !ALTREP(value)) continue;
+        length = XLENGTH(value);
+        if (length == 0 || length > INT_MAX) continue;
+        for (offset = 0; automatic && offset < length;) {
+            R_xlen_t remaining = length - offset;
+            R_xlen_t requested = remaining < 256 ? remaining : 256;
+            R_xlen_t received = INTEGER_GET_REGION(
+                value, offset, requested, buffer);
+            R_xlen_t j;
+            if (received != requested) {
+                automatic = 0;
+                break;
+            }
+            for (j = 0; j < received; ++j) {
+                if (buffer[j] != (int) (offset + j + 1)) {
+                    automatic = 0;
+                    break;
+                }
+            }
+            offset += received;
+        }
+        if (automatic) {
+            SEXP compact = PROTECT(Rf_allocVector(INTSXP, 2));
+            INTEGER(compact)[0] = NA_INTEGER;
+            INTEGER(compact)[1] = -(int) length;
+            SET_VECTOR_ELT(attributes, i, compact);
+            UNPROTECT(1);
+        }
+        return;
+    }
+}
+#endif
+
 static int native_supported(SEXP object, sexp_stack_t *stack, int depth) {
     R_xlen_t i;
     int type = TYPEOF(object);
 
-    if (depth > RDZ_MAX_DEPTH || Rf_isS4(object) ||
-        (object != R_NilValue && ALTREP(object) &&
-         DATAPTR_OR_NULL(object) == NULL)) return 0;
+    if (depth > RDZ_MAX_DEPTH || Rf_isS4(object)) return 0;
+    if (object != R_NilValue && ALTREP(object) &&
+        type != INTSXP && type != REALSXP) return 0;
     switch (type) {
     case NILSXP:
     case LGLSXP:
@@ -439,23 +504,53 @@ static int native_supported(SEXP object, sexp_stack_t *stack, int depth) {
         if (stack_contains(stack, object) || !stack_push(stack, object)) return 0;
     }
 
-#if R_VERSION >= R_Version(4, 6, 0)
+#if RDZ_HAS_ATTRIBUTE_ITERATION_API
     {
-        attribute_support_context_t context = { stack, depth, 1 };
+        attribute_support_context_t context = {
+            stack, depth, 1,
+            depth == 0 && Rf_inherits(object, "data.table")
+        };
         R_mapAttrib(object, attribute_supported, &context);
         if (!context.supported) {
             if (object != R_NilValue) --stack->size;
             return 0;
         }
     }
-#elif R_VERSION >= R_Version(4, 5, 0)
-    if (object != R_NilValue && ANY_ATTRIB(object)) {
-        --stack->size;
-        return 0;
-    }
 #else
-    if (object != R_NilValue) --stack->size;
-    return 0;
+    {
+        SEXP call = PROTECT(Rf_lang2(Rf_install("attributes"), object));
+        SEXP attributes = PROTECT(Rf_eval(call, R_BaseEnv));
+        SEXP names = attributes == R_NilValue ? R_NilValue :
+            Rf_getAttrib(attributes, R_NamesSymbol);
+        R_xlen_t count = attributes == R_NilValue ? 0 : XLENGTH(attributes);
+        int supported = attributes == R_NilValue ||
+            (TYPEOF(attributes) == VECSXP && TYPEOF(names) == STRSXP &&
+             XLENGTH(names) == count);
+        int skip_data_table_selfref =
+            depth == 0 && Rf_inherits(object, "data.table");
+
+        if (supported && attributes != R_NilValue) {
+            compact_automatic_row_names(attributes, names);
+        }
+        for (i = 0; supported && i < count; ++i) {
+            SEXP name = STRING_ELT(names, i);
+            SEXP value = VECTOR_ELT(attributes, i);
+            if (name == NA_STRING || LENGTH(name) == 0) {
+                supported = 0;
+                break;
+            }
+            if (skip_data_table_selfref &&
+                is_data_table_selfref(name, value)) continue;
+            if (!native_supported(value, stack, depth + 1)) {
+                supported = 0;
+            }
+        }
+        UNPROTECT(2);
+        if (!supported) {
+            if (object != R_NilValue) --stack->size;
+            return 0;
+        }
+    }
 #endif
 
     if (type == VECSXP) {
@@ -1202,17 +1297,20 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
                         int format_version, int parent, uint8_t relation,
                         uint64_t index, SEXP name);
 
-#if R_VERSION >= R_Version(4, 6, 0)
+#if RDZ_HAS_ATTRIBUTE_ITERATION_API
 typedef struct {
     writer_t *writer;
     int depth;
     int format_version;
     int parent;
+    int skip_data_table_selfref;
 } attribute_encode_context_t;
 
 static SEXP encode_attribute(SEXP tag, SEXP value, void *data) {
     attribute_encode_context_t *context =
         (attribute_encode_context_t *) data;
+    if (context->skip_data_table_selfref &&
+        is_data_table_selfref(tag, value)) return NULL;
     SEXP name = PRINTNAME(tag);
     uint32_t length = (uint32_t) LENGTH(name);
     writer_u32(context->writer, length);
@@ -1226,11 +1324,18 @@ static SEXP encode_attribute(SEXP tag, SEXP value, void *data) {
 
 static void encode_attributes(writer_t *writer, SEXP object, int depth,
                               int format_version, int parent) {
-#if R_VERSION >= R_Version(4, 6, 0)
+#if RDZ_HAS_ATTRIBUTE_ITERATION_API
     R_xlen_t count = R_getAttribCount(object);
+    int skip_data_table_selfref =
+        depth == 0 && Rf_inherits(object, "data.table");
     attribute_encode_context_t context = {
-        writer, depth, format_version, parent
+        writer, depth, format_version, parent, skip_data_table_selfref
     };
+    if (skip_data_table_selfref) {
+        SEXP tag = Rf_install(".internal.selfref");
+        SEXP value = Rf_getAttrib(object, tag);
+        if (is_data_table_selfref(tag, value)) --count;
+    }
     if ((uint64_t) count > UINT32_MAX) {
         writer->failed = 1;
         return;
@@ -1238,11 +1343,59 @@ static void encode_attributes(writer_t *writer, SEXP object, int depth,
     writer_u32(writer, (uint32_t) count);
     R_mapAttrib(object, encode_attribute, &context);
 #else
-    (void) object;
-    (void) depth;
-    (void) format_version;
-    (void) parent;
-    writer_u32(writer, 0);
+    SEXP call = PROTECT(Rf_lang2(Rf_install("attributes"), object));
+    SEXP attributes = PROTECT(Rf_eval(call, R_BaseEnv));
+    SEXP names = attributes == R_NilValue ? R_NilValue :
+        Rf_getAttrib(attributes, R_NamesSymbol);
+    R_xlen_t i, count = attributes == R_NilValue ? 0 : XLENGTH(attributes);
+    int skip_data_table_selfref =
+        depth == 0 && Rf_inherits(object, "data.table");
+
+    if (attributes != R_NilValue &&
+        (TYPEOF(attributes) != VECSXP || TYPEOF(names) != STRSXP ||
+         XLENGTH(names) != count)) {
+        writer->failed = 1;
+        UNPROTECT(2);
+        return;
+    }
+    if (attributes != R_NilValue) {
+        compact_automatic_row_names(attributes, names);
+    }
+    if (skip_data_table_selfref) {
+        for (i = 0; i < count; ++i) {
+            SEXP name = STRING_ELT(names, i);
+            SEXP value = VECTOR_ELT(attributes, i);
+            if (is_data_table_selfref(
+                    name, value)) {
+                --count;
+                break;
+            }
+        }
+    }
+    if ((uint64_t) count > UINT32_MAX) {
+        writer->failed = 1;
+        UNPROTECT(2);
+        return;
+    }
+    writer_u32(writer, (uint32_t) count);
+    count = attributes == R_NilValue ? 0 : XLENGTH(attributes);
+    for (i = 0; i < count && !writer->failed; ++i) {
+        SEXP name = STRING_ELT(names, i);
+        SEXP value = VECTOR_ELT(attributes, i);
+        uint32_t name_length;
+        if (name == NA_STRING || LENGTH(name) == 0) {
+            writer->failed = 1;
+            break;
+        }
+        if (skip_data_table_selfref &&
+            is_data_table_selfref(name, value)) continue;
+        name_length = (uint32_t) LENGTH(name);
+        writer_u32(writer, name_length);
+        writer_write(writer, CHAR(name), name_length);
+        encode_node(writer, value, depth + 1, format_version, parent,
+                    REPORT_ATTRIBUTE, 0, name);
+    }
+    UNPROTECT(2);
 #endif
 }
 
@@ -1286,6 +1439,153 @@ static const char *encode_strings(writer_t *writer, SEXP object,
     return "string dictionary (4-byte indexes)";
 }
 
+static int is_streamed_altrep(SEXP object) {
+    int type = TYPEOF(object);
+    return object != R_NilValue && ALTREP(object) &&
+        (type == INTSXP || type == REALSXP);
+}
+
+typedef struct {
+    int32_t base;
+    int32_t delta;
+} rdz_integer_sequence_t;
+
+static uint64_t double_bits(double value) {
+    uint64_t bits;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+/* Returns 1 for an exact sequence, 0 otherwise, and -1 on allocation failure. */
+static int scan_altrep_integer_sequence(
+    SEXP object, rdz_integer_sequence_t *sequence
+) {
+    R_xlen_t length = XLENGTH(object), offset = 0;
+    R_xlen_t capacity = RDZ_ALTREP_BUFFER_SIZE / sizeof(int);
+    int *buffer;
+    int32_t previous = 0;
+    int64_t delta = 0;
+
+    memset(sequence, 0, sizeof(*sequence));
+    if (length < 3) return 0;
+    buffer = (int *) malloc(RDZ_ALTREP_BUFFER_SIZE);
+    if (buffer == NULL) return -1;
+    while (offset < length) {
+        R_xlen_t remaining = length - offset;
+        R_xlen_t requested = remaining < capacity ? remaining : capacity;
+        R_xlen_t received = INTEGER_GET_REGION(
+            object, offset, requested, buffer);
+        R_xlen_t i;
+        if (received != requested) {
+            free(buffer);
+            return 0;
+        }
+        for (i = 0; i < received; ++i) {
+            R_xlen_t index = offset + i;
+            int32_t value = (int32_t) buffer[i];
+            if (value == NA_INTEGER) {
+                free(buffer);
+                return 0;
+            }
+            if (index == 0) {
+                sequence->base = value;
+            } else if (index == 1) {
+                delta = (int64_t) value - sequence->base;
+                if (delta < INT32_MIN || delta > INT32_MAX) {
+                    free(buffer);
+                    return 0;
+                }
+                sequence->delta = (int32_t) delta;
+            } else if ((int64_t) previous + delta != value) {
+                free(buffer);
+                return 0;
+            }
+            previous = value;
+        }
+        offset += received;
+    }
+    free(buffer);
+    return 1;
+}
+
+/* Returns 1 for an exact sequence, 0 otherwise, and -1 on allocation failure. */
+static int scan_altrep_real_sequence(
+    SEXP object, rdz_real_sequence_t *sequence
+) {
+    R_xlen_t length = XLENGTH(object), offset = 0;
+    R_xlen_t capacity = RDZ_ALTREP_BUFFER_SIZE / sizeof(double);
+    double *buffer, base = 0, delta = 0;
+
+    memset(sequence, 0, sizeof(*sequence));
+    if (length < 3) return 0;
+    buffer = (double *) malloc(RDZ_ALTREP_BUFFER_SIZE);
+    if (buffer == NULL) return -1;
+    while (offset < length) {
+        R_xlen_t remaining = length - offset;
+        R_xlen_t requested = remaining < capacity ? remaining : capacity;
+        R_xlen_t received = REAL_GET_REGION(
+            object, offset, requested, buffer);
+        R_xlen_t i;
+        if (received != requested) {
+            free(buffer);
+            return 0;
+        }
+        for (i = 0; i < received; ++i) {
+            R_xlen_t index = offset + i;
+            double value = buffer[i];
+            if (index == 0) {
+                base = value;
+            } else if (index == 1) {
+                delta = value - base;
+                if (!isfinite(base) || !isfinite(delta) ||
+                    double_bits(base + delta) != double_bits(value)) {
+                    free(buffer);
+                    return 0;
+                }
+            } else if (double_bits(base + (double) index * delta) !=
+                       double_bits(value)) {
+                free(buffer);
+                return 0;
+            }
+        }
+        offset += received;
+    }
+    free(buffer);
+    sequence->base = double_bits(base);
+    sequence->delta = double_bits(delta);
+    return 1;
+}
+
+static int write_altrep_payload(writer_t *writer, SEXP object,
+                                R_xlen_t length, int type) {
+    size_t element_size = type == INTSXP ? sizeof(int) : sizeof(double);
+    R_xlen_t capacity = (R_xlen_t) (RDZ_ALTREP_BUFFER_SIZE / element_size);
+    unsigned char *buffer =
+        (unsigned char *) malloc(RDZ_ALTREP_BUFFER_SIZE);
+    R_xlen_t offset = 0;
+
+    if (buffer == NULL) return 0;
+    while (offset < length) {
+        R_xlen_t remaining = length - offset;
+        R_xlen_t requested = remaining < capacity ? remaining : capacity;
+        R_xlen_t received = type == INTSXP ?
+            INTEGER_GET_REGION(object, offset, requested, (int *) buffer) :
+            REAL_GET_REGION(object, offset, requested, (double *) buffer);
+        if (received != requested) {
+            free(buffer);
+            return 0;
+        }
+        writer_write(writer, buffer, (size_t) received * element_size);
+        if (writer->failed) {
+            free(buffer);
+            return 0;
+        }
+        offset += received;
+    }
+    free(buffer);
+    return 1;
+}
+
 static void encode_node(writer_t *writer, SEXP object, int depth,
                         int format_version, int parent, uint8_t relation,
                         uint64_t index, SEXP name) {
@@ -1295,6 +1595,7 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
     const char *type_name, *strategy;
     uint64_t report_start = writer->position;
     int report_row;
+    int streamed_altrep;
 
     if (writer->failed || depth > RDZ_MAX_DEPTH) {
         writer->failed = 1;
@@ -1329,6 +1630,12 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
     }
 
     length = object == R_NilValue ? 0 : XLENGTH(object);
+    streamed_altrep = is_streamed_altrep(object);
+    if (streamed_altrep) {
+        strategy = type == NODE_INTEGER ?
+            "integer ALTREP values (streamed direct)" :
+            "numeric ALTREP values (streamed direct)";
+    }
     report_row = reporter_add(
         writer, parent, depth, relation, index, name, type_name,
         (uint64_t) length);
@@ -1364,82 +1671,120 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
             writer_u8(writer, LOGICAL_ENCODING_DIRECT);
         }
         if (type == NODE_INTEGER && format_version >= 2) {
-            rdz_integer_encoding_t encoding;
-            int encoded = rdz_integer_encoding_build(object, &encoding);
-            if (encoded < 0) {
-                writer->failed = 1;
-                return;
-            }
-            if (encoded) {
-                writer_u8(writer, INTEGER_ENCODING_PACKED);
-                writer_u32(writer, (uint32_t) encoding.base);
-                writer_u8(writer, encoding.bits);
-                writer_u8(writer, encoding.flags);
-                writer_write(writer, encoding.packed, encoding.packed_size);
-                rdz_integer_encoding_free(&encoding);
-                reporter_finish(
-                    writer, report_row,
-                    "integer frame-of-reference bit packing", report_start);
-                return;
+            if (streamed_altrep) {
+                rdz_integer_sequence_t sequence;
+                int encoded = scan_altrep_integer_sequence(object, &sequence);
+                if (encoded < 0) {
+                    writer->failed = 1;
+                    return;
+                }
+                if (encoded) {
+                    writer_u8(writer, INTEGER_ENCODING_SEQUENCE);
+                    writer_u32(writer, (uint32_t) sequence.base);
+                    writer_u32(writer, (uint32_t) sequence.delta);
+                    reporter_finish(
+                        writer, report_row,
+                        "exact constant-delta integer ALTREP sequence",
+                        report_start);
+                    return;
+                }
+            } else {
+                rdz_integer_encoding_t encoding;
+                int encoded = rdz_integer_encoding_build(object, &encoding);
+                if (encoded < 0) {
+                    writer->failed = 1;
+                    return;
+                }
+                if (encoded) {
+                    writer_u8(writer, INTEGER_ENCODING_PACKED);
+                    writer_u32(writer, (uint32_t) encoding.base);
+                    writer_u8(writer, encoding.bits);
+                    writer_u8(writer, encoding.flags);
+                    writer_write(writer, encoding.packed, encoding.packed_size);
+                    rdz_integer_encoding_free(&encoding);
+                    reporter_finish(
+                        writer, report_row,
+                        "integer frame-of-reference bit packing", report_start);
+                    return;
+                }
             }
             writer_u8(writer, INTEGER_ENCODING_DIRECT);
         }
         if (type == NODE_REAL && format_version >= 2) {
-            rdz_real_dictionary_t dictionary;
-            rdz_real_sequence_t sequence;
-            int encoded = rdz_real_dictionary_build(object, &dictionary);
-            if (encoded < 0) {
-                writer->failed = 1;
-                return;
-            }
-            if (encoded) {
-                lz4_blocks_t blocks;
-                int use_lz4 = lz4_blocks_build_buffer(
-                    dictionary.packed, dictionary.packed_size, &blocks);
-                writer_u8(writer, use_lz4 ? REAL_ENCODING_DICTIONARY_LZ4 :
-                                           REAL_ENCODING_DICTIONARY);
-                writer_u8(writer, dictionary.bits);
-                writer_u16(writer, dictionary.count);
-                writer_write(writer, dictionary.values,
-                             (size_t) dictionary.count * sizeof(uint64_t));
-                if (use_lz4) {
-                    writer_write(writer, blocks.data, blocks.size);
-                } else {
-                    writer_write(writer, dictionary.packed,
-                                 dictionary.packed_size);
+            if (streamed_altrep) {
+                rdz_real_sequence_t sequence;
+                int encoded = scan_altrep_real_sequence(object, &sequence);
+                if (encoded < 0) {
+                    writer->failed = 1;
+                    return;
                 }
-                lz4_blocks_free(&blocks);
-                rdz_real_dictionary_free(&dictionary);
-                reporter_finish(
-                    writer, report_row,
-                    use_lz4 ?
-                        "numeric dictionary + bit-packed indexes + LZ4" :
-                        "numeric dictionary + bit-packed indexes",
-                    report_start);
-                return;
-            }
-            if (rdz_real_sequence_build(object, &sequence)) {
-                writer_u8(writer, REAL_ENCODING_SEQUENCE);
-                writer_u64(writer, sequence.base);
-                writer_u64(writer, sequence.delta);
-                reporter_finish(writer, report_row,
-                                "exact constant-delta numeric sequence",
-                                report_start);
-                return;
-            }
-            {
-                lz4_blocks_t blocks;
-                if (lz4_blocks_build_real_xor(object, &blocks, 0)) {
-                    writer_u8(writer, REAL_ENCODING_XOR_LZ4);
-                    writer_write(writer, blocks.data, blocks.size);
-                    lz4_blocks_free(&blocks);
+                if (encoded) {
+                    writer_u8(writer, REAL_ENCODING_SEQUENCE);
+                    writer_u64(writer, sequence.base);
+                    writer_u64(writer, sequence.delta);
                     reporter_finish(
                         writer, report_row,
-                        "numeric XOR-delta + byte transpose + LZ4",
+                        "exact constant-delta numeric ALTREP sequence",
                         report_start);
                     return;
                 }
-                lz4_blocks_free(&blocks);
+            } else {
+                rdz_real_dictionary_t dictionary;
+                rdz_real_sequence_t sequence;
+                int encoded = rdz_real_dictionary_build(object, &dictionary);
+                if (encoded < 0) {
+                    writer->failed = 1;
+                    return;
+                }
+                if (encoded) {
+                    lz4_blocks_t blocks;
+                    int use_lz4 = lz4_blocks_build_buffer(
+                        dictionary.packed, dictionary.packed_size, &blocks);
+                    writer_u8(writer, use_lz4 ? REAL_ENCODING_DICTIONARY_LZ4 :
+                                               REAL_ENCODING_DICTIONARY);
+                    writer_u8(writer, dictionary.bits);
+                    writer_u16(writer, dictionary.count);
+                    writer_write(writer, dictionary.values,
+                                 (size_t) dictionary.count * sizeof(uint64_t));
+                    if (use_lz4) {
+                        writer_write(writer, blocks.data, blocks.size);
+                    } else {
+                        writer_write(writer, dictionary.packed,
+                                     dictionary.packed_size);
+                    }
+                    lz4_blocks_free(&blocks);
+                    rdz_real_dictionary_free(&dictionary);
+                    reporter_finish(
+                        writer, report_row,
+                        use_lz4 ?
+                            "numeric dictionary + bit-packed indexes + LZ4" :
+                            "numeric dictionary + bit-packed indexes",
+                        report_start);
+                    return;
+                }
+                if (rdz_real_sequence_build(object, &sequence)) {
+                    writer_u8(writer, REAL_ENCODING_SEQUENCE);
+                    writer_u64(writer, sequence.base);
+                    writer_u64(writer, sequence.delta);
+                    reporter_finish(writer, report_row,
+                                    "exact constant-delta numeric sequence",
+                                    report_start);
+                    return;
+                }
+                {
+                    lz4_blocks_t blocks;
+                    if (lz4_blocks_build_real_xor(object, &blocks, 0)) {
+                        writer_u8(writer, REAL_ENCODING_XOR_LZ4);
+                        writer_write(writer, blocks.data, blocks.size);
+                        lz4_blocks_free(&blocks);
+                        reporter_finish(
+                            writer, report_row,
+                            "numeric XOR-delta + byte transpose + LZ4",
+                            report_start);
+                        return;
+                    }
+                    lz4_blocks_free(&blocks);
+                }
             }
             writer_u8(writer, REAL_ENCODING_DIRECT);
         }
@@ -1447,7 +1792,16 @@ static void encode_node(writer_t *writer, SEXP object, int depth,
             writer->failed = 1;
             return;
         }
-        writer_write(writer, DATAPTR_RO(object), (size_t) length * element_size);
+        if (streamed_altrep) {
+            if (!write_altrep_payload(
+                    writer, object, length, TYPEOF(object))) {
+                writer->failed = 1;
+                return;
+            }
+        } else {
+            writer_write(
+                writer, DATAPTR_RO(object), (size_t) length * element_size);
+        }
     } else if (type == NODE_STRING) {
         strategy = encode_strings(writer, object, format_version);
     } else if (type == NODE_LIST) {
@@ -1713,6 +2067,21 @@ static void decode_integer_v2(reader_t *reader, SEXP object,
             Rf_error("invalid packed integer vector in rdz file");
         }
         reader->pos += packed_size;
+    } else if (encoding == INTEGER_ENCODING_SEQUENCE) {
+        int32_t base = (int32_t) reader_u32(reader);
+        int32_t delta = (int32_t) reader_u32(reader);
+        int64_t value = base;
+        R_xlen_t i;
+        if (length < 3 || base == NA_INTEGER) {
+            Rf_error("invalid integer sequence in rdz file");
+        }
+        for (i = 0; i < length; ++i) {
+            if (value <= INT_MIN || value > INT_MAX) {
+                Rf_error("invalid integer sequence in rdz file");
+            }
+            INTEGER(object)[i] = (int) value;
+            value += delta;
+        }
     } else {
         Rf_error("unknown integer encoding in rdz file");
     }

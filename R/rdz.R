@@ -1,7 +1,8 @@
 #' Write an R object using the rdz format
 #'
-#' Common atomic vectors, lists, matrices, and data frames use a native codec.
-#' Other objects automatically use R's general serialization codec.
+#' Common atomic vectors, lists, matrices, data frames, and top-level data
+#' tables use a native codec. Other objects automatically use R's general
+#' serialization codec.
 #'
 #' @param object An R object.
 #' @param file A file path, conventionally ending in `.rdz`.
@@ -39,6 +40,9 @@ write_rdz <- function(
 
 #' Read an object written by rdz
 #'
+#' A top-level data table's runtime self-reference is reconstructed without
+#' copying when the data.table package is installed.
+#'
 #' @param file A file path, conventionally ending in `.rdz`.
 #' @return The stored R object.
 #' @export
@@ -46,7 +50,14 @@ read_rdz <- function(file) {
   if (length(file) != 1L || is.na(file)) {
     stop("`file` must be one non-missing path", call. = FALSE)
   }
-  .Call(C_rdz_read, path.expand(as.character(file)))
+  object <- .Call(C_rdz_read, path.expand(as.character(file)))
+  if (
+    inherits(object, "data.table") &&
+      requireNamespace("data.table", quietly = TRUE)
+  ) {
+    data.table::setDT(object)
+  }
+  object
 }
 
 #' Report rdz's automatic worker-thread count

@@ -228,6 +228,44 @@ test_that("grouped tibbles preserve grouping through the native codec", {
   expect_identical(copy, x)
 })
 
+test_that("top-level data tables use the native codec", {
+  skip_if_not_installed("data.table")
+  unkeyed <- data.table::data.table(
+    integer = c(1L, NA, 3L),
+    string = c("x", NA, "z")
+  )
+  keyed <- data.table::copy(unkeyed)
+  data.table::setkey(keyed, integer)
+
+  for (x in list(unkeyed, keyed)) {
+    plan <- explain_rdz(x, codec = "native")
+    copy <- roundtrip(x, codec = "native")
+
+    expect_identical(plan$codec[[1L]], "native")
+    expect_identical(class(copy), class(x))
+    expect_identical(data.table::key(copy), data.table::key(x))
+    expect_identical(as.data.frame(copy), as.data.frame(x))
+    data.table::set(copy, j = "added", value = seq_len(nrow(copy)))
+    expect_identical(copy$added, seq_len(nrow(copy)))
+  }
+})
+
+test_that("nested data tables retain general serialization fallback", {
+  skip_if_not_installed("data.table")
+  path <- tempfile(fileext = ".rdz")
+  x <- list(table = data.table::data.table(value = c(1L, 2L)))
+  error_message <- tryCatch(
+    {
+      write_rdz(x, path, codec = "native")
+      NA_character_
+    },
+    error = conditionMessage
+  )
+
+  expect_match(error_message, "not supported")
+  expect_identical(roundtrip(x), x)
+})
+
 test_that("auto mode falls back for general R objects", {
   fun <- function(x) x + 1
   expression <- quote(mean(x, na.rm = TRUE))
@@ -362,10 +400,10 @@ test_that("serialization plans explain fallback and forced codecs", {
     unname(as.numeric(file.info(fallback_path)$size))
   )
 
-  altrep <- explain_rdz(seq_len(1000L))
-  expect_identical(altrep$codec, "R serialization")
+  altrep <- explain_rdz(seq_len(1000L), codec = "native")
+  expect_identical(altrep$codec, "native")
   expect_equal(altrep$length, 1000)
-  expect_match(altrep$strategy, "ALTREP")
+  expect_match(altrep$strategy, "ALTREP values \\(streamed direct\\)")
 
   forced <- explain_rdz(c(1, 2, 3), codec = "r")
   forced_path <- tempfile(fileext = ".rdz")
@@ -412,15 +450,119 @@ test_that("serialization plans preserve nested paths and names", {
   )
 })
 
-test_that("ALTREP objects retain their compact R representation", {
-  path <- tempfile(fileext = ".rdz")
-  x <- seq_len(1000000L)
-  write_rdz(x, path)
-  header <- readBin(path, "raw", n = 9L)
+test_that("integer and real ALTREP sequences stream through the speed codec", {
+  cases <- list(
+    integer = seq_len(100000L),
+    double = as.double(seq_len(100000L))
+  )
 
-  expect_identical(as.integer(header[[9L]]), 2L)
-  expect_lt(file.info(path)$size, 10000)
-  expect_identical(read_rdz(path), x)
+  for (x in cases) {
+    plan <- explain_rdz(x, codec = "native", preset = "speed")
+    expect_identical(plan$codec, "native")
+    expect_match(plan$strategy, "ALTREP values \\(streamed direct\\)")
+    expect_identical(roundtrip(x, "native", "speed"), x)
+  }
+})
+
+test_that("balanced ALTREP sequences use constant-delta encoding", {
+  cases <- list(
+    integer_ascending = list(x = seq_len(100000L), size = 35),
+    integer_descending = list(x = 100000L:1L, size = 35),
+    integer_upper_boundary = list(
+      x = (.Machine$integer.max - 99999L):.Machine$integer.max,
+      size = 35
+    ),
+    integer_lower_boundary = list(
+      x = (-.Machine$integer.max):(-.Machine$integer.max + 99999L),
+      size = 35
+    ),
+    double_ascending = list(x = as.double(seq_len(100000L)), size = 43),
+    double_descending = list(x = as.double(100000L:1L), size = 43)
+  )
+
+  for (case in cases) {
+    path <- tempfile(fileext = ".rdz")
+    plan <- explain_rdz(case$x, codec = "native", preset = "balanced")
+    write_rdz(case$x, path, codec = "native", preset = "balanced")
+
+    expect_identical(plan$codec, "native")
+    expect_match(plan$strategy, "exact constant-delta")
+    expect_identical(read_rdz(path), case$x)
+    expect_equal(file.info(path)$size, case$size)
+  }
+})
+
+test_that("short ALTREP sequences retain streamed direct storage", {
+  cases <- list(1:2, as.double(1:2))
+
+  for (x in cases) {
+    plan <- explain_rdz(x, codec = "native", preset = "balanced")
+    expect_match(plan$strategy, "ALTREP values \\(streamed direct\\)")
+    expect_identical(roundtrip(x, "native", "balanced"), x)
+  }
+})
+
+test_that("ALTREP and materialized doubles share balanced sequence bytes", {
+  altrep <- as.double(seq_len(100000L))
+  materialized <- numeric(length(altrep))
+  materialized[] <- altrep
+  altrep_path <- tempfile(fileext = ".rdz")
+  materialized_path <- tempfile(fileext = ".rdz")
+
+  write_rdz(altrep, altrep_path, preset = "balanced")
+  write_rdz(materialized, materialized_path, preset = "balanced")
+
+  expect_identical(
+    readBin(altrep_path, "raw", n = file.info(altrep_path)$size),
+    readBin(
+      materialized_path,
+      "raw",
+      n = file.info(materialized_path)$size
+    )
+  )
+})
+
+test_that("streamed ALTREP uses the established speed layout", {
+  cases <- list(
+    integer = seq_len(100000L),
+    double = as.double(seq_len(100000L))
+  )
+
+  for (x in cases) {
+    materialized <- vector(typeof(x), length(x))
+    materialized[] <- x
+    altrep_path <- tempfile(fileext = ".rdz")
+    materialized_path <- tempfile(fileext = ".rdz")
+    write_rdz(x, altrep_path, codec = "native", preset = "speed")
+    write_rdz(
+      materialized,
+      materialized_path,
+      codec = "native",
+      preset = "speed"
+    )
+
+    expect_identical(
+      readBin(altrep_path, "raw", n = file.info(altrep_path)$size),
+      readBin(
+        materialized_path,
+        "raw",
+        n = file.info(materialized_path)$size
+      )
+    )
+  }
+})
+
+test_that("ALTREP columns round trip inside tibbles", {
+  skip_if_not_installed("tibble")
+  x <- tibble::tibble(
+    id = seq_len(10000L),
+    value = as.double(seq_len(10000L))
+  )
+  plan <- explain_rdz(x, codec = "native")
+
+  expect_true(all(plan$codec == "native"))
+  expect_true(any(grepl("ALTREP values \\(streamed direct\\)", plan$strategy)))
+  expect_identical(roundtrip(x, "native"), x)
 })
 
 test_that("balanced preset packs logical vectors into two bits", {
@@ -620,6 +762,11 @@ test_that("balanced preset leaves irregular numeric sequences direct", {
 
   expect_identical(read_rdz(balanced_path), x)
   expect_lte(file.info(balanced_path)$size, file.info(speed_path)$size + 1)
+
+  cancellation <- c(1e16, 1, -1e16)
+  plan <- explain_rdz(cancellation, preset = "balanced")
+  expect_identical(grepl("constant-delta", plan$strategy), FALSE)
+  expect_identical(roundtrip(cancellation, preset = "balanced"), cancellation)
 })
 
 test_that("balanced preset XOR-compresses high-cardinality numerics exactly", {
@@ -841,6 +988,49 @@ test_that("malformed balanced integer vectors fail cleanly", {
   )
   writeBin(invalid_padding, path)
   expect_error(read_rdz(path), "invalid packed integer vector")
+})
+
+test_that("malformed balanced integer sequences fail cleanly", {
+  path <- tempfile(fileext = ".rdz")
+  write_rdz(seq_len(100L), path, preset = "balanced")
+  bytes <- readBin(path, "raw", n = file.info(path)$size)
+
+  expect_identical(as.integer(bytes[[27L]]), 2L)
+
+  invalid_base <- bytes
+  invalid_base[28:31] <- writeBin(
+    NA_integer_,
+    raw(),
+    size = 4L,
+    endian = .Platform$endian
+  )
+  writeBin(invalid_base, path)
+  expect_error(read_rdz(path), "invalid integer sequence")
+
+  overflow <- bytes
+  overflow[28:31] <- writeBin(
+    .Machine$integer.max,
+    raw(),
+    size = 4L,
+    endian = .Platform$endian
+  )
+  overflow[32:35] <- writeBin(
+    1L,
+    raw(),
+    size = 4L,
+    endian = .Platform$endian
+  )
+  writeBin(overflow, path)
+  expect_error(read_rdz(path), "invalid integer sequence")
+
+  write_rdz(1:2, path, preset = "balanced")
+  too_short <- readBin(path, "raw", n = file.info(path)$size)
+  too_short[[27L]] <- as.raw(2L)
+  writeBin(too_short, path)
+  expect_error(read_rdz(path), "invalid integer sequence")
+
+  writeBin(bytes[-length(bytes)], path)
+  expect_error(read_rdz(path), "truncated")
 })
 
 test_that("invalid and truncated files fail cleanly", {

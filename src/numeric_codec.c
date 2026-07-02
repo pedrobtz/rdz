@@ -353,7 +353,10 @@ int rdz_real_sequence_build(SEXP object,
     values = REAL_RO(object);
     base = values[0];
     delta = values[1] - values[0];
-    if (!isfinite(base) || !isfinite(delta)) return 0;
+    if (!isfinite(base) || !isfinite(delta) ||
+        real_bits(sequence_value(base, delta, 1)) != real_bits(values[1])) {
+        return 0;
+    }
 
     for (i = 2; i < length; ++i) {
         if (real_bits(sequence_value(base, delta, i)) != real_bits(values[i])) {

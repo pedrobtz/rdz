@@ -1,7 +1,7 @@
 # rdz
 
 `rdz` is an experiment in minimizing R object serialization latency. It
-uses two codecs:
+supports R 4.1 and later and uses two codecs:
 
 - A native codec for atomic vectors, strings, lists, matrices, and data frames.
   The speed preset stores values directly; the balanced preset adds selective
@@ -9,6 +9,15 @@ uses two codecs:
   blocks. Sampled cardinality selects dictionary encoding for repeated strings
   and a batched flat layout for mostly unique strings.
 - A direct, uncompressed R serialization stream for everything else.
+
+On R 4.1 through 4.5, the native codec obtains arbitrary attributes through
+base R's public `attributes()` interface. R 4.6 and later use the lower-overhead
+C attribute-iteration API. Both paths produce the same file representation.
+
+Top-level `data.table` objects use the native codec. rdz preserves their class,
+columns, and key metadata while omitting the runtime-only `.internal.selfref`;
+`read_rdz()` reconstructs that self-reference without copying when data.table
+is installed. Nested data tables currently use R serialization fallback.
 
 The native reader memory-maps files on POSIX systems. The design intentionally
 trades file size for latency and avoids compression work when speed is the
@@ -26,8 +35,11 @@ readable.
 Use `codec = "native"` to require the fast native path, or `codec = "r"` to
 force general R serialization. The default `"auto"` selects the native path
 when it can preserve the object and otherwise falls back automatically.
-ALTREP vectors deliberately use the R serialization path so compact sequences
-and deferred representations are not materialized on disk.
+Integer and double ALTREP vectors stream through bounded region reads. The
+speed preset uses the native direct layouts, while the balanced preset stores
+exact constant-delta sequences compactly and leaves other values direct. Other
+ALTREP types continue to use R serialization until they have an explicit
+bounded writer.
 
 Use `rdz_threads()` to report the maximum number of worker threads that rdz may
 use for automatically parallelized operations. It reports online logical
