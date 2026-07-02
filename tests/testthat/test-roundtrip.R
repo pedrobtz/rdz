@@ -185,6 +185,49 @@ test_that("attributes, matrices, lists, and data frames round trip", {
   }
 })
 
+test_that("tibbles preserve their class through the native codec", {
+  skip_if_not_installed("tibble")
+  cases <- list(
+    tibble::tibble(
+      integer = c(1L, NA, 3L),
+      string = c("x", NA, "z")
+    ),
+    tibble::tibble(
+      id = c(1L, 2L, 3L),
+      values = list(c(1L, 2L), character(), c(TRUE, NA))
+    )
+  )
+
+  for (x in cases) {
+    plan <- explain_rdz(x, codec = "native")
+    copy <- roundtrip(x, codec = "native")
+
+    expect_identical(plan$codec[[1L]], "native")
+    expect_identical(class(copy), class(x))
+    expect_identical(copy, x)
+  }
+})
+
+test_that("grouped tibbles preserve grouping through the native codec", {
+  skip_if_not_installed("dplyr")
+  skip_if_not_installed("tibble")
+  x <- dplyr::group_by(
+    tibble::tibble(
+      group = c("a", "a", "b"),
+      value = c(1L, 2L, 3L)
+    ),
+    group
+  )
+
+  plan <- explain_rdz(x, codec = "native")
+  copy <- roundtrip(x, codec = "native")
+
+  expect_identical(plan$codec[[1L]], "native")
+  expect_identical(class(copy), class(x))
+  expect_identical(dplyr::group_vars(copy), dplyr::group_vars(x))
+  expect_identical(copy, x)
+})
+
 test_that("auto mode falls back for general R objects", {
   fun <- function(x) x + 1
   expression <- quote(mean(x, na.rm = TRUE))

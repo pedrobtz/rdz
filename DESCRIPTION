@@ -1,27 +1,34 @@
 Package: rdz
 Title: Fast Serialization of R Objects
 Version: 0.0.1
-Authors@R: person("utopp", role = c("aut", "cre"),
-    email = "uto.pampas@gmail.com")
+Authors@R: c(
+    person("Pedro", "Baltazar", role = c("aut", "cre", "cph"),
+           email = "pedrobtz@gmail.com"),
+    person("Yann", "Collet", role = "cph",
+           comment = "Author of the bundled LZ4 library"))
 Description: Provides a native serialization path for common R
     vectors, lists, matrices, and data frames. String vectors adapt between
     dictionary and flat layouts. An optional balanced preset dictionary-encodes
-    low-cardinality numeric vectors with bit-packed and optionally LZ4-compressed
+    low-cardinality numeric vectors with bit-packed and optionally 'LZ4'-compressed
     indexes, packs logical vectors into two bits per value, packs small-range
     integer offsets, and stores exact constant-delta numeric sequences
     compactly. High-cardinality doubles can use an exact XOR-delta and
-    byte-transpose transform with independent LZ4 blocks when it saves at least
-    12.5 percent. Flat string payloads use independent LZ4 blocks and run-length
+    byte-transpose transform with independent 'LZ4' blocks when it saves at least
+    12.5 percent. Flat string payloads use independent 'LZ4' blocks and run-length
     encoded metadata only when the combined representation is smaller.
     Unsupported objects automatically fall back to R's general serialization
     format.
 License: MIT + file LICENSE
+URL: https://github.com/pedrobtz/rdz
+BugReports: https://github.com/pedrobtz/rdz/issues
 Encoding: UTF-8
 RoxygenNote: 8.0.0
 Suggests:
     bench,
+    dplyr,
     fst,
     qs2,
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    tibble
 Config/testthat/edition: 3
 NeedsCompilation: yes
