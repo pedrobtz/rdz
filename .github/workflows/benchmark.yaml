@@ -3,18 +3,9 @@
 # comparison is against a genuinely multithreaded fst/qs2 rather than the
 # single-thread macOS build.
 #
-# Triggers:
-#   - pull_request (code/benchmark changes only): a reduced, fast run.
-#   - workflow_dispatch: a manual run with larger, configurable inputs.
+# Run manually with configurable workload sizes and iteration counts.
 # CI runners are noisy, so treat the timings as directional, not authoritative.
 on:
-  pull_request:
-    paths:
-      - "src/**"
-      - "R/**"
-      - "inst/benchmarks/**"
-      - "DESCRIPTION"
-      - ".github/workflows/benchmark.yaml"
   workflow_dispatch:
     inputs:
       iterations:
@@ -54,10 +45,9 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
-      # inputs.* is empty on pull_request, so fall back to lighter defaults.
-      RDZ_BENCH_ITERATIONS: ${{ inputs.iterations || '3' }}
-      RDZ_FST_N: ${{ inputs.fst_n || '200000' }}
-      RDZ_BENCH_N: ${{ inputs.bench_n || '200000' }}
+      RDZ_BENCH_ITERATIONS: ${{ inputs.iterations || '5' }}
+      RDZ_FST_N: ${{ inputs.fst_n || '1000000' }}
+      RDZ_BENCH_N: ${{ inputs.bench_n || '1000000' }}
       RDZ_FST_THREADS: ${{ inputs.fst_threads || '0' }}
 
     steps:

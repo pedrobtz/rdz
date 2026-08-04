@@ -24,12 +24,7 @@ Depends:
 Encoding: UTF-8
 RoxygenNote: 8.0.0
 Suggests:
-    bench,
     data.table,
-    dplyr,
-    fst,
-    qs2,
     testthat (>= 3.0.0),
-    tibble
 Config/testthat/edition: 3
 NeedsCompilation: yes

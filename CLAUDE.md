@@ -10,6 +10,11 @@ exported functions in [R/rdz.R](R/rdz.R): `write_rdz()`, `read_rdz()`,
 `explain_rdz()`, and `rdz_threads()`. All four are thin wrappers over `.Call`
 entry points registered in [src/init.c](src/init.c).
 
+Current work-in-progress status and near-term intent live in
+[docs-dev/status.md](docs-dev/status.md) — check it for what is actively
+changing before starting new work. Longer-term priorities and open decisions
+live in [docs-dev/roadmap.md](docs-dev/roadmap.md).
+
 ## Commands
 
 The package requires compilation (`NeedsCompilation: yes`). Use the R toolchain:
@@ -34,14 +39,10 @@ Command-line equivalents:
 R CMD build . && R CMD check rdz_*.tar.gz
 ```
 
-Benchmarks (not run by the test suite; require Suggests `qs2`, `fst`, `bench`):
-
-```sh
-Rscript inst/benchmarks/benchmark.R          # vs qs2 / qdata
-Rscript inst/benchmarks/data-frames-fst.R    # vs fst; RDZ_FST_THREADS=1 for single-threaded control
-```
-
-Environment knobs: `RDZ_BENCH_N`, `RDZ_BENCH_ITERATIONS`, `RDZ_FST_THREADS`.
+Benchmarks are not run by the test suite. Use the setup, commands, environment
+variables, and result locations in
+[inst/benchmarks/README.md](inst/benchmarks/README.md). The benchmark and native
+diagnostic GitHub Actions workflows are manual-only.
 
 ## Architecture
 
@@ -50,9 +51,15 @@ when it can preserve the object and falls back to R serialization otherwise;
 `"native"` errors instead of falling back; `"r"` forces R serialization.
 
 - **Native codec** — a recursive, single-pass tree serializer for atomic vectors,
-  strings, lists, matrices, and data frames. The reader memory-maps files on
-  POSIX (`mmap`) and uses a Windows fallback. This path does **not** preserve
-  shared list-node identity; recursive objects, ALTREP vectors, and unsupported
+  strings, lists, matrices, data frames, and top-level `data.table`s. The
+  `data.table` `.internal.selfref` external pointer is dropped on write and
+  rebuilt by `read_rdz()` via `data.table::setDT()` when the package is
+  installed (see `is_data_table_selfref` / `skip_data_table_selfref` in
+  [rdz.c](src/rdz.c)). The reader memory-maps files on POSIX (`mmap`) and uses a
+  Windows fallback. Integer and double **ALTREP** vectors are streamed through
+  bounded region reads rather than materialized; the balanced preset can store
+  their exact constant-delta sequences compactly (e.g. `1:n`). This path does
+  **not** preserve shared list-node identity; recursive objects and unsupported
   types deliberately route to R serialization.
 - **R codec** — a direct, uncompressed R serialization stream for everything the
   native path can't represent.
