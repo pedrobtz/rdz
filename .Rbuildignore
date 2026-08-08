@@ -1,0 +1,8 @@
+^rdz\.Rproj$
+^\.Rproj\.user$
+^\.github$
+
+^src/rust/\.cargo$
+^src/rust/target$
+^src/Makevars$
+^src/Makevars\.win$
