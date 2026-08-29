@@ -1,13 +1,21 @@
 [package]
 name = "rdz"
-version = "0.1.0"
+version = "0.0.0"
 edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "Rust codec for the rdz R package"
 
 [lib]
-crate-type = ["staticlib", "lib"]
+crate-type = ["staticlib"]
 
 [dependencies]
-savvy = "*"
+crc32fast = "=1.5.0"
+savvy = "=0.10.2"
+savvy-ffi = "=0.10.2"
+
+[features]
+savvy-test = []
 
 [profile.release]
 # By default, on release build, savvy terminates the R session when a panic

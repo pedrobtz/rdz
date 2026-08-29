@@ -1,8 +1,19 @@
 ^rdz\.Rproj$
 ^\.Rproj\.user$
 ^\.github$
+^\.agents$
+^AGENTS\.md$
+^CLAUDE\.md$
+^LICENSE\.md$
+^rust-toolchain\.toml$
 
+^src/\.cargo$
 ^src/rust/\.cargo$
-^src/rust/target$
+^src/rust/vendor$
+^src/rust/target [0-9]+$
 ^src/Makevars$
 ^src/Makevars\.win$
+^src/Makevars [0-9]+$
+^src/Makevars\.win [0-9]+$
+
+^src/rust/target$

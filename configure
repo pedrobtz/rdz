@@ -1,17 +1,16 @@
-# Even when `cargo` is on `PATH`, `rustc` might not in some cases. This adds
-# ~/.cargo/bin to PATH to address such cases. Note that is not always available
-# (e.g. or on Ubuntu with Rust installed via APT).
+# Prefer a user rustup toolchain when present. R CMD check can prepend an older
+# system Cargo to PATH even when the package-local toolchain is newer.
 if [ -d "${HOME}/.cargo/bin" ]; then
-  export PATH="${PATH}:${HOME}/.cargo/bin"
+  export PATH="${HOME}/.cargo/bin:${PATH}"
 fi
 
-CARGO_VERSION="$(cargo --version)"
+MIN_RUST_VERSION="1.88.0"
 
-if [ $? -ne 0 ]; then
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
   echo "-------------- ERROR: CONFIGURATION FAILED --------------------"
   echo ""
-  echo "The cargo command is not available. To install Rust, please refer"
-  echo "to the official instruction:"
+  echo "Cargo and rustc are both required to install rdz."
+  echo "Install them with your system package manager or rustup:"
   echo ""
   echo "https://www.rust-lang.org/tools/install"
   echo ""
@@ -20,13 +19,54 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# There's a little chance that rustc is not available on PATH while cargo is.
-# So, just ignore the error case.
-RUSTC_VERSION="$(rustc --version || true)"
+CARGO_VERSION="$(cargo --version)"
+RUSTC_VERSION="$(rustc --version)"
+CARGO_RELEASE="$(printf '%s\n' "${CARGO_VERSION}" | sed -n 's/^cargo \([0-9][0-9.]*\).*/\1/p')"
+RUSTC_RELEASE="$(printf '%s\n' "${RUSTC_VERSION}" | sed -n 's/^rustc \([0-9][0-9.]*\).*/\1/p')"
+
+version_at_least() {
+  awk -v current="$1" -v required="$2" 'BEGIN {
+    split(current, c, "."); split(required, r, ".")
+    for (i = 1; i <= 3; i++) {
+      c[i] += 0; r[i] += 0
+      if (c[i] > r[i]) exit 0
+      if (c[i] < r[i]) exit 1
+    }
+    exit 0
+  }'
+}
+
+if [ -z "${CARGO_RELEASE}" ] || [ -z "${RUSTC_RELEASE}" ] ||
+   ! version_at_least "${CARGO_RELEASE}" "${MIN_RUST_VERSION}" ||
+   ! version_at_least "${RUSTC_RELEASE}" "${MIN_RUST_VERSION}"; then
+  echo "-------------- ERROR: CONFIGURATION FAILED --------------------"
+  echo ""
+  echo "rdz requires cargo and rustc ${MIN_RUST_VERSION} or newer."
+  echo "Found: ${CARGO_VERSION}"
+  echo "Found: ${RUSTC_VERSION}"
+  echo "Please upgrade the Rust toolchain; rdz will not install it."
+  echo ""
+  echo "---------------------------------------------------------------"
+  exit 1
+fi
 
 # Report the version of Rustc to comply with the CRAN policy
 echo "using Rust package manager: '${CARGO_VERSION}'"
 echo "using Rust compiler: '${RUSTC_VERSION}'"
+
+if [ -f src/rust/vendor.tar.xz ]; then
+  mkdir -p src/rust/vendor src/.cargo
+  tar -xf src/rust/vendor.tar.xz -C src/rust/vendor
+  printf '%s\n' \
+    '[source.crates-io]' \
+    'replace-with = "vendored-sources"' \
+    '[source.vendored-sources]' \
+    'directory = "rust/vendor"' \
+    '[net]' \
+    'offline = true' \
+    '[target.x86_64-pc-windows-msvc]' \
+    'rustflags = ["-C", "link-arg=/FORCE:UNRESOLVED"]' > src/.cargo/config.toml
+fi
 
 if [ "$(uname)" = "Emscripten" ]; then
   TARGET="wasm32-unknown-emscripten"

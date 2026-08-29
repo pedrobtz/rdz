@@ -2,18 +2,31 @@
 % Please edit documentation in R/serialize.R
 \name{write_rdz}
 \alias{write_rdz}
-\title{Write an R Object to a File}
+\title{Write an R Object to an rdz File}
 \usage{
-write_rdz(x, path)
+write_rdz(x, path, mode = c("auto", "native", "r"))
 }
 \arguments{
-\item{x}{An R object to serialise.}
+\item{x}{An R object to serialize.}
 
-\item{path}{Path of the file to write to.}
+\item{path}{A single, non-missing path to write.}
+
+\item{mode}{Codec selection. \code{"auto"} uses a native codec only when the
+complete value is supported and otherwise uses whole-root R serialization;
+\code{"native"} rejects unsupported values; \code{"r"} forces R serialization.}
 }
 \value{
 \code{path}, invisibly.
 }
 \description{
-Initial implementation: delegates to \code{\link[base:saveRDS]{base::saveRDS()}}.
+\code{write_rdz()} writes an object through the versioned \code{rdz} block container.
+Plain logical vectors and logical vectors with a supported \code{names} attribute
+use the native two-bit codec. Other objects use a whole-root, portable R XDR
+stream in automatic mode.
+}
+\examples{
+path <- tempfile(fileext = ".rdz")
+write_rdz(list(answer = 42L), path)
+read_rdz(path)
+unlink(path)
 }

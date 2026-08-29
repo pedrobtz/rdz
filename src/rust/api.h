@@ -1,8 +1,6 @@
-SEXP savvy_int_times_int__ffi(SEXP c_arg__x, SEXP c_arg__y);
-SEXP savvy_to_upper__ffi(SEXP c_arg__x);
-
-// methods and associated functions for Person
-SEXP savvy_Person_associated_function__ffi(void);
-SEXP savvy_Person_name__ffi(SEXP self__);
-SEXP savvy_Person_new__ffi(void);
-SEXP savvy_Person_set_name__ffi(SEXP self__, SEXP c_arg__name);
+SEXP savvy_rdz_file_info__ffi(SEXP c_arg__path);
+SEXP savvy_rdz_read__ffi(SEXP c_arg__path);
+SEXP savvy_rdz_read_native_names__ffi(SEXP c_arg__path);
+SEXP savvy_rdz_root_length__ffi(SEXP c_arg__x);
+SEXP savvy_rdz_try_write_native__ffi(SEXP c_arg__x, SEXP c_arg__path, SEXP c_arg__strict);
+SEXP savvy_rdz_write_generic__ffi(SEXP c_arg__payload, SEXP c_arg__synopsis, SEXP c_arg__path);

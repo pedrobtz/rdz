@@ -2,6 +2,11 @@
 *.so
 *.dll
 target
+target [0-9]*
+/.cargo/
+rust/vendor/
 
 Makevars
 Makevars.win
+Makevars [0-9]*
+Makevars.win [0-9]*

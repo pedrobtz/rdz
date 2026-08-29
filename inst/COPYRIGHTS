@@ -1,0 +1,49 @@
+The rdz source package bundles the Rust crates listed below. The complete
+license texts and notices distributed by each crate are retained in
+src/rust/vendor.tar.xz.
+
+cc 1.4.0 and find-msvc-tools 0.1.9
+  Author and copyright holder: Alex Crichton and contributors
+  License: MIT OR Apache-2.0
+  Source: https://github.com/rust-lang/cc-rs
+
+cfg-if 1.0.4
+  Author and copyright holder: Alex Crichton
+  License: MIT OR Apache-2.0
+  Source: https://github.com/rust-lang/cfg-if
+
+crc32fast 1.5.0
+  Authors and copyright holders: Sam Rijs, Alex Crichton, and contributors
+  License: MIT OR Apache-2.0
+  Source: https://github.com/srijs/rust-crc32fast
+
+proc-macro2 1.0.107
+  Authors and copyright holders: David Tolnay, Alex Crichton, and contributors
+  License: MIT OR Apache-2.0
+  Source: https://github.com/dtolnay/proc-macro2
+
+quote 1.0.47
+  Author and copyright holder: David Tolnay and contributors
+  License: MIT OR Apache-2.0
+  Source: https://github.com/dtolnay/quote
+
+savvy 0.10.2, savvy-bindgen 0.10.2, savvy-ffi 0.10.2, and savvy-macro 0.10.2
+  Author and copyright holder: Hiroaki Yutani and contributors
+  License: MIT
+  Source: https://github.com/yutannihilation/savvy
+
+shlex 2.0.1
+  Authors and copyright holders: comex, Fenhl, Adrian Taylor, Alex Touchet,
+  Daniel Parks, Garrett Berg, and contributors
+  License: MIT OR Apache-2.0
+  Source: https://github.com/comex/rust-shlex
+
+syn 2.0.119
+  Author and copyright holder: David Tolnay and contributors
+  License: MIT OR Apache-2.0
+  Source: https://github.com/dtolnay/syn
+
+unicode-ident 1.0.24
+  Author and copyright holder: David Tolnay and contributors
+  License: (MIT OR Apache-2.0) AND Unicode-3.0
+  Source: https://github.com/dtolnay/unicode-ident

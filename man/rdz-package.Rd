@@ -4,17 +4,12 @@
 \name{rdz-package}
 \alias{rdz}
 \alias{rdz-package}
-\title{rdz: What the Package Does (One Line, Title Case)}
+\title{rdz: Versioned Serialization for R Objects}
 \description{
-What the package does (one paragraph).
+Writes and reads R objects using a versioned container format implemented in Rust. The format preserves R serialization semantics while adding explicit format identification, length validation, and integrity checking.
 }
 \author{
-\strong{Maintainer}: First Last \email{first.last@example.com}
-
-Authors:
-\itemize{
-  \item First Last \email{first.last@example.com}
-}
+\strong{Maintainer}: Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]
 
 }
 \keyword{internal}

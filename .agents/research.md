@@ -92,6 +92,10 @@ and weak references. `qs2` supplies no custom persistence hook, and its
 native-endian envelope is not cross-endian. So “all R objects” is accurate for
 ordinary serializable R values, not for arbitrary native runtime state.
 
+RDZ deliberately does not inherit the native-endian limitation. Its native codec
+uses canonical little-endian fields, and its generic whole-root codec uses R's
+portable XDR stream as required by [portability.md](portability.md).
+
 ## `qdata`: custom, restricted R object encoding
 
 `qdata` bypasses `R_Serialize()` for speed and compression. It recognizes only
@@ -177,14 +181,28 @@ attributes and unsupported column/list types are not a general extension point.
 
 ## Implications for `rdz`
 
-For complete R-object fidelity, the reusable `qs2` idea is to keep R's serializer
-as the semantic layer and optimize only framing, compression, checksums, and IO.
-`qdata` demonstrates the performance benefit—and compatibility cost—of separating
-a compact structure tree from homogeneous payloads. `fst` contributes the best
-ideas for a tabular specialization: per-column metadata, small independently
-indexed blocks, type-specific transforms, mixed codecs, and selective reads.
+For complete R-object fidelity, RDZ adopts the reusable `qs2` idea as its generic
+fallback: keep one whole-root R serialization stream as the semantic layer and
+optimize its framing, compression, checksums, and IO. `qdata` demonstrates the
+performance benefit—and compatibility cost—of separating a compact structure tree
+from homogeneous payloads, which motivates RDZ's dedicated native codec for the
+common subset. `fst` contributes ideas for the data-frame fast path: per-column
+metadata, small independently indexed blocks, type-specific transforms, mixed
+codecs, and selective reads.
 
-These strategies should remain distinct in `rdz`: a general format needs explicit
-tests for every R `SEXPTYPE` and R's native-resource caveats, while an optional
-tabular fast path can use `fst`-style indexes without defining the semantics of the
-general object format.
+These strategies remain distinct in RDZ through explicit payload codec IDs. The
+generic codec covers every object base R can serialize, subject to R's normal
+native-resource caveats. The native codec accelerates supported vectors and
+compositions without redefining closures, environments, and other rare graph
+semantics. Whole-root fallback preserves reference relationships that separate
+per-child serialization calls would lose.
+
+## Related documents
+
+- [Architecture](architecture.md)
+- [Performance design](performance.md)
+- [Implementation roadmap](roadmap.md)
+- [Validation and benchmarking](validation.md)
+- [R SEXP coverage matrix](sexp-coverage.md)
+- [Cross-OS portability](portability.md)
+- [Encoding and format research](encoding-research.md)

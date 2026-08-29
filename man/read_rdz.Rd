@@ -2,16 +2,23 @@
 % Please edit documentation in R/serialize.R
 \name{read_rdz}
 \alias{read_rdz}
-\title{Read an R Object from a File}
+\title{Read an R Object from an rdz File}
 \usage{
 read_rdz(path)
 }
 \arguments{
-\item{path}{Path of the file to read from.}
+\item{path}{A single, non-missing path to read.}
 }
 \value{
 The R object stored in \code{path}.
 }
 \description{
-Initial implementation: delegates to \code{\link[base:readRDS]{base::readRDS()}}.
+\code{read_rdz()} validates the header, trailer, directory, block headers, bounds,
+and block checksums before deserializing a generic payload.
+}
+\examples{
+path <- tempfile(fileext = ".rdz")
+write_rdz(c(TRUE, FALSE, NA), path)
+read_rdz(path)
+unlink(path)
 }

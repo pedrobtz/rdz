@@ -20,6 +20,14 @@ all: $(SHLIB) clean_intermediate
 $(SHLIB): $(STATLIB)
 
 $(STATLIB):
+	# R's source cleanup can remove static archives from Cargo's build-script
+	# output while leaving Cargo's freshness metadata. Refresh the affected
+	# crates when that happens so repeated load_all(recompile = TRUE) works.
+	if [ -d "$(LIBDIR)/build" ] && \
+	   ! find "$(LIBDIR)/build" -path '*/savvy-*/out/*unwind_protect*' -print -quit | grep -q .; then \
+	  cd rust && cargo clean --profile $(PROFILE) --target $(TARGET) --package savvy --package savvy-ffi --manifest-path Cargo.toml --target-dir $(TARGET_DIR); \
+	fi
+
 	# When the GNU toolchain is used (i.e. on CRAN), -lgcc_eh is specified for
 	# building proc-macro2, but Rtools doesn't contain libgcc_eh. This isn't used
 	# in actual, but we need this tweak to please the compiler.
@@ -30,7 +38,7 @@ $(STATLIB):
 	  export CC="$(CC)" && \
 	  export CFLAGS="$(CFLAGS)" && \
 	  export RUSTFLAGS="$(RUSTFLAGS)" && \
-	  cargo build --target $(TARGET) --lib --profile $(PROFILE) $(FEATURE_FLAGS) --manifest-path ./rust/Cargo.toml --target-dir $(TARGET_DIR)
+	  cd rust && cargo build --jobs 2 --offline --locked --target $(TARGET) --lib --profile $(PROFILE) $(FEATURE_FLAGS) --manifest-path Cargo.toml --target-dir $(TARGET_DIR)
 
 clean_intermediate: $(SHLIB)
 	rm -f $(STATLIB)

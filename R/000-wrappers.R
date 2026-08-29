@@ -37,68 +37,34 @@ NULL
   stop(class, " cannot be modified", call. = FALSE)
 }
 
-#' Multiply Input By Another Input
-#'
-#' @param x An integer vector.
-#' @param y An integer to multiply.
-#' @returns An integer vector with values multiplied by `y`.
-#' @export
-`int_times_int` <- function(`x`, `y`) {
-  .Call(savvy_int_times_int__impl, `x`, `y`)
-}
 
-#' Convert Input To Upper-Case
-#'
-#' @param x A character vector.
-#' @returns A character vector with upper case version of the input.
-#' @export
-`to_upper` <- function(`x`) {
-  .Call(savvy_to_upper__impl, `x`)
-}
-
-### wrapper functions for Person
-
-`Person_name` <- function(self) {
-  function() {
-    .Call(savvy_Person_name__impl, `self`)
-  }
-}
-
-`Person_set_name` <- function(self) {
-  function(`name`) {
-    invisible(.Call(savvy_Person_set_name__impl, `self`, `name`))
-  }
-}
-
-`.savvy_wrap_Person` <- function(ptr) {
-  e <- new.env(parent = emptyenv())
-  e$.ptr <- ptr
-  e$`name` <- `Person_name`(ptr)
-  e$`set_name` <- `Person_set_name`(ptr)
-
-  class(e) <- c("rdz::Person", "Person", "savvy_rdz__sealed")
-  e
+`rdz_file_info` <- function(`path`) {
+  .Call(savvy_rdz_file_info__impl, `path`)
 }
 
 
-
-`Person` <- new.env(parent = emptyenv())
-
-### associated functions for Person
-
-`Person`$`associated_function` <- function() {
-  .Call(savvy_Person_associated_function__impl)
-}
-
-`Person`$`new` <- function() {
-  .savvy_wrap_Person(.Call(savvy_Person_new__impl))
+`rdz_read` <- function(`path`) {
+  .Call(savvy_rdz_read__impl, `path`)
 }
 
 
-class(`Person`) <- c("rdz::Person__bundle", "savvy_rdz__sealed")
-
-#' @export
-`print.rdz::Person__bundle` <- function(x, ...) {
-  cat('rdz::Person\n')
+`rdz_read_native_names` <- function(`path`) {
+  .Call(savvy_rdz_read_native_names__impl, `path`)
 }
+
+
+`rdz_root_length` <- function(`x`) {
+  .Call(savvy_rdz_root_length__impl, `x`)
+}
+
+
+`rdz_try_write_native` <- function(`x`, `path`, `strict`) {
+  .Call(savvy_rdz_try_write_native__impl, `x`, `path`, `strict`)
+}
+
+
+`rdz_write_generic` <- function(`payload`, `synopsis`, `path`) {
+  invisible(.Call(savvy_rdz_write_generic__impl, `payload`, `synopsis`, `path`))
+}
+
 
