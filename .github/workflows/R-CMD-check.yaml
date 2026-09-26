@@ -1,0 +1,26 @@
+# Reusable workflow from https://github.com/pedrobtz/r-actions
+on:
+  push:
+    branches: [main, master]
+  # `labeled` so that adding `full-ci` to a pull request reruns it in full.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+name: R-CMD-check
+
+permissions: read-all
+
+# A new push to a pull request cancels the run it supersedes. Pushes to main
+# get a group of their own, so every merge is checked and none is cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  R-CMD-check:
+    uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@v1
+    with:
+      # Quick on each push to a pull request, full after merge. The
+      # `full-ci` label runs the full set on a pull request before merging.
+      profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}
+      rust: true

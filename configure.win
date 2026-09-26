@@ -1,0 +1,93 @@
+if [ -d "${HOME}/.cargo/bin" ]; then
+  export PATH="${HOME}/.cargo/bin:${PATH}"
+fi
+
+MIN_RUST_VERSION="1.88.0"
+
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+  echo "-------------- ERROR: CONFIGURATION FAILED --------------------"
+  echo ""
+  echo "Cargo and rustc are both required to install rdz."
+  echo "Install them with your system package manager or rustup:"
+  echo ""
+  echo "https://www.rust-lang.org/tools/install"
+  echo ""
+  echo "---------------------------------------------------------------"
+
+  exit 1
+fi
+
+CARGO_VERSION="$(cargo --version)"
+RUSTC_VERSION="$(rustc --version)"
+CARGO_RELEASE="$(printf '%s\n' "${CARGO_VERSION}" | sed -n 's/^cargo \([0-9][0-9.]*\).*/\1/p')"
+RUSTC_RELEASE="$(printf '%s\n' "${RUSTC_VERSION}" | sed -n 's/^rustc \([0-9][0-9.]*\).*/\1/p')"
+
+version_at_least() {
+  awk -v current="$1" -v required="$2" 'BEGIN {
+    split(current, c, "."); split(required, r, ".")
+    for (i = 1; i <= 3; i++) {
+      c[i] += 0; r[i] += 0
+      if (c[i] > r[i]) exit 0
+      if (c[i] < r[i]) exit 1
+    }
+    exit 0
+  }'
+}
+
+if [ -z "${CARGO_RELEASE}" ] || [ -z "${RUSTC_RELEASE}" ] ||
+   ! version_at_least "${CARGO_RELEASE}" "${MIN_RUST_VERSION}" ||
+   ! version_at_least "${RUSTC_RELEASE}" "${MIN_RUST_VERSION}"; then
+  echo "-------------- ERROR: CONFIGURATION FAILED --------------------"
+  echo ""
+  echo "rdz requires cargo and rustc ${MIN_RUST_VERSION} or newer."
+  echo "Found: ${CARGO_VERSION}"
+  echo "Found: ${RUSTC_VERSION}"
+  echo "Please upgrade the Rust toolchain; rdz will not install it."
+  echo ""
+  echo "---------------------------------------------------------------"
+  exit 1
+fi
+
+# Report the version of Rustc to comply with the CRAN policy
+echo "using Rust package manager: '${CARGO_VERSION}'"
+echo "using Rust compiler: '${RUSTC_VERSION}'"
+
+if [ -f src/rust/vendor.tar.xz ]; then
+  mkdir -p src/rust/vendor src/.cargo
+  # R's internal untar decompresses xz itself, so no xz binary is needed.
+  if ! "${R_HOME}/bin${R_ARCH_BIN}/Rscript.exe" --vanilla -e \
+    'stopifnot(utils::untar("src/rust/vendor.tar.xz", exdir = "src/rust/vendor", tar = "internal") == 0L)'; then
+    echo "ERROR: failed to extract the vendored Rust crates from src/rust/vendor.tar.xz" >&2
+    exit 1
+  fi
+  printf '%s\n' \
+    '[source.crates-io]' \
+    'replace-with = "vendored-sources"' \
+    '[source.vendored-sources]' \
+    'directory = "rust/vendor"' \
+    '[net]' \
+    'offline = true' \
+    '[target.x86_64-pc-windows-msvc]' \
+    'rustflags = ["-C", "link-arg=/FORCE:UNRESOLVED"]' > src/.cargo/config.toml
+fi
+
+# allow overriding profile externally (e.g. on CI)
+if [ -n "${SAVVY_PROFILE}" ]; then
+  PROFILE="${SAVVY_PROFILE}"
+# catch DEBUG envvar, which is passed from pkgbuild::compile_dll()
+elif [ "${DEBUG}" = "true" ]; then
+  PROFILE=dev
+else
+  PROFILE=release
+fi
+
+# e.g. SAVVY_FEATURES="a b"  -->  "--features 'a b'"
+if [ -n "${SAVVY_FEATURES}" ]; then
+  FEATURE_FLAGS="--features '${SAVVY_FEATURES}'"
+fi
+
+sed \
+  -e "s/@TARGET@/x86_64-pc-windows-gnu/" \
+  -e "s/@PROFILE@/${PROFILE}/" \
+  -e "s/@FEATURE_FLAGS@/${FEATURE_FLAGS}/" \
+  src/Makevars.win.in > src/Makevars.win
