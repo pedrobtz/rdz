@@ -56,7 +56,12 @@ echo "using Rust compiler: '${RUSTC_VERSION}'"
 
 if [ -f src/rust/vendor.tar.xz ]; then
   mkdir -p src/rust/vendor src/.cargo
-  tar -xf src/rust/vendor.tar.xz -C src/rust/vendor
+  # R's internal untar decompresses xz itself, so no xz binary is needed.
+  if ! "${R_HOME}/bin/Rscript" --vanilla -e \
+    'stopifnot(utils::untar("src/rust/vendor.tar.xz", exdir = "src/rust/vendor", tar = "internal") == 0L)'; then
+    echo "ERROR: failed to extract the vendored Rust crates from src/rust/vendor.tar.xz" >&2
+    exit 1
+  fi
   printf '%s\n' \
     '[source.crates-io]' \
     'replace-with = "vendored-sources"' \

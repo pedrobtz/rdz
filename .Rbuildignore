@@ -17,3 +17,4 @@
 ^src/Makevars\.win [0-9]+$
 
 ^src/rust/target$
+^review\.md$
