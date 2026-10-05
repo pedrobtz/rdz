@@ -94,19 +94,6 @@ test_that("the C writer refuses a directory and an oversized synopsis", {
   expect_length(list.files(dir, all.files = TRUE, no.. = TRUE), 0L)
 })
 
-test_that("files the C writer writes are read by the Rust reference", {
-  skip_without_rust()
-  path <- tempfile(fileext = ".rdz")
-  on.exit(unlink(path), add = TRUE)
-  x <- list(a = 1:10, b = letters, c = list(pi, NULL))
-  synopsis <- serialize(rdz:::build_rdz_synopsis(x), NULL, xdr = TRUE, version = 3L)
-  payload <- serialize(x, NULL, xdr = TRUE, version = 3L)
-  rdz:::rdz_check(.Call(rdz:::rdz_test_write_generic, payload, synopsis, path))
-  as_rust_header(path)
-  expect_identical(unserialize(rdz:::rdz_read(path)$value), x)
-  expect_identical(rdz_info(path)$synopsis$root_type, "list")
-})
-
 test_that("files record the writer, which matches the package version", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)

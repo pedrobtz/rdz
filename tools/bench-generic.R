@@ -1,6 +1,5 @@
 # The generic codec, forced (plan-c Stage C): rdz's streamed C writer and
-# reader against the Rust implementation's whole-payload path (when built),
-# qs2 and saveRDS(), one thread each. Run against an installed rdz:
+# reader against qs2 and saveRDS(), one thread each. Run against an installed rdz:
 #
 #   Rscript tools/bench-generic.R
 #
@@ -35,14 +34,6 @@ writers <- list(
   rdz_c = list(
     write = function(x, p) write_rdz(x, p, mode = "r"),
     read = function(p) read_rdz(p)
-  ),
-  rdz_rust = if (rdz:::rdz_has_rust()) list(
-    write = function(x, p) {
-      payload <- serialize(x, NULL, xdr = TRUE, version = 3L)
-      synopsis <- serialize(rdz:::build_rdz_synopsis(x), NULL, xdr = TRUE, version = 3L)
-      rdz:::rdz_write_generic(payload, synopsis, p)
-    },
-    read = function(p) unserialize(rdz:::rdz_read(p)$value)
   ),
   qs2 = list(
     write = function(x, p) qs2::qs_save(x, p, nthreads = 1L),

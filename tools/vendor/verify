@@ -52,7 +52,7 @@ declared=$(
         manifest_field "$src" defines | tr ',' '\n'
     done | LC_ALL=C sort -u
 )
-for mv in src/Makevars.in src/Makevars.win.in; do
+for mv in src/Makevars src/Makevars.win; do
     flags=$(sed 's/#.*//' "$mv")
     for d in $declared; do
         if ! printf '%s\n' "$flags" | grep -q -- "-D$d\b"; then

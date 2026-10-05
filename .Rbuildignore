@@ -5,18 +5,9 @@
 ^AGENTS\.md$
 ^CLAUDE\.md$
 ^LICENSE\.md$
-^rust-toolchain\.toml$
-
-^src/\.cargo$
-^src/rust/\.cargo$
-^src/rust/vendor$
-^src/rust/target [0-9]+$
-^src/Makevars$
-^src/Makevars\.win$
+^cran-comments\.md$
 ^src/Makevars [0-9]+$
 ^src/Makevars\.win [0-9]+$
-
-^src/rust/target$
 ^review\.md$
 ^fuzz$
 ^\.git$

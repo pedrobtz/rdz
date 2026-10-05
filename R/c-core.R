@@ -34,12 +34,6 @@ rdz_c_file_info <- function(path) {
   rdz_check(.Call(rdz_c_info, path))
 }
 
-# Whether this build has the Rust reference implementation, which writing
-# and reading need until the C port replaces them.
-rdz_has_rust <- function() {
-  .Call(rdz_c_has_rust)
-}
-
 # The settings the C writer and reader take: c(zstd level, threads, block
 # size). Options, documented in ?write_rdz:
 #

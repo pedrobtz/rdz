@@ -59,19 +59,6 @@ test_that("the classifier rejects an impossible logical value the same way", {
   expect_identical(read_rdz(paths[[1L]]), x)
 })
 
-test_that("the Rust reference reads what the C native writer writes", {
-  skip_without_rust()
-  old <- options(rdz.preset = "speed") # the Rust reader predates compression
-  on.exit(options(old), add = TRUE)
-  path <- tempfile(fileext = ".rdz")
-  on.exit(unlink(path), add = TRUE)
-  for (spec in native_specs()) {
-    with_dictionary_policy(spec$policy, write_rdz(spec$value(), path, mode = "native"))
-    as_rust_header(path)
-    expect_identical(rdz:::rdz_read(path)$value, spec$value(), label = spec$name)
-  }
-})
-
 test_that("strict native mode raises rdz_unsupported_error and leaves no file", {
   path <- tempfile(fileext = ".rdz")
   expect_error(write_rdz(1i, path, mode = "native"), class = "rdz_unsupported_error")

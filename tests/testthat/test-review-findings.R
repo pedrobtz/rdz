@@ -99,12 +99,10 @@ test_that(".Rbuildignore excludes stray build artifacts and agent guidance", {
     ))
   }
 
-  expect_true(is_ignored("src/rust/target"))
-  # macOS duplicates the directory rather than the file when a name collides.
-  # `^src/rust/target$` is anchored and does not match, so 62 MB of Cargo
-  # artifacts land in the source tarball.
-  expect_true(is_ignored("src/rust/target 2"))
-  expect_true(is_ignored("src/rust/vendor"))
+  # macOS duplicates a file when a name collides: a stray copy of the
+  # Makevars must not ship, the Makevars itself must
+  expect_true(is_ignored("src/Makevars 2"))
+  expect_false(is_ignored("src/Makevars"))
   # CLAUDE.md is a symlink to the ignored AGENTS.md, and `tar` follows it.
   expect_true(is_ignored("CLAUDE.md"))
 })

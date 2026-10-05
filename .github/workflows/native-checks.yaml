@@ -1,7 +1,4 @@
 # The family's native gates (plan-c.md section 7), from pedrobtz/r-actions.
-# Where a workflow takes an environment, RDZ_RUST=0 builds the C
-# implementation alone, which is what these gates are for; valgrind and LTO
-# build the Rust reference implementation as well when the runner has cargo.
 on:
   push:
     branches: [main, master]
@@ -22,8 +19,6 @@ jobs:
     with:
       asan: true
       profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}
-      env: |
-        RDZ_RUST=0
 
   valgrind:
     uses: pedrobtz/r-actions/.github/workflows/valgrind.yml@70cdfd7c6d62f42828e931a7f061ce998bb0e8f5 # v1.21.0
@@ -38,8 +33,6 @@ jobs:
     with:
       profile: ${{ github.event_name == 'pull_request' && 'quick' || 'full' }}
       timeout-minutes: 240
-      env: |
-        RDZ_RUST=0
 
   rchk:
     uses: pedrobtz/r-actions/.github/workflows/rchk.yml@70cdfd7c6d62f42828e931a7f061ce998bb0e8f5 # v1.21.0

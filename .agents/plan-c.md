@@ -303,6 +303,9 @@ and the complete `rdz_schema()`/`rdz_attributes()` surface.
 
 ### Stage I — Tuning, fuzzing, the freeze, 0.1.0 · M
 
+**Status:** done 2026-10-05 but the submission, which waits for zufast and zubin on CRAN
+(current-state.md, "Checkpoint 2026-10-05: plan-c Stage I").
+
 **Do:** roadmap Phase 8 as written, minus the generic-bridge item already done in Stage C;
 cross-OS fixture exchange between CI jobs; the frozen 0.1.0 fixtures; mutation checks on
 every reader guard (`/* GUARD */` markers, zucbor's tool); `cran-comments.md`; the Rust tree

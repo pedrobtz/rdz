@@ -1,7 +1,6 @@
 # The C implementation on 32-bit x86, musl and big-endian s390x (plan-c.md
 # section 7): the s390x leg reads the little-endian reference corpus and
-# writes files the corpus test compares byte for byte. The containers have no
-# cargo, so these build the C implementation alone.
+# writes files the corpus test compares byte for byte.
 on:
   schedule:
     - cron: "17 5 * * 2"

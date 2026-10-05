@@ -1,6 +1,5 @@
-The rdz source package bundles third-party code: the Zstandard library,
-compiled into rdz, and the Rust crates of the Rust reference implementation,
-which is built only when cargo is available and is to be removed.
+The rdz source package bundles one third-party library: Zstandard, compiled
+into rdz.
 
 -------------------------------------------------------------------------------
 Zstandard (src/vendor/zstd/)
@@ -23,51 +22,3 @@ ZSTDLIB_VISIBLE and ZSTDERRORLIB_VISIBLE empty so that no zstd symbol is
 exported. tools/vendor/manifest.tsv records the archive checksum, and
 tools/vendor/verify checks the vendored files against
 tools/vendor/checksums.sha256.
-
--------------------------------------------------------------------------------
-Rust crates (src/rust/vendor.tar.xz)
--------------------------------------------------------------------------------
-
-The complete license texts and notices distributed by each crate are retained
-in src/rust/vendor.tar.xz.
-
-cc 1.4.0 and find-msvc-tools 0.1.9
-  Author and copyright holder: Alex Crichton and contributors
-  License: MIT OR Apache-2.0
-  Source: https://github.com/rust-lang/cc-rs
-
-proc-macro2 1.0.107
-  Authors and copyright holders: David Tolnay, Alex Crichton, and contributors
-  License: MIT OR Apache-2.0
-  Source: https://github.com/dtolnay/proc-macro2
-
-quote 1.0.47
-  Author and copyright holder: David Tolnay and contributors
-  License: MIT OR Apache-2.0
-  Source: https://github.com/dtolnay/quote
-
-savvy 0.10.2, savvy-bindgen 0.10.2, savvy-ffi 0.10.2, and savvy-macro 0.10.2
-  Author and copyright holder: Hiroaki Yutani and contributors
-  License: MIT
-  Source: https://github.com/yutannihilation/savvy
-
-shlex 2.0.1
-  Authors and copyright holders: comex, Fenhl, Adrian Taylor, Alex Touchet,
-  Daniel Parks, Garrett Berg, and contributors
-  License: MIT OR Apache-2.0
-  Source: https://github.com/comex/rust-shlex
-
-syn 2.0.119
-  Author and copyright holder: David Tolnay and contributors
-  License: MIT OR Apache-2.0
-  Source: https://github.com/dtolnay/syn
-
-unicode-ident 1.0.24
-  Author and copyright holder: David Tolnay and contributors
-  License: (MIT OR Apache-2.0) AND Unicode-3.0
-  Source: https://github.com/dtolnay/unicode-ident
-
-xxhash-rust 0.8.19
-  Author and copyright holder: Douman
-  License: BSL-1.0
-  Source: https://github.com/DoumanAsh/xxhash-rust

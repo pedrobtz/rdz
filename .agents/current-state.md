@@ -1,5 +1,60 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-05: plan-c Stage I
+
+The format froze. Four pull requests:
+
+1. **Mutation check.** `tools/run-mutation-check` disables each of 22
+   reader guards in turn: checksums, bounds, graph ranges and depth, record
+   lengths, run ends, the dictionary range and the zstd length. Each guard's
+   hostile file (`tools/c-tests/probe.c`) must then get a different answer.
+2. **Extension points**, from a second-opinion review of the format before
+   the freeze (container-format.md, "Compatibility and extension"):
+   - block sizes are the writer's policy;
+   - directory records may grow, and readers skip the bytes they do not know;
+   - every flags word has a must-understand half and an ignorable half;
+   - the header records the writer and its version;
+   - versions bump only when an existing meaning changes.
+3. **Coverage.**
+   - General attributes (kind 8): any ASCII-named attribute with a native
+     value, nested. Dates, POSIXct, difftime, matrices, POSIXlt, keyed
+     data.tables and tibbles with extra attributes are now native.
+   - ALTREP vectors are written from their data.
+   - Automatic mode leaves an object of 1,024 or more parts averaging under
+     1 KiB to the generic codec. A list of 500,000 pairs was 88 MB native and
+     is 1 MB generic.
+4. **The freeze.**
+   - The Rust implementation is retired: no `configure`, no cargo, static
+     `Makevars`. Its corpus stays as read-compatibility data.
+   - The frozen corpus (`tests/testthat/fixtures/v0.1.0/`, 42 files, 1.6 MB)
+     covers every block encoding, both compressions, generic and native, and
+     every object kind. Every later rdz must read it to its specs' values, and
+     must rewrite its `speed` files byte for byte apart from the writer field.
+   - `exchange.yaml` writes the corpus's specs on Linux, macOS and Windows, and
+     reads every platform's files on every platform. The s390x leg reads the
+     corpus and rewrites it byte for byte.
+   - `cran-comments.md` is written.
+
+`tools/bench-dataframe.R`-style frame, 5e6 rows (integer id, Date, POSIXct,
+double, factor), now native where it was generic; times in ms:
+
+| Threads | rdz write / read | qs2 write / read | rdz MB | qs2 MB |
+|---|---|---|---:|---:|
+| 1 | 240 / 119 | 454 / 142 | 64.8 | 67.9 |
+| 8 | 73 / 53 | 151 / 37 | 64.8 | 67.9 |
+
+Threads stay at one by default, so the default never competes for a CRAN
+machine's cores.
+
+The CRAN submission waits for zufast and then zubin to be on CRAN.
+
+After 0.1.0, all additive (no format change):
+- attribute access below the root;
+- selective column reads;
+- data frame matrix columns (they need a column-length rule, which is a
+  format addition);
+- native-encoded non-ASCII strings in UTF-8 sessions (portability.md's call).
+
 ## Checkpoint 2026-10-05: plan-c Stage H
 
 Lists and data frames are native, as object graphs (container-format.md,

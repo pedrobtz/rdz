@@ -2,9 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`rdz` is an R package being re-implemented in C on zubin and zufast (`.agents/plan-c.md`, adopted 2026-10-05). User-facing code lives in `R/`. The C implementation is `src/core/` (R-free: records, container reader and writer, file IO; it never includes an R header and compiles standalone into `tools/c-tests/` and `fuzz/`) and `src/rdz_r.c` (the `.Call` entry points), registered by `src/rdz_init.c`. Until the C port replaces it stage by stage, the Rust implementation in `src/rust/` is the oracle: `configure` builds it when R is 4.5 or newer and cargo and rustc 1.88 are available (`RDZ_RUST=0` disables it, `RDZ_RUST=1` requires it), and tests that need it call `skip_without_rust()`. Tests are in `tests/testthat/`; the Rust reference corpus is in `tests/testthat/fixtures/rust/`; benchmarks and scripts are in `tools/`.
-
-Savvy generated `R/000-wrappers.R`, `src/init.c` and `src/rust/api.h`; savvy-cli is no longer run, and they change only as the Rust implementation is retired.
+`rdz` is an R package implemented in C on zubin and zufast (`.agents/plan-c.md`, adopted 2026-10-05; the Rust implementation it replaced was retired at Stage I). User-facing code lives in `R/`. The C implementation is `src/core/` (R-free: records, container reader and writer, codecs, pipeline, file IO; it never includes an R header and compiles standalone into `tools/c-tests/` and `fuzz/`), `src/adapter/` (the R boundary: the generic codec's streams, the native planner and reader) and `src/rdz_r.c` (the `.Call` entry points), registered by `src/rdz_init.c`. Tests are in `tests/testthat/`: the frozen 0.1.0 corpus in `fixtures/v0.1.0/` and the retired Rust implementation's corpus in `fixtures/rust/`, both read-compatibility data; benchmarks and scripts are in `tools/`.
 
 Project design and implementation guidance lives in:
 
@@ -69,44 +67,25 @@ native-word-order scalars, pointer widths, addresses, or CPU-specific requiremen
 ## Build, Test, and Development Commands
 
 - `Rscript -e 'roxygen2::roxygenise()'` regenerates R documentation.
-- `tools/run-c-tests` runs the R-free C core under its harness (warnings are errors, ASan and UBSan on), against the Rust reference corpus.
+- `tools/run-c-tests` runs the R-free C core under its harness (warnings are errors, ASan and UBSan on), against the reference corpora.
 - A version bump in `DESCRIPTION` updates `RDZ_WRITER_*` in `src/core/rdz_format.h` (the header's writer field; `test-c-container.R` checks the two agree).
 - `tools/run-mutation-check` proves each `/* GUARD: name */` reader guard load-bearing against its hostile file in `tools/c-tests/probe.c`.
 - `tools/run-fuzz [seconds]` fuzzes the container reader after its canary has crashed; `tools/run-fuzz --replay` runs the seeds and corpus once where the compiler has no libFuzzer.
-- `RDZ_RUST=0 R CMD INSTALL --preclean .` builds the C implementation alone.
+- `Rscript tools/exchange.R write DIR` and `check DIR...` exchange the frozen corpus's specs between platforms (`exchange.yaml`); `tools/make-frozen-fixtures.R` wrote the corpus once and is never rerun over it.
 - `Rscript -e 'testthat::test_local(reporter = "summary")'` runs R integration tests.
-- `cargo test --manifest-path src/rust/Cargo.toml` runs pure Rust tests that do not require R.
-- `savvy-cli test src/rust` runs `#[cfg(feature = "savvy-test")]` tests inside R.
-- `cargo fmt --check --manifest-path src/rust/Cargo.toml` checks Rust formatting.
 - `R CMD INSTALL .` installs locally. For release checks, run `R CMD build .`, then `R CMD check --no-manual rdz_0.0.0.9000.tar.gz`.
-
-`Cargo.toml` and the committed lockfile pin Savvy 0.10.2, which requires R 4.5 and Rust 1.88. Keep `Cargo.lock` committed and treat Savvy upgrades as compatibility changes: review its changelog, generated files, build templates, and minimum versions. Windows also needs the `x86_64-pc-windows-gnu` Rust target.
-
-## CRAN Rust Packaging Requirements
-
-Follow CRAN's [Using Rust in CRAN packages](https://cran.r-project.org/web/packages/using_rust.html) guidance when changing dependencies or build infrastructure. Prefer bundling all Rust dependencies with `cargo vendor` so installation and checks do not require network access; package vendored sources as an `xz`-compressed tar archive. If a download is unavoidable, pin an exact version, use a secure long-term host under the maintainer's control, embed and verify its checksum, and do not rely on GitHub as the sole source.
-
-List `Cargo` and `rustc` separately in `DESCRIPTION` under `SystemRequirements`, with conservative minimum versions justified by this package and its transitive crates. Include authorship and copyright information for all bundled Rust code, including dependencies, in `DESCRIPTION`. Test release builds with Cargo versions at least two years old, and preferably four or more years old, because CRAN systems may use older distribution toolchains.
-
-The `configure` and `configure.win` scripts must find both `cargo` and `rustc`, checking the system `PATH` and `~/.cargo/bin`, validate required versions, and print the selected `rustc` version before compilation. If no suitable toolchain exists, give installation instructions but never install Rust on the user's behalf. Invoke Cargo with an explicit parallel-job limit of one or two jobs to stay within CRAN policy.
 
 ## C Rules
 
 C99, four-space indentation, `rdz_` for internals and `.Call` entry points, `rdz_test_` for test-only entry points. The core never includes an R header and allocates only through zubin's `zb_buf`. Records are zubin layout specifications (`src/core/rdz_records.h`) checked by `rdz_records_check()`; read and write them with zubin's `zb_rd_`/`zb_wr_` at their offsets, never through a struct. Every count, length and offset from a file is bounds-checked before it sizes an allocation or a read. C never raises an rdz error: a failure returns an `rdz_failure` string that `rdz_check()` raises as a condition inheriting `rdz_error`. Heap state that must survive a longjmp hangs off an external pointer created before the first allocation, with a finalizer that releases it. Only the R thread touches SEXPs or calls R.
 
-## Coding Style & Savvy Boundary Rules (the Rust oracle)
+## R Style
 
-Use two-space indentation, `<-`, and `snake_case` in R. Use `rustfmt` and `snake_case` in Rust. Exported Rust functions must return `savvy::Result<()>`, `savvy::Result<savvy::Sexp>`, or a supported `#[savvy]` type.
-
-Input SEXP wrappers are read-only; allocate the corresponding `Owned...Sexp` for output and propagate fallible operations with `?`. Savvy performs no implicit R coercion, so put user-friendly casting and validation in R wrappers where practical. Preserve missing values explicitly with `savvy::NotAvailableValue`; ordinary logical iteration maps `NA` to `true`, which is unacceptable for serialization.
-
-Savvy SEXP wrappers are neither `Send` nor `Sync`. Never move them to worker threads or call the R API there. Extract or copy data on the R thread, parallelize only owned Rust buffers, then allocate R results back on the R thread. Use `savvy_err!` or `?` for recoverable failures. Avoid `panic!`, `unwrap()`, and unchecked indexing at the R boundary: release builds use `panic = "abort"`, so a panic terminates R.
-
-If a dependency adds native libraries, build with `RUSTFLAGS=--print=native-static-libs` and add platform-specific linker flags to the Makevars/configure workflow. Consult the [Savvy guide](https://yutannihilation.github.io/savvy/guide/) and [0.10.2 API](https://docs.rs/savvy/0.10.2/savvy/).
+Use two-space indentation, `<-`, and `snake_case` in R.
 
 ## Testing Guidelines
 
-Name files `test-*.R`, helpers `helper-*.R`, and use descriptive `test_that()` labels. R-side tests are authoritative. Keep format/codec tests independent of Savvy. Savvy-dependent Rust tests use `#[cfg(feature = "savvy-test")]`, return `savvy::Result<()>`, and require `savvy-test = []` in `Cargo.toml`.
+Name files `test-*.R`, helpers `helper-*.R`, and use descriptive `test_that()` labels. R-side tests are authoritative; the C harness and the fuzz targets cover the R-free core.
 
 Every API or format change needs round-trip tests. Use `expect_identical()` for
 ordinary values; use semantic graph/behavior assertions for reference objects
@@ -115,15 +94,15 @@ objects with explicitly ignored transient metadata. Cover
 missing values, ordinary and custom attributes, encodings, empty objects,
 reference sharing, boundary
 lengths, malformed input, automatic whole-root R-serialization fallback,
-strict-native rejection, and temporary-file cleanup. Commit a compatibility
-fixture before changing an on-disk format released in 0.1.0 or later. Pre-0.1.0
-files and fixtures have no backward-compatibility requirement and may be replaced
-when the format changes. Every on-disk change must satisfy
+strict-native rejection, and temporary-file cleanup. The format froze at 0.1.0
+(container-format.md, "Compatibility and extension"): every later rdz reads the
+frozen corpus (`fixtures/v0.1.0/`) to its values, which is never regenerated; an
+addition gets new fixtures beside it, and a changed meaning gets a new version. Every on-disk change must satisfy
 `.agents/portability.md`, update cross-OS fixtures where bytes change, and remain
 readable on the Windows, macOS, and Linux CI matrix.
 
 ## Commit & Pull Request Guidelines
 
-History establishes no convention beyond `Initial commit`. Use short imperative subjects, such as `Add corruption checks for rdz files`. PRs should describe behavior and compatibility impact, link issues, and report R and Rust test/check results. Include benchmarks for performance changes and call out platform-specific behavior.
+History establishes no convention beyond `Initial commit`. Use short imperative subjects, such as `Add corruption checks for rdz files`. PRs should describe behavior and compatibility impact, link issues, and report R and C test/check results. Include benchmarks for performance changes and call out platform-specific behavior.
 
-Do not commit `src/rust/target/`, generated `src/Makevars` or `src/Makevars.win`, credentials, local state, or benchmark output. Keep the tracked `.in` templates.
+Do not commit object files, credentials, local state, or benchmark output. `src/Makevars` and `src/Makevars.win` are tracked and static.
