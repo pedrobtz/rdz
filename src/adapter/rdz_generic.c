@@ -28,7 +28,7 @@
 
 #include "../core/rdz_vector.h"
 
-SEXP rdz_native_value_r(rdz_reader *r, rdz_vec *v, int threads, rdz_error *e, int *failed);
+SEXP rdz_native_read_r(rdz_reader *opened, int threads, rdz_error *e, int *failed);
 
 /* settings: c(level, threads, block_size); level 0 stores raw, block_size 0
    is the format's 1 MiB. */
@@ -323,12 +323,6 @@ static SEXP rdz_gen_unserialize(void *data)
     return R_Unserialize(&in);
 }
 
-static SEXP rdz_native_body(void *data)
-{
-    rdz_gen_in *g = (rdz_gen_in *)data;
-    return rdz_native_value_r(&g->r, &g->vec, g->threads, &g->e, &g->failed);
-}
-
 static void rdz_gen_in_cleanup(void *data, Rboolean jump)
 {
     if (jump) rdz_gen_in_finalize((SEXP)data);
@@ -358,16 +352,12 @@ SEXP rdz_generic_read(SEXP path, SEXP settings)
         return rdz_failure(&e);
     }
     if (g->r.codec_id == RDZ_CODEC_NATIVE_V1) {
-        out = PROTECT(R_UnwindProtect(rdz_native_body, g, rdz_gen_in_cleanup, ptr, cont));
-        e = g->e;
-        if (g->failed) {
-            rdz_gen_in_finalize(ptr);
-            UNPROTECT(3);
-            return rdz_failure(&e);
-        }
+        int failed;
+        /* the native reader takes the open reader over */
+        out = PROTECT(rdz_native_read_r(&g->r, set.threads, &e, &failed));
         rdz_gen_in_finalize(ptr);
         UNPROTECT(3);
-        return out;
+        return failed ? rdz_failure(&e) : out;
     }
     /* A one-block file needs no workers. */
     if (rdz_pipeline_init(&g->pipe, g->r.nblocks > 1 ? set.threads : 1, rdz_job_decode,

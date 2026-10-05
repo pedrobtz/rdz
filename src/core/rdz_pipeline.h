@@ -46,6 +46,8 @@ typedef struct {
     const zb_buf *result; /* the job's output: the stored bytes written, or
                              the decoded bytes read (in or out) */
     const void *block;    /* a read job's rdz_block */
+    uint16_t vtype;       /* a vector job's RDZ_TYPE_*; RDZ_TYPE_CHARACTER: the
+                             slot holds a packed string block to compress */
 } rdz_slot;
 
 struct rdz_pipeline;
@@ -70,7 +72,7 @@ typedef struct rdz_pipeline {
     uint64_t next_consume;
     rdz_job_fn job;
     int level;           /* for compression jobs */
-    uint16_t vtype;      /* for rdz_job_vector: RDZ_TYPE_* */
+
 } rdz_pipeline;
 
 /* threads >= 1. slots: 2 * threads, at least 2. Buffers grow to max. */
@@ -93,7 +95,8 @@ void rdz_pipeline_release(rdz_pipeline *p, rdz_slot *s);
 
 /* The jobs. compress: in holds bytes, compressed or not. decode: in holds a
    block's stored bytes, verified and decompressed. vector: in holds
-   logical_count values of p->vtype, encoded as a record and compressed. */
+   logical_count values of s->vtype, encoded as a record and compressed (a
+   character slot holds an encoded string block, compressed as it is). */
 void rdz_job_compress(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec);
 void rdz_job_decode(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec);
 void rdz_job_vector(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec);

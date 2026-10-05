@@ -52,7 +52,7 @@ test_that("the synopsis always reports `synopsis_error`", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
 
-  write_rdz(list(value = 1L), path)
+  write_rdz(list(value = 1L), path, mode = "r")
 
   expect_identical(rdz_info(path)$synopsis$synopsis_error, FALSE)
 })

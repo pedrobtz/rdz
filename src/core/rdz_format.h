@@ -48,17 +48,24 @@
 #define RDZ_COMPRESSION_NONE 0u
 #define RDZ_COMPRESSION_ZSTD 1u /* reserved: not written or accepted yet */
 
+#define RDZ_TYPE_NULL      0u
 #define RDZ_TYPE_LOGICAL   1u
 #define RDZ_TYPE_INTEGER   2u
 #define RDZ_TYPE_DOUBLE    3u
 #define RDZ_TYPE_CHARACTER 4u
 #define RDZ_TYPE_FACTOR    5u
+#define RDZ_TYPE_LIST      6u
+#define RDZ_TYPE_DATA_FRAME 7u
 #define RDZ_ROLE_ROOT            0u
 #define RDZ_ROLE_ATTRIBUTE_NAME  1u
 #define RDZ_ROLE_ATTRIBUTE_VALUE 2u
 #define RDZ_ROLE_LEVELS          3u /* a factor's levels, its one child */
+#define RDZ_ROLE_CHILD           4u /* an element of a list or a data frame's column */
 #define RDZ_OBJECT_FLAG_ORDERED  1u /* a factor root: class c("ordered", "factor") */
-#define RDZ_ATTRIBUTE_FLAG_NAMES 1u
+#define RDZ_ATTRIBUTE_FLAG_NAMES     1u
+#define RDZ_ATTRIBUTE_FLAG_ROW_NAMES 2u /* a data frame's explicit row names */
+#define RDZ_ATTRIBUTE_FLAG_CLASS     4u /* a data frame's class */
+#define RDZ_MAX_DEPTH 1000u /* nesting below the root */
 #define RDZ_ROOT_PARENT_ID 0xFFFFFFFFu
 
 #define RDZ_BLOCK_SIZE           ((uint32_t)1024 * 1024)

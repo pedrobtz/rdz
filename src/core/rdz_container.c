@@ -62,25 +62,6 @@ static int rdz_block_range(const rdz_object *o, uint32_t nblocks, uint32_t *end,
     return 0;
 }
 
-static int rdz_check_object(const rdz_object *o, uint32_t id, uint32_t parent, uint16_t role,
-                            uint16_t type_tag, rdz_error *e)
-{
-    if (o->object_id != id || o->parent_id != parent || o->role != role ||
-        o->type_tag != type_tag || o->flags != 0) {
-        return rdz_invalid(e, "invalid native object descriptor");
-    }
-    return 0;
-}
-
-static int rdz_check_leaf(const rdz_object *o, rdz_error *e)
-{
-    if (o->first_child != 0 || o->child_count != 0 || o->first_attribute != 0 ||
-        o->attribute_count != 0) {
-        return rdz_invalid(e, "attribute object is not a leaf");
-    }
-    return 0;
-}
-
 static int rdz_check_logical_blocks(const rdz_object *o, const rdz_block *blocks,
                                     uint32_t nblocks, rdz_error *e)
 {
@@ -226,100 +207,204 @@ static int rdz_check_generic_schema(const rdz_reader *r, rdz_error *e)
     return 0;
 }
 
-/* A native file: a root of any native type, a factor's levels as its one
-   child, and an optional `names` attribute on any root but a factor; the
-   objects in that order (root, levels, name, value) and their blocks
-   contiguous, in the same order, covering every block. */
+/* A native file's object graph (container-format.md, "Native object
+   graphs"): object 0 the root; every other object after its parent, as a
+   list's or data frame's child (the children contiguous), a factor's levels,
+   or an attribute's name or value; attributes contiguous per owner in owner
+   order; nesting at most RDZ_MAX_DEPTH deep; every object's blocks in object
+   order, covering every block. Containers and NULL have no blocks. */
 static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
 {
-    const rdz_object *root, *levels = NULL, *name = NULL, *value = NULL;
-    const rdz_attribute *a;
-    uint32_t next, k;
-    int factor;
+    zb_buf scratch;
+    uint32_t *depth, i, next_block = 0, next_attribute = 0;
+    uint8_t *referenced;
+    int failed = 1;
+    size_t bytes;
+
     if (r->synopsis_len != 0) {
         return rdz_invalid(e, "native codec cannot contain a generic synopsis");
     }
     if (r->nobjects == 0) return rdz_invalid(e, "invalid logical object directory shape");
-    root = &r->objects[0];
-    if (root->type_tag < RDZ_TYPE_LOGICAL || root->type_tag > RDZ_TYPE_FACTOR) {
-        return rdz_invalid(e, "invalid native object descriptor");
+    bytes = (size_t)r->nobjects * (sizeof(uint32_t) + 1);
+    if (zb_buf_alloc(&scratch, 0, 0) || zb_put_zeros(&scratch, bytes)) {
+        zb_buf_release(&scratch);
+        return rdz_memory(e, "the object graph check");
     }
-    factor = root->type_tag == RDZ_TYPE_FACTOR;
-    if (r->nattributes > 1 || (factor && r->nattributes != 0) ||
-        r->nobjects != 1u + (uint32_t)factor + 2u * r->nattributes) {
-        return rdz_invalid(e, "invalid logical object directory shape");
-    }
-    if (root->object_id != 0 || root->parent_id != RDZ_ROOT_PARENT_ID ||
-        root->role != RDZ_ROLE_ROOT || (root->flags & ~(factor ? RDZ_OBJECT_FLAG_ORDERED : 0u))) {
-        return rdz_invalid(e, "invalid native object descriptor");
-    }
-    if (root->first_child != (uint32_t)factor || root->child_count != (uint32_t)factor ||
-        root->first_attribute != 0) {
-        return rdz_invalid(e, "invalid logical root references");
-    }
-    if (root->attribute_count != r->nattributes) {
-        return rdz_invalid(e, "logical attribute count mismatch");
-    }
-    switch (root->type_tag) {
-    case RDZ_TYPE_LOGICAL:
-        if (rdz_check_logical_blocks(root, r->blocks, r->nblocks, e)) return 1;
-        break;
-    case RDZ_TYPE_CHARACTER:
-        if (rdz_check_string_blocks(root, r->blocks, r->nblocks, e)) return 1;
-        break;
-    case RDZ_TYPE_FACTOR:
-        if (rdz_check_numeric_blocks(root, RDZ_TYPE_INTEGER, r->blocks, r->nblocks, e)) return 1;
-        break;
-    default:
-        if (rdz_check_numeric_blocks(root, root->type_tag, r->blocks, r->nblocks, e)) return 1;
-        break;
-    }
-    k = 1;
-    if (factor) {
-        levels = &r->objects[k++];
-        if (rdz_check_object(levels, 1, 0, RDZ_ROLE_LEVELS, RDZ_TYPE_CHARACTER, e) ||
-            rdz_check_leaf(levels, e) || rdz_check_string_blocks(levels, r->blocks, r->nblocks, e)) {
-            return 1;
+    depth = (uint32_t *)(void *)scratch.data;
+    referenced = scratch.data + (size_t)r->nobjects * sizeof(uint32_t);
+
+    for (i = 0; i < r->nobjects; i++) {
+        const rdz_object *o = &r->objects[i];
+        uint16_t t = o->type_tag;
+        int container = t == RDZ_TYPE_LIST || t == RDZ_TYPE_DATA_FRAME;
+        uint32_t k;
+        if (o->object_id != i || t > RDZ_TYPE_DATA_FRAME ||
+            (o->flags & ~(t == RDZ_TYPE_FACTOR ? RDZ_OBJECT_FLAG_ORDERED : 0u))) {
+            rdz_invalid(e, "invalid native object descriptor");
+            goto done;
         }
+        if (i == 0) {
+            if (o->parent_id != RDZ_ROOT_PARENT_ID || o->role != RDZ_ROLE_ROOT) {
+                rdz_invalid(e, "invalid native object descriptor");
+                goto done;
+            }
+        } else {
+            const rdz_object *pa;
+            if (o->parent_id >= i || o->role == RDZ_ROLE_ROOT || o->role > RDZ_ROLE_CHILD ||
+                !referenced[i]) {
+                rdz_invalid(e, "invalid native object descriptor");
+                goto done;
+            }
+            pa = &r->objects[o->parent_id];
+            depth[i] = depth[o->parent_id] + 1;
+            if (depth[i] > RDZ_MAX_DEPTH) {
+                rdz_limit(e, "object nesting");
+                goto done;
+            }
+            if (o->role == RDZ_ROLE_CHILD && pa->type_tag == RDZ_TYPE_DATA_FRAME &&
+                o->logical_len != pa->logical_len) {
+                rdz_invalid(e, "a data frame column's length differs from its rows");
+                goto done;
+            }
+        }
+        /* children: a list's elements, a data frame's columns, a factor's levels */
+        if (container || t == RDZ_TYPE_FACTOR) {
+            if (t == RDZ_TYPE_FACTOR ? o->child_count != 1
+                                     : (t == RDZ_TYPE_LIST && o->child_count != o->logical_len)) {
+                rdz_invalid(e, "invalid native object children");
+                goto done;
+            }
+            if (o->first_child <= i || o->first_child > r->nobjects ||
+                o->child_count > r->nobjects - o->first_child) {
+                rdz_invalid(e, "invalid native object children");
+                goto done;
+            }
+            for (k = o->first_child; k < o->first_child + o->child_count; k++) {
+                const rdz_object *c = &r->objects[k];
+                uint16_t want = t == RDZ_TYPE_FACTOR ? RDZ_ROLE_LEVELS : RDZ_ROLE_CHILD;
+                if (c->parent_id != i || c->role != want || referenced[k] ||
+                    (t == RDZ_TYPE_FACTOR && (c->type_tag != RDZ_TYPE_CHARACTER || c->child_count ||
+                                              c->attribute_count))) {
+                    rdz_invalid(e, "invalid native object children");
+                    goto done;
+                }
+                referenced[k] = 1;
+            }
+        } else if (o->first_child != 0 || o->child_count != 0) {
+            rdz_invalid(e, "invalid logical root references");
+            goto done;
+        }
+        if (t == RDZ_TYPE_NULL && o->logical_len != 0) {
+            rdz_invalid(e, "invalid native object descriptor");
+            goto done;
+        }
+        /* attributes */
+        if (o->attribute_count ? o->first_attribute != next_attribute : o->first_attribute != 0) {
+            rdz_invalid(e, "logical attribute count mismatch");
+            goto done;
+        }
+        if (o->attribute_count > r->nattributes - next_attribute) {
+            rdz_invalid(e, "logical attribute count mismatch");
+            goto done;
+        }
+        for (k = 0; k < o->attribute_count; k++) {
+            const rdz_attribute *a = &r->attributes[next_attribute + k];
+            const rdz_object *nm, *val;
+            uint64_t want_len;
+            if (a->owner_id != i || a->ordinal != k || a->name_object_id <= i ||
+                a->value_object_id <= i || a->name_object_id >= r->nobjects ||
+                a->value_object_id >= r->nobjects || referenced[a->name_object_id] ||
+                referenced[a->value_object_id] || a->name_object_id == a->value_object_id) {
+                rdz_invalid(e, "invalid names attribute entry");
+                goto done;
+            }
+            nm = &r->objects[a->name_object_id];
+            val = &r->objects[a->value_object_id];
+            if (nm->parent_id != i || nm->role != RDZ_ROLE_ATTRIBUTE_NAME ||
+                nm->type_tag != RDZ_TYPE_CHARACTER || nm->logical_len != 1 ||
+                val->parent_id != i || val->role != RDZ_ROLE_ATTRIBUTE_VALUE ||
+                nm->child_count || nm->attribute_count || val->child_count ||
+                val->attribute_count) {
+                rdz_invalid(e, "invalid native object descriptor");
+                goto done;
+            }
+            switch (a->flags) {
+            case RDZ_ATTRIBUTE_FLAG_NAMES:
+                want_len = container ? o->child_count : o->logical_len;
+                if (val->type_tag != RDZ_TYPE_CHARACTER || val->logical_len != want_len ||
+                    t == RDZ_TYPE_FACTOR || t == RDZ_TYPE_NULL) {
+                    rdz_invalid(e, "names object length mismatch");
+                    goto done;
+                }
+                break;
+            case RDZ_ATTRIBUTE_FLAG_ROW_NAMES:
+                if (t != RDZ_TYPE_DATA_FRAME || val->logical_len != o->logical_len ||
+                    (val->type_tag != RDZ_TYPE_CHARACTER && val->type_tag != RDZ_TYPE_INTEGER)) {
+                    rdz_invalid(e, "invalid row names attribute");
+                    goto done;
+                }
+                break;
+            case RDZ_ATTRIBUTE_FLAG_CLASS:
+                if (t != RDZ_TYPE_DATA_FRAME || val->type_tag != RDZ_TYPE_CHARACTER ||
+                    val->logical_len == 0) {
+                    rdz_invalid(e, "invalid class attribute");
+                    goto done;
+                }
+                break;
+            default:
+                rdz_invalid(e, "invalid names attribute entry");
+                goto done;
+            }
+            referenced[a->name_object_id] = 1;
+            referenced[a->value_object_id] = 1;
+        }
+        next_attribute += o->attribute_count;
+        /* blocks */
+        if (o->first_block != next_block) {
+            rdz_invalid(e, i == 0 ? "logical blocks are not fully indexed"
+                                  : "native object blocks are not canonical");
+            goto done;
+        }
+        switch (t) {
+        case RDZ_TYPE_LOGICAL:
+            if (rdz_check_logical_blocks(o, r->blocks, r->nblocks, e)) goto done;
+            break;
+        case RDZ_TYPE_CHARACTER:
+            if (o->role == RDZ_ROLE_ATTRIBUTE_NAME
+                    ? rdz_check_object_blocks(o, r->blocks, r->nblocks, RDZ_ENCODING_STRING_PLAIN, e)
+                    : rdz_check_string_blocks(o, r->blocks, r->nblocks, e)) {
+                goto done;
+            }
+            break;
+        case RDZ_TYPE_INTEGER:
+        case RDZ_TYPE_FACTOR:
+            if (rdz_check_numeric_blocks(o, RDZ_TYPE_INTEGER, r->blocks, r->nblocks, e)) goto done;
+            break;
+        case RDZ_TYPE_DOUBLE:
+            if (rdz_check_numeric_blocks(o, RDZ_TYPE_DOUBLE, r->blocks, r->nblocks, e)) goto done;
+            break;
+        default:
+            if (o->block_count != 0) {
+                rdz_invalid(e, "a container object has data blocks");
+                goto done;
+            }
+            break;
+        }
+        next_block = o->first_block + o->block_count;
     }
-    if (r->nattributes == 1) {
-        name = &r->objects[k];
-        value = &r->objects[k + 1];
-        if (rdz_check_object(name, k, 0, RDZ_ROLE_ATTRIBUTE_NAME, RDZ_TYPE_CHARACTER, e)) return 1;
-        if (rdz_check_object(value, k + 1, 0, RDZ_ROLE_ATTRIBUTE_VALUE, RDZ_TYPE_CHARACTER, e)) {
-            return 1;
-        }
-        if (name->logical_len != 1 || value->logical_len != root->logical_len) {
-            return rdz_invalid(e, "names object length mismatch");
-        }
-        if (rdz_check_leaf(name, e) || rdz_check_leaf(value, e)) return 1;
-        if (rdz_check_object_blocks(name, r->blocks, r->nblocks, RDZ_ENCODING_STRING_PLAIN, e)) {
-            return 1;
-        }
-        if (rdz_check_string_blocks(value, r->blocks, r->nblocks, e)) return 1;
-        a = &r->attributes[0];
-        if (a->owner_id != 0 || a->name_object_id != k || a->value_object_id != k + 1 ||
-            a->ordinal != 0 || a->flags != RDZ_ATTRIBUTE_FLAG_NAMES) {
-            return rdz_invalid(e, "invalid names attribute entry");
-        }
+    if (next_attribute != r->nattributes) {
+        rdz_invalid(e, "invalid names attribute entry");
+        goto done;
     }
-    /* canonical: every object's blocks follow the previous object's; the
-       ranges were checked against nblocks above, so these cannot wrap */
-    next = 0;
-    for (k = 0; k < r->nobjects; k++) {
-        const rdz_object *o = &r->objects[k];
-        if (o->first_block != next) {
-            return rdz_invalid(e, k == 0 || r->nattributes ? "native object blocks are not canonical"
-                                                           : "logical blocks are not fully indexed");
-        }
-        next = o->first_block + o->block_count;
+    if (next_block != r->nblocks) {
+        rdz_invalid(e, r->nattributes ? "native object blocks are not canonical"
+                                      : "logical blocks are not fully indexed");
+        goto done;
     }
-    if (next != r->nblocks) {
-        return rdz_invalid(e, r->nattributes || factor ? "native object blocks are not canonical"
-                                                       : "logical blocks are not fully indexed");
-    }
-    (void)levels;
-    return 0;
+    failed = 0;
+done:
+    zb_buf_release(&scratch);
+    return failed;
 }
 
 /* ---- reader ------------------------------------------------------------------------ */
@@ -391,7 +476,10 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
     synopsis_len = zb_rd_u32le(d + RDZ_DH_SYNOPSIS_LEN);
     if (nobj > RDZ_MAX_OBJECTS) return rdz_limit(e, "object count");
     if (natt > RDZ_MAX_ATTRIBUTES) return rdz_limit(e, "attribute count");
-    if (nblk == 0 || nblk > RDZ_MAX_BLOCKS) return rdz_limit(e, "block count");
+    /* a native object graph of empty containers has no blocks */
+    if ((nblk == 0 && r->codec_id != RDZ_CODEC_NATIVE_V1) || nblk > RDZ_MAX_BLOCKS) {
+        return rdz_limit(e, "block count");
+    }
     if (synopsis_len > RDZ_MAX_SYNOPSIS_LEN) return rdz_limit(e, "synopsis length");
     if (RDZ_CHECKSUM_DIFFERS(zb_rd_u64le(d + RDZ_DH_CHECKSUM), rdz_hash(d, RDZ_DH_CHECKSUM))) {
         return rdz_invalid(e, "directory header checksum mismatch");
@@ -488,7 +576,7 @@ static int rdz_reader_validate(rdz_reader *r, rdz_error *e)
         (uint64_t)RDZ_MAX_BLOCKS * RDZ_BLOCK_ENTRY_LEN + RDZ_MAX_SYNOPSIS_LEN;
     uint32_t i;
 
-    if (file_len < RDZ_HEADER_LEN + RDZ_BLOCK_HEADER_LEN + RDZ_DIRECTORY_HEADER_LEN + RDZ_TRAILER_LEN) {
+    if (file_len < RDZ_HEADER_LEN + RDZ_DIRECTORY_HEADER_LEN + RDZ_TRAILER_LEN) {
         return rdz_invalid(e, "file is truncated");
     }
     if (rdz_infile_read_at(&r->file, 0, header, sizeof header, e)) return 1;

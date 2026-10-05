@@ -2,6 +2,7 @@
 
 #include "rdz_logical.h"
 #include "rdz_numeric.h"
+#include "rdz_graph.h"
 #include "rdz_vector.h"
 
 size_t rdz_vec_block_values(uint16_t type)
@@ -11,11 +12,6 @@ size_t rdz_vec_block_values(uint16_t type)
     case RDZ_TYPE_DOUBLE: return RDZ_DBL_BLOCK_VALUES;
     default: return RDZ_LOGICAL_BLOCK_VALUES;
     }
-}
-
-static size_t elem_size(uint16_t type)
-{
-    return type == RDZ_TYPE_DOUBLE ? sizeof(double) : sizeof(int32_t);
 }
 
 void rdz_vec_init(rdz_vec *v)
@@ -30,12 +26,6 @@ void rdz_vec_free(rdz_vec *v)
     if (v->have_pipe) rdz_pipeline_free(&v->pipe); /* joins the workers first */
     v->have_pipe = 0;
     rdz_writer_discard(&v->w);
-}
-
-static int emit_block(void *ctx, uint16_t encoding, uint64_t count, const uint8_t *data, size_t n,
-                      rdz_error *e)
-{
-    return rdz_writer_block((rdz_writer *)ctx, encoding, count, data, n, e);
 }
 
 static uintptr_t one_key(void *ctx, size_t i)
@@ -55,167 +45,56 @@ static int one_value(void *ctx, size_t i, rdz_str *out, rdz_error *e)
     return 0;
 }
 
-/* Writes one finished slot and frees it. */
-static int consume(rdz_vec *v, rdz_slot *s, rdz_error *e)
-{
-    int failed = 0;
-    if (s->failed) {
-        *e = s->e;
-        failed = 1;
-    } else if (rdz_writer_stored(&v->w, s->encoding, s->compression, s->logical_count,
-                                 s->decoded_len, s->result->data, s->result->len, s->checksum,
-                                 e)) {
-        failed = 1;
-    }
-    rdz_pipeline_release(&v->pipe, s);
-    return failed;
-}
-
-typedef struct {
-    rdz_vec *v;
-    const rdz_vec_spec *spec;
-} rdz_emit_ctx;
-
-/* A character block from the string encoder into the pipeline, which
-   compresses and checksums it. */
-static int emit_pipeline(void *ctx, uint16_t encoding, uint64_t count, const uint8_t *data,
-                         size_t n, rdz_error *e)
-{
-    rdz_emit_ctx *c = (rdz_emit_ctx *)ctx;
-    rdz_slot *s;
-    int must;
-    while ((s = rdz_pipeline_next(&c->v->pipe, &must)) != NULL && must) {
-        if (consume(c->v, s, e)) return 1;
-    }
-    if (n && zb_put_bytes(&s->in, data, n)) {
-        rdz_pipeline_unget(&c->v->pipe, s);
-        return rdz_memory(e, "a block");
-    }
-    s->encoding = encoding;
-    s->logical_count = count;
-    rdz_pipeline_submit(&c->v->pipe, s, e);
-    while ((s = rdz_pipeline_oldest(&c->v->pipe, 0)) != NULL) {
-        if (consume(c->v, s, e)) return 1;
-    }
-    if (c->spec->tick) c->spec->tick(c->spec->tick_ctx);
-    return 0;
-}
-
-/* Appends one character object's blocks, uncompressed. */
-static int write_strings_plain(rdz_vec *v, const rdz_str_source *src, int policy, rdz_error *e)
-{
-    return rdz_string_encode(src, policy, emit_block, &v->w, e);
-}
-
 int rdz_vec_write(rdz_vec *v, const char *path, const rdz_vec_spec *spec, rdz_error *e)
 {
-    uint16_t type = spec->type, values_type = type == RDZ_TYPE_FACTOR ? RDZ_TYPE_INTEGER : type;
-    size_t n = spec->n, per = rdz_vec_block_values(values_type), size = elem_size(values_type),
-           at = 0;
-    const uint8_t *src = (const uint8_t *)spec->values;
-    rdz_object objects[4];
+    rdz_node nodes[4];
     rdz_attribute attribute;
-    rdz_slot *s;
-    uint32_t k = 1, first;
-    int factor = type == RDZ_TYPE_FACTOR;
-
-    memset(objects, 0, sizeof objects);
+    rdz_str_source one;
+    uint32_t k = 1;
+    int factor = spec->type == RDZ_TYPE_FACTOR;
+    memset(nodes, 0, sizeof nodes);
     memset(&attribute, 0, sizeof attribute);
-    if (spec->names && spec->names->n != n) {
+    if (spec->names && spec->names->n != spec->n) {
         return rdz_invalid(e, "names length does not match the vector");
     }
     if (factor && spec->names) return rdz_invalid(e, "a native factor has no names");
-    if (rdz_pipeline_init(&v->pipe, spec->threads,
-                          type == RDZ_TYPE_CHARACTER ? rdz_job_compress : rdz_job_vector,
-                          (size_t)RDZ_MAX_BLOCK_SIZE, e)) {
-        return 1;
-    }
-    v->have_pipe = 1;
-    v->pipe.vtype = values_type;
-    v->pipe.level = type == RDZ_TYPE_LOGICAL ? 0 : spec->level;
-    if (rdz_writer_open(&v->w, path, RDZ_CODEC_NATIVE_V1, RDZ_NATIVE_CODEC_VERSION, RDZ_BLOCK_SIZE,
-                        e)) {
-        return 1;
-    }
-    if (type == RDZ_TYPE_CHARACTER) {
-        rdz_emit_ctx c;
-        c.v = v;
-        c.spec = spec;
-        if (rdz_string_encode(spec->strings, spec->policy, emit_pipeline, &c, e)) return 1;
-    } else {
-        do {
-            size_t take = n - at < per ? n - at : per;
-            int must;
-            while ((s = rdz_pipeline_next(&v->pipe, &must)) != NULL && must) {
-                if (consume(v, s, e)) return 1;
-            }
-            if (take && zb_put_bytes(&s->in, src + at * size, take * size)) {
-                rdz_pipeline_unget(&v->pipe, s);
-                return rdz_memory(e, "a block");
-            }
-            s->logical_count = take;
-            rdz_pipeline_submit(&v->pipe, s, e);
-            at += take;
-            while ((s = rdz_pipeline_oldest(&v->pipe, 0)) != NULL) {
-                if (consume(v, s, e)) return 1;
-            }
-            if (spec->tick && at < n) spec->tick(spec->tick_ctx);
-        } while (at < n);
-    }
-    while ((s = rdz_pipeline_oldest(&v->pipe, 1)) != NULL) {
-        if (consume(v, s, e)) return 1;
-    }
-    rdz_pipeline_free(&v->pipe);
-    v->have_pipe = 0;
-
-    objects[0].parent_id = RDZ_ROOT_PARENT_ID;
-    objects[0].role = RDZ_ROLE_ROOT;
-    objects[0].type_tag = type;
-    objects[0].flags = factor && spec->ordered ? RDZ_OBJECT_FLAG_ORDERED : 0;
-    objects[0].logical_len = n;
-    objects[0].first_child = (uint32_t)factor;
-    objects[0].child_count = (uint32_t)factor;
-    objects[0].attribute_count = spec->names ? 1 : 0;
-    objects[0].block_count = v->w.nblocks;
+    nodes[0].type = spec->type;
+    nodes[0].role = RDZ_ROLE_ROOT;
+    nodes[0].parent = RDZ_ROOT_PARENT_ID;
+    nodes[0].flags = factor && spec->ordered ? RDZ_OBJECT_FLAG_ORDERED : 0;
+    nodes[0].length = spec->n;
+    nodes[0].values = spec->values;
+    nodes[0].strings = spec->strings;
     if (factor) {
-        first = v->w.nblocks;
-        if (write_strings_plain(v, spec->levels, spec->policy, e)) return 1;
-        objects[k].object_id = k;
-        objects[k].role = RDZ_ROLE_LEVELS;
-        objects[k].type_tag = RDZ_TYPE_CHARACTER;
-        objects[k].logical_len = spec->levels->n;
-        objects[k].first_block = first;
-        objects[k].block_count = v->w.nblocks - first;
-        k++;
+        nodes[0].first_child = 1;
+        nodes[0].child_count = 1;
+        nodes[1].type = RDZ_TYPE_CHARACTER;
+        nodes[1].role = RDZ_ROLE_LEVELS;
+        nodes[1].length = spec->levels->n;
+        nodes[1].strings = spec->levels;
+        k = 2;
     }
     if (spec->names) {
-        rdz_str_source one;
         one.n = 1;
         one.ctx = NULL;
         one.key = one_key;
         one.value = one_value;
-        first = v->w.nblocks;
-        if (write_strings_plain(v, &one, RDZ_DICT_PLAIN, e)) return 1;
-        objects[k].object_id = k;
-        objects[k].role = RDZ_ROLE_ATTRIBUTE_NAME;
-        objects[k].type_tag = RDZ_TYPE_CHARACTER;
-        objects[k].logical_len = 1;
-        objects[k].first_block = first;
-        objects[k].block_count = v->w.nblocks - first;
-        first = v->w.nblocks;
-        if (write_strings_plain(v, spec->names, spec->policy, e)) return 1;
-        objects[k + 1].object_id = k + 1;
-        objects[k + 1].role = RDZ_ROLE_ATTRIBUTE_VALUE;
-        objects[k + 1].type_tag = RDZ_TYPE_CHARACTER;
-        objects[k + 1].logical_len = n;
-        objects[k + 1].first_block = first;
-        objects[k + 1].block_count = v->w.nblocks - first;
+        nodes[0].attribute_count = 1;
+        nodes[k].type = RDZ_TYPE_CHARACTER;
+        nodes[k].role = RDZ_ROLE_ATTRIBUTE_NAME;
+        nodes[k].length = 1;
+        nodes[k].strings = &one;
+        nodes[k + 1].type = RDZ_TYPE_CHARACTER;
+        nodes[k + 1].role = RDZ_ROLE_ATTRIBUTE_VALUE;
+        nodes[k + 1].length = spec->n;
+        nodes[k + 1].strings = spec->names;
         attribute.name_object_id = k;
         attribute.value_object_id = k + 1;
         attribute.flags = RDZ_ATTRIBUTE_FLAG_NAMES;
         k += 2;
     }
-    return rdz_writer_finish(&v->w, objects, k, &attribute, spec->names ? 1 : 0, NULL, 0, e);
+    return rdz_graph_write(v, path, nodes, k, &attribute, spec->names ? 1 : 0, spec->policy,
+                           spec->level, spec->threads, spec->tick, spec->tick_ctx, e);
 }
 
 int rdz_vec_shape(const rdz_reader *r, uint16_t *type, size_t *n, rdz_error *e)

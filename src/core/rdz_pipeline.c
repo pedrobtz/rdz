@@ -259,8 +259,9 @@ void rdz_job_decode(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
    in the codec's scratch buffer. A failure says no. */
 static int rdz_plain_wins(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
 {
-    size_t width = p->vtype == RDZ_TYPE_DOUBLE ? 8 : 4;
+    size_t width = s->vtype == RDZ_TYPE_DOUBLE ? 8 : 4;
     size_t n = (size_t)s->logical_count, m = n < RDZ_SAMPLE_VALUES ? n : RDZ_SAMPLE_VALUES;
+    (void)p;
     size_t cap = 8192, distinct = 0, i, k;
     uint64_t *table;
     if (m == 0) return 0;
@@ -289,12 +290,19 @@ void rdz_job_vector(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
     size_t n = (size_t)s->logical_count;
     uint16_t encoding = 0;
     int failed;
-    switch (p->vtype) {
+    if (s->vtype == RDZ_TYPE_CHARACTER) {
+        uint16_t keep = s->encoding;
+        rdz_job_compress(p, s, codec);
+        s->encoding = keep;
+        return;
+    }
+    switch (s->vtype) {
     case RDZ_TYPE_LOGICAL:
         failed = rdz_logical_encode((const int32_t *)(const void *)s->in.data, n, &s->out,
                                     &encoding, &codec->scratch, &s->e);
         break;
     case RDZ_TYPE_INTEGER:
+    case RDZ_TYPE_FACTOR:
         failed = rdz_int_encode((const int32_t *)(const void *)s->in.data, n, p->level != 0,
                                 &s->out, &encoding, &s->e);
         break;
@@ -312,7 +320,7 @@ void rdz_job_vector(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
        a sample both ways and keep the plain form when it wins. */
     if ((encoding == RDZ_ENCODING_INT_SHUFFLE || encoding == RDZ_ENCODING_DBL_SHUFFLE) &&
         rdz_plain_wins(p, s, codec)) {
-        failed = p->vtype == RDZ_TYPE_INTEGER
+        failed = s->vtype != RDZ_TYPE_DOUBLE
                      ? rdz_int_encode((const int32_t *)(const void *)s->in.data, n, 0, &s->out,
                                       &encoding, &s->e)
                      : rdz_dbl_encode((const double *)(const void *)s->in.data, n, 0, &s->out,
