@@ -28,8 +28,19 @@ version_at_least() {
 # Savvy, the Rust implementation's R binding, needs R 4.5.0.
 R_HAS_SAVVY_FLOOR="$("${R_HOME}/bin/Rscript" --vanilla -e 'cat(getRversion() >= "4.5.0")')"
 
+# A sanitizer build (R's own compiler carries -fsanitize) instruments C only;
+# the Rust library would be linked in uninstrumented, and building it with
+# that compiler is what such a build must not depend on.
+R_CC_FLAGS="$("${R_HOME}/bin/R" CMD config CC) $("${R_HOME}/bin/R" CMD config CFLAGS)"
+case "${R_CC_FLAGS}" in
+  *-fsanitize*) R_SANITIZED=yes ;;
+  *) R_SANITIZED=no ;;
+esac
+
 if [ "${RDZ_RUST}" != "0" ] && [ "${RDZ_RUST}" != "false" ]; then
-  if [ "${R_HAS_SAVVY_FLOOR}" != "TRUE" ]; then
+  if [ "${R_SANITIZED}" = "yes" ] && [ "${RDZ_RUST}" != "1" ]; then
+    echo "rdz: R's compiler is sanitized; leaving out the Rust reference implementation"
+  elif [ "${R_HAS_SAVVY_FLOOR}" != "TRUE" ]; then
     echo "rdz: the Rust reference implementation needs R 4.5.0 or newer"
   elif command -v cargo >/dev/null 2>&1 && command -v rustc >/dev/null 2>&1; then
     CARGO_VERSION="$(cargo --version)"
