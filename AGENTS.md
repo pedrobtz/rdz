@@ -2,13 +2,13 @@
 
 ## Project Structure & Module Organization
 
-`rdz` is an R package whose serialization format is implemented in Rust. User-facing code lives in `R/`; Rust code and Cargo files live in `src/rust/`. Keep format, codec, and IO logic in ordinary Rust modules, independent of R, with thin `#[savvy]` boundary functions. Tests are in `tests/testthat/`; benchmarks are in `tools/`.
+`rdz` is an R package being re-implemented in C on zubin and zufast (`.agents/plan-c.md`, adopted 2026-10-05). User-facing code lives in `R/`. The C implementation is `src/core/` (R-free: records, container reader and writer, file IO; it never includes an R header and compiles standalone into `tools/c-tests/` and `fuzz/`) and `src/rdz_r.c` (the `.Call` entry points), registered by `src/rdz_init.c`. Until the C port replaces it stage by stage, the Rust implementation in `src/rust/` is the oracle: `configure` builds it when R is 4.5 or newer and cargo and rustc 1.88 are available (`RDZ_RUST=0` disables it, `RDZ_RUST=1` requires it), and tests that need it call `skip_without_rust()`. Tests are in `tests/testthat/`; the Rust reference corpus is in `tests/testthat/fixtures/rust/`; benchmarks and scripts are in `tools/`.
 
-Do not edit `R/000-wrappers.R`, `src/init.c`, or `src/rust/api.h`; Savvy generates them from marked Rust interfaces.
+Savvy generated `R/000-wrappers.R`, `src/init.c` and `src/rust/api.h`; savvy-cli is no longer run, and they change only as the Rust implementation is retired.
 
 Project design and implementation guidance lives in:
 
-- [Plan C: re-implementing rdz in C](.agents/plan-c.md) (proposal, 2026-10-05)
+- [Plan C: re-implementing rdz in C](.agents/plan-c.md) (adopted 2026-10-05; the current sequence)
 - [Current implementation assessment](.agents/current-state.md)
 - [Native serializer architecture](.agents/architecture.md)
 - [Pre-0.1 container wire format](.agents/container-format.md)
@@ -68,7 +68,10 @@ native-word-order scalars, pointer widths, addresses, or CPU-specific requiremen
 
 ## Build, Test, and Development Commands
 
-- `Rscript -e 'savvy::savvy_update(); roxygen2::roxygenise()'` regenerates bindings and R documentation after changing a `#[savvy]` signature or its `///` roxygen comments.
+- `Rscript -e 'roxygen2::roxygenise()'` regenerates R documentation.
+- `tools/run-c-tests` runs the R-free C core under its harness (warnings are errors, ASan and UBSan on), against the Rust reference corpus.
+- `tools/run-fuzz [seconds]` fuzzes the container reader after its canary has crashed; `tools/run-fuzz --replay` runs the seeds and corpus once where the compiler has no libFuzzer.
+- `RDZ_RUST=0 R CMD INSTALL --preclean .` builds the C implementation alone.
 - `Rscript -e 'testthat::test_local(reporter = "summary")'` runs R integration tests.
 - `cargo test --manifest-path src/rust/Cargo.toml` runs pure Rust tests that do not require R.
 - `savvy-cli test src/rust` runs `#[cfg(feature = "savvy-test")]` tests inside R.
@@ -85,7 +88,11 @@ List `Cargo` and `rustc` separately in `DESCRIPTION` under `SystemRequirements`,
 
 The `configure` and `configure.win` scripts must find both `cargo` and `rustc`, checking the system `PATH` and `~/.cargo/bin`, validate required versions, and print the selected `rustc` version before compilation. If no suitable toolchain exists, give installation instructions but never install Rust on the user's behalf. Invoke Cargo with an explicit parallel-job limit of one or two jobs to stay within CRAN policy.
 
-## Coding Style & Savvy Boundary Rules
+## C Rules
+
+C99, four-space indentation, `rdz_` for internals and `.Call` entry points, `rdz_test_` for test-only entry points. The core never includes an R header and allocates only through zubin's `zb_buf`. Records are zubin layout specifications (`src/core/rdz_records.h`) checked by `rdz_records_check()`; read and write them with zubin's `zb_rd_`/`zb_wr_` at their offsets, never through a struct. Every count, length and offset from a file is bounds-checked before it sizes an allocation or a read. C never raises an rdz error: a failure returns an `rdz_failure` string that `rdz_check()` raises as a condition inheriting `rdz_error`. Heap state that must survive a longjmp hangs off an external pointer created before the first allocation, with a finalizer that releases it. Only the R thread touches SEXPs or calls R.
+
+## Coding Style & Savvy Boundary Rules (the Rust oracle)
 
 Use two-space indentation, `<-`, and `snake_case` in R. Use `rustfmt` and `snake_case` in Rust. Exported Rust functions must return `savvy::Result<()>`, `savvy::Result<savvy::Sexp>`, or a supported `#[savvy]` type.
 

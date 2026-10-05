@@ -18,8 +18,10 @@ blocks. Native schemas are authoritative; generic schemas are bounded
 synopses and are marked non-authoritative.
 }
 \examples{
+\dontshow{if (rdz:::rdz_has_rust()) withAutoprint(\{ # examplesIf}
 path <- tempfile(fileext = ".rdz")
 write_rdz(c(first = TRUE, second = NA), path)
 rdz_schema(path)
 unlink(path)
+\dontshow{\}) # examplesIf}
 }

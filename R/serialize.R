@@ -11,7 +11,7 @@
 #'   complete value is supported and otherwise uses whole-root R serialization;
 #'   `"native"` rejects unsupported values; `"r"` forces R serialization.
 #' @returns `path`, invisibly.
-#' @examples
+#' @examplesIf rdz:::rdz_has_rust()
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(list(answer = 42L), path)
 #' read_rdz(path)
@@ -60,7 +60,7 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
 #'
 #' @param path A single, non-missing path to read.
 #' @returns The R object stored in `path`.
-#' @examples
+#' @examplesIf rdz:::rdz_has_rust()
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(c(TRUE, FALSE, NA), path)
 #' read_rdz(path)
@@ -85,7 +85,7 @@ read_rdz <- function(path) {
 #'
 #' @param path A single, non-missing path to inspect.
 #' @returns A named list of container information and a bounded root synopsis.
-#' @examples
+#' @examplesIf rdz:::rdz_has_rust()
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(data.frame(value = 1:3), path)
 #' rdz_info(path)
@@ -93,7 +93,7 @@ read_rdz <- function(path) {
 #' @export
 rdz_info <- function(path) {
   path <- validate_existing_rdz_path(path)
-  info <- rdz_file_info(path)
+  info <- rdz_c_file_info(path)
   synopsis <- if (length(info$synopsis) == 0L) {
     NULL
   } else {
@@ -161,7 +161,7 @@ print.rdz_info <- function(x, ...) {
 #'
 #' @param path A single, non-missing path to inspect.
 #' @returns A named schema list.
-#' @examples
+#' @examplesIf rdz:::rdz_has_rust()
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(c(first = TRUE, second = NA), path)
 #' rdz_schema(path)
@@ -195,7 +195,7 @@ rdz_schema <- function(path) {
 #' @param names Optional character vector selecting attribute names.
 #' @param allow_full Whether generic files may be fully deserialized.
 #' @returns A named list of attribute values.
-#' @examples
+#' @examplesIf rdz:::rdz_has_rust()
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(c(first = TRUE, second = FALSE), path)
 #' rdz_attributes(path, names = "names")

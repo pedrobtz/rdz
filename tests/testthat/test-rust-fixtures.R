@@ -17,7 +17,10 @@ test_that("the Rust reference corpus is complete and unmodified", {
   expect_identical(manifest$policy, vapply(specs, `[[`, "", "policy"))
 
   files <- file.path(rust_fixture_dir(), paste0(manifest$name, ".rdz"))
-  expect_identical(unname(tools::sha256sum(files)), manifest$sha256)
+  # tools::sha256sum() arrived in R 4.5.0.
+  if (exists("sha256sum", asNamespace("tools"))) {
+    expect_identical(unname(tools::sha256sum(files)), manifest$sha256)
+  }
   expect_identical(as.character(file.size(files)), manifest$bytes)
 
   # Every block encoding a writer emits is represented (1, the legacy two-bit
@@ -28,15 +31,51 @@ test_that("the Rust reference corpus is complete and unmodified", {
   expect_setequal(manifest$codec, c("native_v1", "r_serial_v3"))
 })
 
-test_that("every Rust fixture reads back to its spec's value", {
-  manifest <- rust_fixture_manifest()
+test_that("rdz_info() reports what the Rust build reported for every fixture", {
   infos <- readRDS(file.path(rust_fixture_dir(), "info.rds"))
+  for (spec in rust_fixture_specs()) {
+    path <- file.path(rust_fixture_dir(), paste0(spec$name, ".rdz"))
+    expect_identical(unclass(rdz_info(path)), infos[[spec$name]], label = spec$name)
+  }
+})
+
+test_that("the C reader reads every generic fixture to its spec's value", {
+  for (spec in rust_fixture_specs()) {
+    path <- file.path(rust_fixture_dir(), paste0(spec$name, ".rdz"))
+    if (rdz_info(path)$codec != "r_serial_v3") next
+    payload <- rdz:::rdz_check(.Call(rdz:::rdz_test_read_generic, path))
+    expect_identical(unserialize(payload), spec$value(), label = spec$name)
+  }
+})
+
+test_that("the C writer reproduces every generic fixture byte for byte", {
+  dir <- tempfile("rdz-c-writer-")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  for (spec in rust_fixture_specs()) {
+    path <- file.path(rust_fixture_dir(), paste0(spec$name, ".rdz"))
+    info <- rdz_info(path)
+    if (info$codec != "r_serial_v3") next
+    payload <- rdz:::rdz_check(.Call(rdz:::rdz_test_read_generic, path))
+    synopsis <- rdz:::rdz_c_file_info(path)$synopsis
+    copy <- file.path(dir, basename(path))
+    rdz:::rdz_check(.Call(rdz:::rdz_test_write_generic, payload, synopsis, copy))
+    expect_identical(
+      readBin(copy, "raw", file.size(copy)),
+      readBin(path, "raw", file.size(path)),
+      label = spec$name
+    )
+  }
+})
+
+test_that("every Rust fixture reads back to its spec's value", {
+  skip_without_rust()
+  manifest <- rust_fixture_manifest()
   for (spec in rust_fixture_specs()) {
     path <- file.path(rust_fixture_dir(), paste0(spec$name, ".rdz"))
     row <- manifest[manifest$name == spec$name, ]
 
     expect_identical(read_rdz(path), spec$value(), label = spec$name)
-    expect_identical(unclass(rdz_info(path)), infos[[spec$name]], label = spec$name)
 
     blocks <- rdz_block_encodings(path)
     expect_identical(

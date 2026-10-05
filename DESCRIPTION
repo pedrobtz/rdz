@@ -4,8 +4,8 @@ Version: 0.0.0.9000
 Authors@R:
     person("Pedro", "Baltazar", email = "pedrobtz@gmail.com",
            role = c("aut", "cre", "cph"))
-Description: Writes and reads R objects using a versioned container format
-    implemented in Rust. The format preserves R serialization semantics while
+Description: Writes and reads R objects using a versioned, block-structured
+    container format. The format preserves R serialization semantics while
     adding explicit format identification, length validation, and integrity
     checking.
 License: MIT + file LICENSE
@@ -13,13 +13,22 @@ Copyright: The authors and copyright holders of the bundled Rust crates are
     listed in file inst/COPYRIGHTS.
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 8.0.0
 Depends:
-    R (>= 4.5.0)
+    R (>= 4.1)
 Suggests:
     bench,
     devtools,
     fst,
     testthat (>= 3.0.0)
+LinkingTo:
+    zubin,
+    zufast
 Config/testthat/edition: 3
-SystemRequirements: Cargo (>= 1.88.0) (Rust's package manager), rustc (>= 1.88.0)
+SystemRequirements: Cargo (>= 1.88.0) (Rust's package manager) and rustc
+    (>= 1.88.0), optional: with R 4.5.0 or newer, the Rust reference
+    implementation is built when they are available, until the C
+    implementation replaces it
+Remotes:
+    pedrobtz/zubin,
+    pedrobtz/zufast
+Config/roxygen2/version: 8.1.0

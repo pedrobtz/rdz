@@ -1,3 +1,5 @@
+skip_without_rust()
+
 test_that("read benchmark matrix reports median milliseconds", {
   skip_if_not_installed("bench")
 

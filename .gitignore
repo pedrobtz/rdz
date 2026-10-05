@@ -1,1 +1,3 @@
 .Rproj.user
+fuzz/corpus/
+fuzz/artifacts/

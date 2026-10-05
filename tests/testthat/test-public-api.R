@@ -1,3 +1,5 @@
+skip_without_rust()
+
 test_that("write_rdz writes a file and returns its path invisibly", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)

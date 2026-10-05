@@ -1,0 +1,98 @@
+# The R-free C core (plan-c.md, Stage B), outside R:
+#
+#   c-tests   tools/run-c-tests under gcc and clang: warnings are errors, ASan
+#             and UBSan on, against the Rust reference corpus
+#   fuzz      libFuzzer over the container reader, the canary first; the
+#             grown corpus is cached, so fuzzing time accumulates: 10 minutes
+#             per push, an hour nightly
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds to fuzz (the job times out at 150 minutes)
+        type: number
+        default: 3600
+
+name: hardening
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  c-tests:
+    runs-on: ubuntu-latest
+    name: c-tests (${{ matrix.cc }})
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        with:
+          repository: pedrobtz/zubin
+          path: .deps/zubin
+      - uses: actions/checkout@v6
+        with:
+          repository: pedrobtz/zufast
+          path: .deps/zufast
+      - name: Run the core harness
+        env:
+          CC: ${{ matrix.cc }}
+          ZUBIN_INCLUDE: ${{ github.workspace }}/.deps/zubin/inst/include
+          ZUFAST_INCLUDE: ${{ github.workspace }}/.deps/zufast/inst/include
+        run: tools/run-c-tests
+
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        with:
+          repository: pedrobtz/zubin
+          path: .deps/zubin
+      - uses: actions/checkout@v6
+        with:
+          repository: pedrobtz/zufast
+          path: .deps/zufast
+      - name: Install clang with libFuzzer
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q clang
+          v=$(clang -dumpversion | cut -d. -f1)
+          sudo apt-get install -y -q "libclang-rt-$v-dev" || true
+      - name: Restore the corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+      - name: Fuzz
+        env:
+          FUZZ_CC: clang
+          ZUBIN_INCLUDE: ${{ github.workspace }}/.deps/zubin/inst/include
+          ZUFAST_INCLUDE: ${{ github.workspace }}/.deps/zufast/inst/include
+        run: tools/run-fuzz ${{ github.event_name == 'workflow_dispatch' && inputs.seconds || github.event_name == 'schedule' && 3600 || 600 }}
+      - name: Save the corpus
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+      - name: Upload findings
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore

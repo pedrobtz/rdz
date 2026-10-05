@@ -1,5 +1,43 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-05: plan-c Stage B
+
+The C skeleton and the R-free container are in place beside the Rust oracle:
+
+- `src/core/` (C99, no R header): the wire constants and error kinds
+  (`rdz_format.h`); the seven records as zubin layout specifications, proved
+  against their offsets by `rdz_records_check()` (`rdz_records.c`); files with
+  64-bit offsets, UTF-8 paths on Windows, and same-directory temporary files
+  renamed over the destination with its permissions kept (`rdz_io.c`); and the
+  container reader and writer (`rdz_container.c`). The reader is the Rust
+  reader's validation check for check, with its messages, plus one bound the
+  Rust reader lacked: a logical root's block range is checked against the
+  block table before it is indexed. Checksums are zufast's XXH3.
+- `src/rdz_r.c` and `src/rdz_init.c`: `rdz_info()` now reads through the C
+  reader; failures are classed conditions inheriting `rdz_error`. Writing and
+  reading still go through Rust.
+- The build: `configure` builds the Rust oracle only with R 4.5 or newer and
+  cargo and rustc 1.88 (`RDZ_RUST=0` turns it off); without it the C
+  implementation builds alone, Rust-dependent tests skip, and the examples
+  (gated on `rdz:::rdz_has_rust()` until Stage C) do not run.
+- The R floor is R 4.1: the family's floor (zubin, zufast), and all the C
+  implementation needs so far. It is confirmed or raised at Stage E, where the
+  C adapter iterates attributes (the Rust shim used `R_getAttribCount()`, an R
+  4.6 API, with an `ATTRIB()` fallback).
+- Evidence: `tools/run-c-tests` (2,422 checks under ASan and UBSan) reads all 33
+  reference fixtures, reproduces every generic fixture byte for byte with the C
+  writer, and rejects every single-byte change and every truncation of two
+  fixtures; the libFuzzer target ran ten minutes on the reader with no finding
+  after its canary crashed; `rdz_info()` matches the Rust build's for every
+  fixture, in builds with and without Rust; the C writer's files are read by
+  the Rust reader.
+- CI: `hardening` (the harness under gcc and clang, fuzzing 10 minutes per
+  push and an hour nightly), `native-checks` (sanitizers, valgrind, LTO,
+  gctorture, blocking rchk), and `arch` (i386, musl, s390x; weekly and on
+  `full-ci`), beside `R-CMD-check`.
+
+Stage C (the generic codec, streamed) is next.
+
 ## Checkpoint 2026-10-05: plan-c Stage A
 
 rdz is being re-implemented in C on zubin and zufast (plan-c.md, adopted

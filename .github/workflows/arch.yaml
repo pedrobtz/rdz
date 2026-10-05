@@ -1,0 +1,39 @@
+# The C implementation on 32-bit x86, musl and big-endian s390x (plan-c.md
+# section 7): the s390x leg reads the little-endian reference corpus and
+# writes files the corpus test compares byte for byte. The containers have no
+# cargo, so these build the C implementation alone.
+on:
+  schedule:
+    - cron: "17 5 * * 2"
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+name: arch
+
+permissions:
+  contents: read
+
+jobs:
+  arch:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
+    uses: pedrobtz/r-actions/.github/workflows/arch.yml@70cdfd7c6d62f42828e931a7f061ce998bb0e8f5 # v1.21.0
+    with:
+      targets: >-
+        [{"name": "i386", "platform": "linux/386",
+          "image": "i386/debian:bookworm",
+          "setup": "apt-get update && apt-get install -y --no-install-recommends r-base-dev r-cran-testthat ca-certificates locales && echo 'en_US.UTF-8 UTF-8' > /etc/locale.gen && locale-gen"},
+         {"name": "musl", "platform": "linux/amd64",
+          "image": "alpine:3.21",
+          "setup": "apk add --no-cache R R-dev R-doc build-base linux-headers libuv-dev ca-certificates"},
+         {"name": "s390x", "platform": "linux/s390x",
+          "image": "s390x/debian:bookworm",
+          "setup": "apt-get update && apt-get install -y --no-install-recommends r-base-dev r-cran-testthat ca-certificates locales && echo 'en_US.UTF-8 UTF-8' > /etc/locale.gen && locale-gen"}]
+      install-dependencies: >-
+        mkdir -p ~/.R && printf '_R_CHECK_TESTS_NLINES_=0\n_R_CHECK_FORCE_SUGGESTS_=false\n' > ~/.R/check.Renviron
+        && Rscript -e 'if (!requireNamespace("testthat", quietly = TRUE)) install.packages("testthat", repos = "https://cloud.r-project.org")'
+        && for p in zufast zubin; do Rscript -e "download.file('https://github.com/pedrobtz/$p/archive/refs/heads/main.tar.gz', '/tmp/$p.tar.gz', mode = 'wb')" && mkdir -p /tmp/$p && tar -xzf /tmp/$p.tar.gz -C /tmp/$p --strip-components 1 && R CMD INSTALL /tmp/$p || exit 1; done
+      check-args: --no-manual --ignore-vignettes
+      error-on: warning
+      require-tests: true
+      timeout-minutes: 180

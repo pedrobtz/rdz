@@ -1,3 +1,5 @@
+skip_without_rust()
+
 # Regression tests for the defects recorded in review.md.
 
 # review.md finding 2 ---------------------------------------------------------

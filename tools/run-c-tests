@@ -1,0 +1,26 @@
+#!/bin/sh
+# The R-free core under its own harness (tools/c-tests/core_test.c), from the
+# package root. Warnings are errors; ASan and UBSan are on unless
+# RDZ_SANITIZE=0 (or the compiler cannot link them). zubin's and zufast's
+# headers come from $ZUBIN_INCLUDE and $ZUFAST_INCLUDE, or their installed
+# packages.
+set -eu
+
+CC=${CC:-cc}
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+ZUBIN=${ZUBIN_INCLUDE:-$(Rscript -e 'cat(system.file("include", package = "zubin"))')}
+ZUFAST=${ZUFAST_INCLUDE:-$(Rscript -e 'cat(system.file("include", package = "zufast"))')}
+[ -n "$ZUBIN" ] && [ -n "$ZUFAST" ] || { echo "run-c-tests: install zubin and zufast first" >&2; exit 2; }
+
+FLAGS="-std=c99 -g -O1 -Wall -Wextra -Wpedantic -Wshadow -Werror -DRDZ_STANDALONE"
+SAN="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+if [ "${RDZ_SANITIZE:-1}" = 1 ] && printf 'int main(void){return 0;}\n' > "$WORK/p.c" &&
+   $CC $SAN "$WORK/p.c" -o "$WORK/p" 2>/dev/null; then
+  FLAGS="$FLAGS $SAN"
+fi
+
+$CC $FLAGS -I"$ZUBIN" -I"$ZUFAST" -Isrc/core src/core/*.c tools/c-tests/core_test.c \
+  -o "$WORK/core_test"
+mkdir -p "$WORK/tmp"
+"$WORK/core_test" "$WORK/tmp"

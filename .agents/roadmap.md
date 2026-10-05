@@ -1,5 +1,14 @@
 # RDZ Native Serialization Roadmap
 
+> Since 2026-10-05 the sequence is [plan-c.md](plan-c.md), the re-implementation
+> in C. Its stages map onto the phases below: the container and generic codec
+> (Phase 0B, the streaming bridge of Phase 8) are Stages B and C; compression
+> and the pipeline are Stage D; Phase 1 (logical) is Stage E; Phases 2 and 3
+> (integer, double) Stage F; Phases 4 and 5 (character, factor) Stage G;
+> Phases 6 and 7 (list, data frame) Stage H; Phase 8 (tuning, the 0.1.0
+> freeze) Stage I. Each phase's deliverables and completion gate below still
+> apply to its stage.
+
 ## Development method
 
 Implement one complete vertical slice at a time. A type is not complete when it

@@ -1,0 +1,72 @@
+#!/bin/sh
+# libFuzzer over the R-free container reader (plan-c Stage B). From the
+# package root:
+#
+#   tools/run-fuzz [seconds]     default 60
+#   tools/run-fuzz --replay      run the seeds and the corpus once under ASan
+#                                and UBSan, for compilers without libFuzzer
+#
+# The canary (fuzz/fuzz_canary.c) must crash first, through the same code and
+# flags, or the gate is not trusted. Seeds are the reference fixtures under
+# 64 KiB. Both targets compare no checksum (-DRDZ_FUZZ_SKIP_CHECKSUMS), or
+# the fuzzer would never get past one to the structure it guards; the grown
+# corpus is kept in $FUZZ_CORPUS (default fuzz/corpus),
+# which CI caches so that fuzzing time accumulates. zubin's and zufast's
+# headers come from $ZUBIN_INCLUDE and $ZUFAST_INCLUDE, or their installed
+# packages.
+set -eu
+
+CC=${FUZZ_CC:-clang}
+CORPUS=${FUZZ_CORPUS:-fuzz/corpus}
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+ZUBIN=${ZUBIN_INCLUDE:-$(Rscript -e 'cat(system.file("include", package = "zubin"))')}
+ZUFAST=${ZUFAST_INCLUDE:-$(Rscript -e 'cat(system.file("include", package = "zufast"))')}
+[ -n "$ZUBIN" ] && [ -n "$ZUFAST" ] || { echo "run-fuzz: install zubin and zufast first" >&2; exit 2; }
+
+SRCS="src/core/rdz_container.c src/core/rdz_records.c src/core/rdz_io.c src/core/rdz_error.c"
+FLAGS="-std=c99 -g -O1 -fno-omit-frame-pointer -fno-sanitize-recover=undefined -UNDEBUG
+       -DRDZ_STANDALONE -DRDZ_FUZZ_SKIP_CHECKSUMS -Isrc/core -I$ZUBIN -I$ZUFAST"
+
+mkdir -p "$WORK/seeds" "$CORPUS" "$WORK/artifacts"
+for f in tests/testthat/fixtures/rust/*.rdz; do
+  [ "$(wc -c < "$f")" -le 65536 ] && cp "$f" "$WORK/seeds/"
+done
+
+if [ "${1:-}" = "--replay" ]; then
+  $CC $FLAGS -fsanitize=address,undefined fuzz/standalone_main.c fuzz/fuzz_container.c $SRCS \
+    -o "$WORK/replay"
+  "$WORK/replay" "$WORK"/seeds/* $(find "$CORPUS" -type f 2>/dev/null)
+  exit 0
+fi
+
+printf 'int LLVMFuzzerTestOneInput(const unsigned char *d, unsigned long n) { (void) d; (void) n; return 0; }\n' > "$WORK/probe.c"
+if ! $CC -fsanitize=fuzzer "$WORK/probe.c" -o "$WORK/probe" 2>/dev/null; then
+  echo "run-fuzz: $CC has no libFuzzer runtime; set FUZZ_CC, or use --replay" >&2
+  exit 2
+fi
+for t in fuzz_canary fuzz_container; do
+  $CC $FLAGS -fsanitize=fuzzer,address,undefined "fuzz/$t.c" $SRCS -o "$WORK/$t"
+done
+
+# 1. The canary must crash.
+if "$WORK/fuzz_canary" -runs=100000 -artifact_prefix="$WORK/canary-" "$WORK/seeds" > "$WORK/canary.log" 2>&1; then
+  echo "FAIL: the canary did not crash; the fuzz gate cannot be trusted" >&2
+  exit 2
+fi
+ls "$WORK"/canary-* > /dev/null 2>&1 || { echo "FAIL: the canary exited without a crash artifact" >&2; exit 2; }
+echo "==> canary crashed, as it must"
+
+# 2. The target, for the time asked, over the cached corpus and the seeds.
+SECS=${1:-60}
+status=0
+"$WORK/fuzz_container" -max_total_time="$SECS" -max_len=65536 -dict=fuzz/rdz.dict \
+  -artifact_prefix="$WORK/artifacts/" "$CORPUS" "$WORK/seeds" > "$WORK/fuzz.log" 2>&1 || status=$?
+tail -5 "$WORK/fuzz.log"
+if [ "$status" != 0 ] || [ -n "$(ls -A "$WORK/artifacts")" ]; then
+  echo "FAIL: fuzz_container found a crash (exit $status):" >&2
+  ls "$WORK/artifacts" >&2
+  mkdir -p fuzz/artifacts && cp "$WORK/artifacts"/* fuzz/artifacts/ 2>/dev/null || true
+  exit 1
+fi
+echo "==> fuzz_container: ${SECS}s, no finding; corpus now $(ls "$CORPUS" | wc -l | tr -d ' ') inputs"

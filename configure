@@ -6,23 +6,12 @@ fi
 
 MIN_RUST_VERSION="1.88.0"
 
-if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
-  echo "-------------- ERROR: CONFIGURATION FAILED --------------------"
-  echo ""
-  echo "Cargo and rustc are both required to install rdz."
-  echo "Install them with your system package manager or rustup:"
-  echo ""
-  echo "https://www.rust-lang.org/tools/install"
-  echo ""
-  echo "---------------------------------------------------------------"
-
-  exit 1
-fi
-
-CARGO_VERSION="$(cargo --version)"
-RUSTC_VERSION="$(rustc --version)"
-CARGO_RELEASE="$(printf '%s\n' "${CARGO_VERSION}" | sed -n 's/^cargo \([0-9][0-9.]*\).*/\1/p')"
-RUSTC_RELEASE="$(printf '%s\n' "${RUSTC_VERSION}" | sed -n 's/^rustc \([0-9][0-9.]*\).*/\1/p')"
+# The C implementation needs only R, zubin and zufast. The Rust implementation,
+# the oracle for the C port until it is retired (plan-c.md), is built as well
+# when cargo and rustc 1.88.0 or newer are found, unless RDZ_RUST=0;
+# RDZ_RUST=1 makes it required.
+RDZ_RUST="${RDZ_RUST:-auto}"
+USE_RUST=no
 
 version_at_least() {
   awk -v current="$1" -v required="$2" 'BEGIN {
@@ -36,20 +25,41 @@ version_at_least() {
   }'
 }
 
-if [ -z "${CARGO_RELEASE}" ] || [ -z "${RUSTC_RELEASE}" ] ||
-   ! version_at_least "${CARGO_RELEASE}" "${MIN_RUST_VERSION}" ||
-   ! version_at_least "${RUSTC_RELEASE}" "${MIN_RUST_VERSION}"; then
-  echo "-------------- ERROR: CONFIGURATION FAILED --------------------"
-  echo ""
-  echo "rdz requires cargo and rustc ${MIN_RUST_VERSION} or newer."
-  echo "Found: ${CARGO_VERSION}"
-  echo "Found: ${RUSTC_VERSION}"
-  echo "Please upgrade the Rust toolchain; rdz will not install it."
-  echo ""
-  echo "---------------------------------------------------------------"
-  exit 1
+# Savvy, the Rust implementation's R binding, needs R 4.5.0.
+R_HAS_SAVVY_FLOOR="$("${R_HOME}/bin/Rscript" --vanilla -e 'cat(getRversion() >= "4.5.0")')"
+
+if [ "${RDZ_RUST}" != "0" ] && [ "${RDZ_RUST}" != "false" ]; then
+  if [ "${R_HAS_SAVVY_FLOOR}" != "TRUE" ]; then
+    echo "rdz: the Rust reference implementation needs R 4.5.0 or newer"
+  elif command -v cargo >/dev/null 2>&1 && command -v rustc >/dev/null 2>&1; then
+    CARGO_VERSION="$(cargo --version)"
+    RUSTC_VERSION="$(rustc --version)"
+    CARGO_RELEASE="$(printf '%s\n' "${CARGO_VERSION}" | sed -n 's/^cargo \([0-9][0-9.]*\).*/\1/p')"
+    RUSTC_RELEASE="$(printf '%s\n' "${RUSTC_VERSION}" | sed -n 's/^rustc \([0-9][0-9.]*\).*/\1/p')"
+    if [ -n "${CARGO_RELEASE}" ] && [ -n "${RUSTC_RELEASE}" ] &&
+       version_at_least "${CARGO_RELEASE}" "${MIN_RUST_VERSION}" &&
+       version_at_least "${RUSTC_RELEASE}" "${MIN_RUST_VERSION}"; then
+      USE_RUST=yes
+    else
+      echo "rdz: ${CARGO_VERSION} and ${RUSTC_VERSION} are older than ${MIN_RUST_VERSION}"
+    fi
+  else
+    echo "rdz: cargo and rustc were not found"
+  fi
+  if [ "${USE_RUST}" = "no" ] && [ "${RDZ_RUST}" = "1" ]; then
+    echo "ERROR: RDZ_RUST=1 requires R 4.5.0 and cargo and rustc ${MIN_RUST_VERSION} or newer" >&2
+    exit 1
+  fi
 fi
 
+RUST_OBJECTS=""
+RUST_STATLIB=""
+RUST_LIBS=""
+RUST_CPPFLAGS=""
+
+if [ "${USE_RUST}" = "no" ]; then
+  echo "rdz: building the C implementation without the Rust reference implementation"
+else
 # Report the version of Rustc to comply with the CRAN policy
 echo "using Rust package manager: '${CARGO_VERSION}'"
 echo "using Rust compiler: '${RUSTC_VERSION}'"
@@ -110,9 +120,19 @@ if [ "$(uname)" = "Darwin" ]; then
   BEFORE_CARGO_BUILD="${BEFORE_CARGO_BUILD}"' export MACOSX_DEPLOYMENT_TARGET="'"${MACOSX_DEPLOYMENT_TARGET}"'" \&\&'
 fi
 
+RUST_OBJECTS="init.o r_bridge.o"
+RUST_STATLIB='$(STATLIB)'
+RUST_LIBS='-L$(LIBDIR) -lrdz'
+RUST_CPPFLAGS="-DRDZ_HAVE_RUST"
+fi
+
 sed \
   -e "s/@TARGET@/${TARGET}/" \
   -e "s/@PROFILE@/${PROFILE}/" \
   -e "s/@FEATURE_FLAGS@/${FEATURE_FLAGS}/" \
+  -e "s|@RUST_OBJECTS@|${RUST_OBJECTS}|" \
+  -e "s|@RUST_STATLIB@|${RUST_STATLIB}|" \
+  -e "s|@RUST_LIBS@|${RUST_LIBS}|" \
+  -e "s|@RUST_CPPFLAGS@|${RUST_CPPFLAGS}|" \
   -e "s|@BEFORE_CARGO_BUILD@|${BEFORE_CARGO_BUILD}|" \
   src/Makevars.in > src/Makevars
