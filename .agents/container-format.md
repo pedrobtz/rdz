@@ -43,6 +43,7 @@ whole-root generic codec.
 | Block encoding | 20 | Double raw (`f64` bits LE) |
 | Block encoding | 21 | Double shuffled raw (8 byte planes) |
 | Block encoding | 22 | Double runs |
+| Block encoding | 23 | Double decimals (ALP), since plan-c Stage J |
 | Compression | 0 | No compression |
 | Compression | 1 | One Zstandard frame (since plan-c Stage D) |
 | Checksum | implicit v3 | XXH3-64, seed 0, stored little-endian |
@@ -295,6 +296,27 @@ block's record, before any compression:
 - **21, double shuffled raw:** the same bytes as eight planes.
 - **22, double runs:** `runs:u32`, `0:u32`, then per run `bits:u64`,
   `end:u32`, `0:u32`; runs compare bit patterns.
+- **23, double decimals** (since plan-c Stage J; ALP, Afroozeh, Kuffó and
+  Boncz, SIGMOD 2024, with a division decode): vectors of 1,024 values (the
+  last shorter), back to back, nothing else. Each vector is `e:u8` (0 to 18),
+  `f:u8` (0 to `e`), `width:u8` (0 to 64), `flags:u8` (bit 0: delta; the rest
+  zero), `exceptions:u16`, `0:u16`, `base:i64`; with delta, `first:i64`; then
+  the codes, `width` bits each, packed as above (the vector's length of them,
+  or one fewer with delta), unused high bits zero; then the exceptions'
+  positions (`u16`, strictly increasing, below the vector's length) and their
+  values (`u64` bits). Without delta, value `i` is `n = base + code[i]`; with
+  delta, `n[0] = first` and `n[i] = n[i-1] + base + code[i-1]`, in
+  two's-complement 64-bit arithmetic. Every `n` satisfies
+  `|n × 10^f| < 2^53`, and the value is the double nearest
+  `n × 10^f ÷ 10^e` (ties to even): one division in IEEE double arithmetic,
+  both operands exact, and the double R parses or rounds that decimal to. An
+  exception replaces the value at its position with its bits, so NA, NaN
+  payloads, `-0`, infinities and full-precision values survive exactly. The
+  record is exactly as long as its vectors. Writers choose `e` and `f` by
+  sampling, and use this record only when compressing (not the `speed`
+  preset) and when it is smaller than raw and runs; the pipeline then
+  compresses it like any record. Readers on x87 extended precision decode
+  through `strtod()`, which rounds once.
 
 Every decoded value is checked: an integer record cannot produce `INT32_MIN`
 except through its `NA` code. The writer chooses the smallest record from one

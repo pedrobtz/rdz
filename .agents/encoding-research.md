@@ -450,6 +450,61 @@ retained selector is the distinct share of 4,096 sampled values (under half:
 plain). ALP/ALP-RD stays deferred: its audit gate (above) is not yet run, and
 qs2's lead on currency (42 MB) is the evidence that motivates it.
 
+#### 2026-10-05 plan-c Stage J result: ALP adopted, with a division decode
+
+The audit above ran as an experiment (`tools/experiments/doubles/`): a
+portable C prototype of ALP (two-level sampling, frame of reference or delta,
+exact exceptions) and ALP-RD, against plain and shuffled bytes under zstd 1,
+qs2 0.2.2, fst 0.9.8 and Pcodec, on 4e6 doubles each, one thread, arm64.
+Bits per value (ALP's encode and decode speed):
+
+| data | best before | ALP | qs2 | fst 100 | Pcodec | ALP GB/s |
+|---|---:|---:|---:|---:|---:|---|
+| `round(rnorm(), 2)` | 18.5 | 10.3 | 15.4 | 17.2 | 9.3 | 2.4 / 6.7 |
+| currency (2 places) | 42.5 | 25.1 | 35.6 | 34.7 | 25.0 | 2.3 / 6.5 |
+| prices, random walk (delta) | 18.5 | 7.4 | 16.2 | 17.7 | 6.7 | 2.1 / 4.1 |
+| sensor, 1 place (delta) | 4.8 | 3.2 | 4.8 | 4.6 | 2.4 | 2.0 / 5.3 |
+| POSIXct, seconds | 25.4 | 25.1 | 32.8 | 29.7 | 24.9 | 2.3 / 6.9 |
+| POSIXct, milliseconds | 44.9 | 35.1 | 47.0 | 45.4 | 46.9 | 2.3 / 6.4 |
+| Date (1% NA) | 14.4 | 14.9 | 14.3 | 20.6 | 13.8 | 2.2 / 7.4 |
+
+Findings:
+
+- **Division, not multiplication.** The reference ALP decodes `n * 10^f *
+  10^-e`; `10^-e` is inexact, and on 13-digit values (millisecond times) a
+  third of the values missed R's double by an ulp and fell to ALP-RD (49.5
+  bits). Decoding `n * 10^f / 10^e`, one correctly rounded division with both
+  operands exact (`|n * 10^f| < 2^53`), is the double R parses or rounds the
+  decimal to: 35.1 bits, for about 7% of decode speed. The format defines
+  the value as that nearest double, so it does not depend on an
+  implementation's arithmetic; x87 (i386 builds), which would round twice,
+  decodes through `strtod()`. The harness checks the premise, division equal
+  to `strtod()`, on 100,000 decimals on every architecture.
+- **ALP-RD rejected:** no smaller than shuffle + zstd on full-precision data
+  (57.2 against 56.4 bits on normal deviates), worse on cumulative sums (51
+  against 36), four times slower to encode.
+- **No zstd inside ALP:** 0 to 4% smaller for a third of the decode speed;
+  the pipeline's ordinary compression of each record (kept only when
+  smaller) covers the rest, and turns repeated values from a loss (34 bits)
+  into a win (7.3 against 8.9).
+- **Pcodec**, the ratio leader of 2025, is 5 to 15% smaller and 5 to 6 times
+  slower to encode, 2 to 3 times slower to decode, and Rust; a reference, not
+  a dependency.
+- **The XOR family** (Gorilla, Chimp, Elf, Kangaroo, DeXOR) targets streaming
+  time series, decompresses slowly (Hishida et al., VLDB 2025), and was not
+  pursued.
+- **Not vendored:** the MIT reference (cwida/ALP) is C++, about 3.7 MB of
+  generated FastLanes code, decodes by multiplication, and would make its
+  interleaved layout rdz's format. Encoding 23 is rdz's own record over the
+  existing LSB-first packing (about 450 lines of C, `src/core/rdz_alp.c`).
+
+End to end (`tools/bench-numeric.R`, 1e7 values, balanced, one thread):
+rounded 224/70 ms and 22.1 MB before, 71/28 ms and 11.9 MB after; currency
+92/52 ms and 50.6 MB, then 79/20 ms and 30.0 MB; repeated values 178/77 ms and
+10.7 MB, then 229/49 ms and 8.7 MB (the one slower write). The 5e6-row mixed
+data frame went from 162/112 ms and 57.8 MB to 138/77 ms and 34.7 MB (fst 100:
+3,277/318 ms, 49.9 MB; qs2 42.2 MB).
+
 Baseline: exact little-endian `u64` bits.
 
 Experiments:
@@ -657,7 +712,8 @@ so the whole-payload raw vector never exists. The bytes on disk are those of
 | Frame-of-reference/bit packing | integer, factor | experiment | Phases 2, 5 |
 | Delta miniblocks | integer, string lengths | experiment | Phases 2, 4 |
 | Byte-stream split | numeric | experiment | Phase 3 |
-| ALP/ALP-RD with exact exceptions | numeric | experiment after raw/shuffle reference; define RDZ-owned wire record | Phase 3/tuning |
+| ALP with exact exceptions | numeric | adopted, encoding 23, division decode (Stage J) | done |
+| ALP-RD | numeric | rejected (Stage J): no gain over shuffle + zstd | — |
 | Gorilla/Chimp/Patas family | numeric sequences | defer until reference codec | Phase 3/tuning |
 | Offsets plus concatenated bytes | character | adopt as reference candidate | Phase 4 |
 | Whole-string dictionary | character, factor levels | experiment | Phases 4, 5 |

@@ -2,6 +2,7 @@
 
 #include <zubin/rw.h>
 
+#include "rdz_alp.h"
 #include "rdz_numeric.h"
 
 #define INT_NA INT32_MIN
@@ -328,6 +329,7 @@ int rdz_dbl_length_ok(uint16_t encoding, uint64_t n, uint64_t len)
     case RDZ_ENCODING_DBL_RUNS:
         return n != 0 && len >= RDZ_RUNS_HEADER + RDZ_DBL_RUN_RECORD &&
                len <= RDZ_RUNS_HEADER + RDZ_DBL_RUN_RECORD * n;
+    case RDZ_ENCODING_DBL_DECIMAL: return rdz_alp_length_ok(n, len);
     default: return 0;
     }
 }
@@ -341,6 +343,16 @@ int rdz_dbl_encode(const double *v, size_t n, int compressing, zb_buf *out, uint
         if (bits_of(v[i]) != bits_of(v[i - 1])) runs++;
     }
     runs_len = RDZ_RUNS_HEADER + RDZ_DBL_RUN_RECORD * runs;
+    /* decimals (ALP) when the block will be compressed and they are smaller
+       than runs and raw; the speed preset keeps its plain copy */
+    if (compressing && n) {
+        int used;
+        if (rdz_alp_encode(v, n, runs_len < raw_len ? runs_len : raw_len, out, &used, e)) return 1;
+        if (used) {
+            *encoding = RDZ_ENCODING_DBL_DECIMAL;
+            return 0;
+        }
+    }
     if (n && runs_len < raw_len) {
         size_t at = RDZ_RUNS_HEADER;
         if (!(dst = reserve(out, runs_len, e))) return 1;
@@ -411,6 +423,8 @@ int rdz_dbl_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, 
         }
         return start == n ? 0 : rdz_invalid(e, "invalid double block");
     }
+    case RDZ_ENCODING_DBL_DECIMAL:
+        return rdz_alp_decode(enc, len, n, out, e);
     default:
         return rdz_invalid(e, "unsupported double block encoding");
     }

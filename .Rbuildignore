@@ -11,3 +11,4 @@
 ^review\.md$
 ^fuzz$
 ^\.git$
+^tools/experiments$

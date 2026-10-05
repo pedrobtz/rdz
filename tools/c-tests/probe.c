@@ -215,7 +215,7 @@ static const char *const cases[] = {
     "directory-length", "block-offsets", "compressed-smaller", "declared-block-size",
     "block-range", "numeric-length", "logical-length", "string-length", "children-range",
     "depth", "frame-rows", "attribute-range", "delta-width", "int-run-end", "logical-run-end",
-    "string-record-length", "dict-index-range", "zstd-length", NULL};
+    "string-record-length", "dict-index-range", "zstd-length", "alp-exception-position", NULL};
 
 static int is(const char *a, const char *b) { return strcmp(a, b) == 0; }
 
@@ -350,6 +350,18 @@ static int run(const char *dir, const char *name)
         static const uint8_t zeros[400];
         o[0] = object(0, RDZ_ROOT_PARENT_ID, RDZ_ROLE_ROOT, RDZ_TYPE_INTEGER, 101, 0, 1);
         add_zstd(&s, 10, 101, zeros, sizeof zeros, 404);
+        s.objects = o;
+        s.nobjects = 1;
+    } else if (is(name, "alp-exception-position")) {
+        /* a decimal vector of 100 fives whose one exception lies just past it */
+        uint8_t rec[26];
+        memset(rec, 0, sizeof rec);
+        zb_wr_u16le(rec + 4, 1);
+        zb_wr_u64le(rec + 8, 5);
+        zb_wr_u16le(rec + 16, 100);
+        zb_wr_u64le(rec + 18, 0x7FF00000000007A2ull);
+        o[0] = object(0, RDZ_ROOT_PARENT_ID, RDZ_ROLE_ROOT, RDZ_TYPE_DOUBLE, 100, 0, 1);
+        add(&s, 23, 100, rec, sizeof rec);
         s.objects = o;
         s.nobjects = 1;
     } else {

@@ -70,6 +70,13 @@ frozen_fixture_specs <- function() {
     list(name = "dbl_kinds", value = function() {
       c(frozen_doubles(), rep(2.5, 131072L), frozen_hash(3000L, 1000L) / 7)
     }),
+    # decimals (encoding 23, Stage J) under the compressing presets: prices in
+    # cents, millisecond times, one-decimal readings with NA and -0
+    list(name = "dbl_decimal", value = function() {
+      c(round(100 + cumsum(c(0, (frozen_hash(9999L, 41L) - 20L) / 100)), 2),
+        1.7e9 + frozen_hash(5000L, 30000000L) / 1000,
+        replace(frozen_hash(3000L, 500L) / 10, c(7L, 99L), c(NA, -0)))
+    }),
     list(name = "chr_plain", value = function() rep_len(frozen_strings(), 600L)),
     list(name = "chr_dictionary", value = function() {
       c("a", "bb", "ccc", NA)[frozen_hash(80000L, 4L) + 1L]

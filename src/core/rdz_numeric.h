@@ -10,7 +10,8 @@
  *            13 delta (first + bit-packed deltas over their minimum; no NA),
  *            14 runs (value, end)
  *   double   20 raw (f64 bits LE), 21 shuffled raw (8 byte planes),
- *            22 runs (bits, end)
+ *            22 runs (bits, end), 23 decimals (ALP: rdz_alp.h; when
+ *            compressing)
  *
  * Shuffled raw replaces raw when the block will be compressed: the byte
  * planes compress better and decode the same way. Doubles are bit-exact:

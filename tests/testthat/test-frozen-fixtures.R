@@ -23,7 +23,7 @@ test_that("the frozen corpus is complete and unmodified", {
   }
   # every block encoding and both compressions are represented
   encodings <- unique(unlist(strsplit(manifest$encodings, " ", fixed = TRUE)))
-  expect_setequal(encodings, as.character(c(0L, 2:14, 20:22)))
+  expect_setequal(encodings, as.character(c(0L, 2:14, 20:23)))
   compressions <- unique(unlist(strsplit(manifest$compressions, " ", fixed = TRUE)))
   expect_setequal(compressions, c("0", "1"))
 })
@@ -40,6 +40,12 @@ test_that("every frozen file reads to its spec's value", {
 })
 
 test_that("this rdz writes every frozen native speed file's bytes again", {
+  # R on x87 (i386) sets the quiet bit of NA_real_, a signalling NaN, when it
+  # merely copies it, so a spec's doubles there are not the bits the corpus
+  # holds (R still reads both as NA)
+  na <- writeBin(c(NA_real_, 0)[1L], raw(), endian = "little")
+  skip_if(!identical(na, as.raw(c(0xa2, 0x07, 0, 0, 0, 0, 0xf0, 0x7f))),
+          "R on this platform changes NaN payloads")
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
   for (spec in frozen_fixture_specs()) {
