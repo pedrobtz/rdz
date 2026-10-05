@@ -8,7 +8,10 @@ Use three complementary layers:
    targets (`tools/run-fuzz`, `fuzz/`) for records, lengths, blocks, checksums,
    container finalization, and malformed input. They compile without R, under
    ASan and UBSan, with warnings as errors, and the fuzz gate trusts a target only
-   after its canary has crashed.
+   after its canary has crashed. `tools/run-mutation-check` disables each reader
+   guard marked `/* GUARD: name */` in turn and requires its hostile file
+   (`tools/c-tests/probe.c`) to get a different answer, so no marked guard is
+   vacuous; a new guard against hostile input gets a marker and a case.
 2. The Rust reference corpus (`tests/testthat/fixtures/rust/`): every fixture
    must read back `identical()` to its spec and report the Rust build's
    `rdz_info()`, and the C writer must reproduce the generic fixtures byte for

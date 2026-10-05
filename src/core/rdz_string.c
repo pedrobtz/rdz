@@ -334,7 +334,7 @@ int rdz_string_decode_records(const uint8_t *block, size_t len, size_t count, rd
         tag = block[at];
         n = zb_rd_u32le(block + at + 1);
         at += RDZ_STRING_RECORD_HEADER;
-        if (n > len - at) return rdz_invalid(e, "truncated character bytes");
+        if (n > len - at) return rdz_invalid(e, "truncated character bytes"); /* GUARD: string-record-length */
         if (tag == RDZ_STR_NA) {
             if (n != 0) return rdz_invalid(e, "missing character record has nonzero length");
         } else if (tag > RDZ_STR_BYTES) {
@@ -370,7 +370,7 @@ int rdz_string_decode_indices(const uint8_t *block, size_t len, size_t count,
         if (v > high) high = v;
         out[i] = v;
     }
-    if (count != 0 && (base + high >= (uint64_t)dictionary_len || base + high > 0xffffffffull)) {
+    if (count != 0 && (base + high >= (uint64_t)dictionary_len || base + high > 0xffffffffull)) { /* GUARD: dict-index-range */
         return rdz_invalid(e, "dictionary index refers to an undefined entry");
     }
     for (i = 0; i < count; i++) out[i] += (uint32_t)base;

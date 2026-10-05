@@ -259,7 +259,8 @@ int rdz_int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, 
     case RDZ_ENCODING_INT_DELTA: {
         unsigned width = enc[0];
         int64_t value = (int32_t)zb_rd_u32le(enc + 4), dmin = (int64_t)zb_rd_u64le(enc + 8);
-        if (width > 32 || enc[1] || enc[2] || enc[3] || value == INT32_MIN ||
+        if (width > 32) return rdz_invalid(e, "invalid delta width"); /* GUARD: delta-width */
+        if (enc[1] || enc[2] || enc[3] || value == INT32_MIN ||
             dmin < -(int64_t)UINT32_MAX || dmin > (int64_t)UINT32_MAX ||
             len != RDZ_INT_DELTA_HEADER + packed_bytes(n - 1, width) ||
             !padding_clear(enc + RDZ_INT_DELTA_HEADER, n - 1, width)) {
@@ -291,7 +292,8 @@ int rdz_int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, 
             const uint8_t *rec = enc + RDZ_RUNS_HEADER + r * RDZ_INT_RUN_RECORD;
             int32_t value = (int32_t)zb_rd_u32le(rec);
             size_t end = zb_rd_u32le(rec + 4);
-            if (end <= start || end > n || (r && value == out[start - 1])) return bad_int(e);
+            if (end > n) return rdz_invalid(e, "an integer run ends past its block"); /* GUARD: int-run-end */
+            if (end <= start || (r && value == out[start - 1])) return bad_int(e);
             for (i = start; i < end; i++) out[i] = value;
             start = end;
         }

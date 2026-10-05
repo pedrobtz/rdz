@@ -142,5 +142,5 @@ test_that("a corrupt numeric record is a classed error", {
   dir_len <- sum(as.numeric(bytes[(n - 23L):(n - 16L)]) * 256^(0:7))
   bytes[(n - 15L):(n - 8L)] <- hash_le(bytes[(dir_off + 1L):(dir_off + dir_len)])
   writeBin(bytes, path)
-  expect_error(read_rdz(path), "invalid integer block", class = "rdz_format_error")
+  expect_error(read_rdz(path), "invalid delta width", class = "rdz_format_error")
 })

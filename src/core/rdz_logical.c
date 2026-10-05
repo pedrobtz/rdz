@@ -609,7 +609,8 @@ static int decode_runs(const uint8_t *enc, size_t len, size_t n, int32_t *out, r
         size_t end = zb_rd_u32le(rec);
         uint8_t s = rec[4];
         int32_t v;
-        if (rec[5] || rec[6] || rec[7] || s > NA_STATE || prev == s || end <= start || end > n) {
+        if (end > n) return rdz_invalid(e, "a logical run ends past its block"); /* GUARD: logical-run-end */
+        if (rec[5] || rec[6] || rec[7] || s > NA_STATE || prev == s || end <= start) {
             return rdz_invalid(e, "invalid logical run record");
         }
         v = value_of(s);

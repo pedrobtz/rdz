@@ -60,7 +60,7 @@ int rdz_codec_decompress(rdz_codec *c, uint16_t compression, const uint8_t *stor
         if (!c->dctx) return rdz_memory(e, "a decompression context");
     }
     got = ZSTD_decompressDCtx((ZSTD_DCtx *)c->dctx, dst, decoded_len, stored, stored_len);
-    if (ZSTD_isError(got) || got != decoded_len) {
+    if (ZSTD_isError(got) || got != decoded_len) { /* GUARD: zstd-length */
         return rdz_invalid_block(e, "block %lu does not decompress to its decoded length",
                                  sequence);
     }
