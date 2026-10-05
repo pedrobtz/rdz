@@ -274,18 +274,20 @@ distinguished outcome; `native` surfaces it; `r` bypasses the attempt and forces
 eligible `names` attribute. Any other logical attribute, unsupported name
 representation, or root type produces the distinguished whole-root fallback.
 
-The R layer currently allocates the whole XDR raw vector. Rust then writes it
-directly to a same-directory temporary file, appends the directory/trailer,
-closes it, preserves an existing destination's permissions, and replaces the
-destination. A platform rename that can replace the target is atomic for process
+The generic payload is streamed (since plan-c Stage C): `R_Serialize()` writes
+through a callback that fills 1 MiB blocks into a same-directory temporary
+file, the directory and trailer follow, and the file is closed, given an
+existing destination's permissions, and renamed over the destination. An
+error or interrupt during serialization removes the temporary file at once. A platform rename that can replace the target is atomic for process
 observers but is not crash-durable because RDZ does not call `fsync`/`sync_all`.
 On platforms where rename cannot replace an existing target, the backup-and-
 rollback fallback has a brief missing-destination window and can strand the
 backup after a process or machine crash. Dropping an uncommitted writer removes
 its temporary file. A future opt-in durable mode may sync the file and parent
-directory; the callback-based streaming R bridge remains a pre-0.1 requirement.
+directory.
 
-Decided 2026-10-05 for the C implementation: the generic payload is streamed.
+Decided 2026-10-05 for the C implementation, and implemented at Stage C: the
+generic payload is streamed.
 `R_Serialize()` writes through an `R_outpstream` whose callback fills the current
 block, and `R_Unserialize()` reads through an `R_inpstream` that pulls verified
 blocks in order, so neither the whole raw vector nor a separate whole-payload

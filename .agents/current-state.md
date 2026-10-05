@@ -1,5 +1,50 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-05: plan-c Stage C
+
+The generic codec is C and streamed (`src/adapter/rdz_generic.c`):
+`R_Serialize()` writes through an `R_outpstream` that fills a 1 MiB block and
+hands each full block to the container writer; `R_Unserialize()` reads through
+an `R_inpstream` that pulls blocks in order, each verified before it is used.
+Both run under `R_UnwindProtect()`, so an error or an interrupt (checked between
+blocks) removes the temporary file or closes the reader at once; the external
+pointer's finalizer is the backstop. A block that fails its checksum is raised
+as the classed `rdz_format_error` from inside the stream.
+
+- `write_rdz()` writes every object the native logical codec does not take
+  through it (`mode = "r"` always), in every build; `read_rdz()` reads every
+  generic file through it. Native logical files are still written and read by
+  the Rust oracle until Stage E; a build without Rust writes logicals
+  generically, and `mode = "native"` is an error there.
+- The synopsis's root length comes from C (`rdz_c_root_length()`).
+- The streamed writer's files are byte for byte the Rust writer's under the
+  same R version (checked against the reference corpus).
+- Memory: a forced-generic write allocates almost nothing on the R heap, where
+  the Rust path allocated the whole payload; the C side holds one 1 MiB block.
+  Measured with `tools/bench-generic.R` (median of 5, one thread, R 4.6.1,
+  Apple arm64, qs2 0.2.2 at its defaults with checksum validation):
+
+  | data | format | write ms | read ms | R heap per write, MB | file MB |
+  |---|---|---:|---:|---:|---:|
+  | data frame, 1e6 rows | rdz (C, streamed) | 151 | 211 | 0.19 | 31.5 |
+  |  | rdz (Rust, whole payload) | 147 | 207 | 31.49 | 31.5 |
+  |  | qs2 | 94 | 113 | 0.03 | 0.08 |
+  |  | saveRDS, uncompressed | 299 | 363 | 0.03 | 31.5 |
+  | 100 numeric vectors of 1e5 | rdz (C, streamed) | 161 | 161 | 0.02 | 76.3 |
+  |  | rdz (Rust, whole payload) | 209 | 207 | 76.31 | 76.3 |
+  |  | qs2 | 131 | 64 | 0.01 | 1.2 |
+  |  | saveRDS, uncompressed | 148 | 164 | 0.01 | 76.3 |
+  | character, 1e6 | rdz (C, streamed) | 95 | 223 | 0.02 | 17.2 |
+  |  | rdz (Rust, whole payload) | 102 | 206 | 17.18 | 17.2 |
+  |  | qs2 | 122 | 146 | 0.01 | 0.4 |
+  |  | saveRDS, uncompressed | 256 | 370 | 0.01 | 17.2 |
+
+  qs2's lead on these is compression (its files are 40 to 400 times smaller):
+  rdz has none until Stage D. Without it, the streamed generic path matches the
+  whole-payload one on speed and removes its allocation.
+
+Stage D (the pipeline and compression) is next.
+
 ## Checkpoint 2026-10-05: plan-c Stage B
 
 The C skeleton and the R-free container are in place beside the Rust oracle:

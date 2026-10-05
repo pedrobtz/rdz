@@ -14,7 +14,7 @@
 #include <R.h>
 #include <Rinternals.h>
 
-#include "core/rdz_container.h"
+#include "rdz_r.h"
 
 static const char *rdz_kind(rdz_code code)
 {
@@ -28,7 +28,7 @@ static const char *rdz_kind(rdz_code code)
     }
 }
 
-static SEXP rdz_failure(const rdz_error *e)
+SEXP rdz_failure(const rdz_error *e)
 {
     SEXP out = PROTECT(Rf_mkString(e->message));
     SEXP kind = PROTECT(Rf_mkString(rdz_kind(e->code)));
@@ -41,7 +41,7 @@ static SEXP rdz_failure(const rdz_error *e)
 
 /* The bytes of a path for the core: UTF-8 on Windows, where the core opens
    it through the wide-character API; the native encoding elsewhere. */
-static const char *rdz_path(SEXP path)
+const char *rdz_path(SEXP path)
 {
     if (TYPEOF(path) != STRSXP || XLENGTH(path) != 1 || STRING_ELT(path, 0) == NA_STRING) {
         Rf_error("`path` must be a single, non-missing string.");
@@ -76,6 +76,16 @@ static SEXP rdz_reader_handle(rdz_reader **out)
     *out = r;
     UNPROTECT(1);
     return ptr;
+}
+
+void rdz_raise(const rdz_error *e)
+{
+    SEXP failure = PROTECT(rdz_failure(e));
+    SEXP name = PROTECT(Rf_mkString("rdz"));
+    SEXP ns = PROTECT(R_FindNamespace(name));
+    SEXP call = PROTECT(Rf_lang2(Rf_install("rdz_check"), failure));
+    Rf_eval(call, ns);
+    UNPROTECT(4); /* not reached: rdz_check() raises */
 }
 
 static void rdz_set(SEXP list, SEXP names, R_xlen_t i, const char *name, SEXP value)
@@ -138,7 +148,23 @@ SEXP rdz_c_has_rust(void)
 #endif
 }
 
+SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, int fail_after);
+
+SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path)
+{
+    return rdz_generic_write(x, synopsis, path, -1);
+}
+
 /* ---- test-only entry points (rdz_test_) ---------------------------------------- */
+
+/* The streamed writer, raising an R error after `blocks` blocks. */
+SEXP rdz_test_write_generic_unwind(SEXP x, SEXP path, SEXP blocks)
+{
+    SEXP synopsis = PROTECT(Rf_allocVector(RAWSXP, 0));
+    SEXP out = rdz_generic_write(x, synopsis, path, Rf_asInteger(blocks));
+    UNPROTECT(1);
+    return out;
+}
 
 SEXP rdz_test_records(void)
 {

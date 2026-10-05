@@ -7,7 +7,7 @@ PKG_CPPFLAGS = -I. @RUST_CPPFLAGS@
 PKG_LIBS = @RUST_LIBS@
 
 CORE_OBJECTS = core/rdz_container.o core/rdz_error.o core/rdz_io.o core/rdz_records.o
-OBJECTS = rdz_init.o rdz_r.o $(CORE_OBJECTS) @RUST_OBJECTS@
+OBJECTS = rdz_init.o rdz_r.o adapter/rdz_generic.o $(CORE_OBJECTS) @RUST_OBJECTS@
 RUST_STATLIB = @RUST_STATLIB@
 
 TARGET = @TARGET@

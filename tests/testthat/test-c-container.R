@@ -102,6 +102,6 @@ test_that("files the C writer writes are read by the Rust reference", {
   synopsis <- serialize(rdz:::build_rdz_synopsis(x), NULL, xdr = TRUE, version = 3L)
   payload <- serialize(x, NULL, xdr = TRUE, version = 3L)
   rdz:::rdz_check(.Call(rdz:::rdz_test_write_generic, payload, synopsis, path))
-  expect_identical(read_rdz(path), x)
+  expect_identical(unserialize(rdz:::rdz_read(path)$value), x)
   expect_identical(rdz_info(path)$synopsis$root_type, "list")
 })

@@ -28,10 +28,8 @@ exact attribute values still require \code{\link[=read_rdz]{read_rdz()}}. Data b
 validated by \code{\link[=read_rdz]{read_rdz()}}, not by this metadata-only operation.
 }
 \examples{
-\dontshow{if (rdz:::rdz_has_rust()) withAutoprint(\{ # examplesIf}
 path <- tempfile(fileext = ".rdz")
 write_rdz(data.frame(value = 1:3), path)
 rdz_info(path)
 unlink(path)
-\dontshow{\}) # examplesIf}
 }
