@@ -71,9 +71,9 @@ remain possible future extensions.
 ```text
 R wrapper
    |
-   | one .Call through generated Savvy bindings
+   | one .Call (src/rdz_r.c)
    v
-thin #[savvy] boundary
+thin entry point: argument re-validation, conditions, R-owned handles
    |
    v
 R adapter (R thread only)
@@ -101,41 +101,27 @@ RDZ container and IO
    |- temporary file and safest platform replacement
 ```
 
-The intended Rust module layout is:
+The implementation is C99 on zubin and zufast (plan-c.md section 4, adopted
+2026-10-05); the Rust implementation in `src/rust/` is the oracle until the port
+retires it. The module layout:
 
 ```text
-src/rust/src/
-|- lib.rs
-|- format.rs
-|- codec/
-|  |- mod.rs
-|  |- encode.rs
-|  |- decode.rs
-|  |- tags.rs
-|  `- error.rs
-|- container/
-|  |- mod.rs
-|  |- reader.rs
-|  |- writer.rs
-|  |- metadata.rs
-|  `- directory.rs
-|- r_adapter/
-|  |- mod.rs
-|  |- encode.rs
-|  |- decode.rs
-|  |- attributes.rs
-|  |- character.rs
-|  |- r_serial.rs
-|  `- r_api.rs
-`- pipeline/
-   |- mod.rs
-   |- compress.rs
-   `- decompress.rs
+R/                 write_rdz(), read_rdz(), rdz_info(), rdz_schema(), rdz_attributes()
+src/rdz_r.c        .Call entry points: argument re-validation, failures as rdz_failure,
+                   core state owned by external pointers
+src/rdz_init.c     routine registration (C, and the Rust oracle when built)
+src/adapter/       R thread only: dispatch, traversal, attribute policy, CHARSXP
+                   access, the R_Serialize bridge, allocation of decoded objects
+                   (from Stage C)
+src/core/          R-free: rdz_format.h (wire constants, errors), rdz_records
+                   (zubin layouts), rdz_container (reader, writer), rdz_io (files,
+                   atomic replacement); type codecs and the block pipeline later
+src/vendor/zstd/   the amalgamation (from Stage D)
 ```
 
-The layout may be introduced incrementally. The dependency direction is
-important: `codec`, `container`, and `pipeline` must not depend on Savvy or the R
-API.
+The dependency direction is the rule: `src/core/` never includes an R header and
+compiles standalone into `tools/c-tests/` and `fuzz/`; its only allocation
+primitive is zubin's `zb_buf`.
 
 ## R, C, and Rust responsibilities
 
@@ -158,49 +144,36 @@ tests, native benchmarks, and users who do not want implicit fallback.
 Supplying an R serialization `refhook`, if supported by the public API, forces the
 generic whole-root codec; strict native mode with a `refhook` is an argument error.
 
-### Generated Savvy boundary
+### The .Call boundary
 
-Savvy supplies the `.Call` bridge. Internal native entry points should remain
-thin, for example:
+`src/rdz_r.c` holds thin entry points. They translate the path (UTF-8 on
+Windows, native elsewhere), create an external pointer before the core allocates
+anything, call the core, and build the R result. C never raises an rdz error: a
+failure returns an `rdz_failure` string with its kind, which `rdz_check()` in
+`R/c-core.R` raises as `rdz_format_error`, `rdz_limit_error`,
+`rdz_version_error`, `rdz_codec_error`, `rdz_io_error` or `rdz_memory_error`, each
+inheriting `rdz_error`. Do not put format logic in these functions.
 
-```rust
-#[savvy]
-fn rdz_serialize(x: savvy::Sexp, path: savvy::StringSexp)
-  -> savvy::Result<()>;
+### R adapter (R thread only)
 
-#[savvy]
-fn rdz_unserialize(path: savvy::StringSexp)
-  -> savvy::Result<savvy::Sexp>;
-```
+The adapter owns semantic dispatch and recursive traversal. Only the R thread
+touches SEXPs or calls R; workers receive owned `zb_buf`s and immutable metadata.
+Strings cross the boundary once, as bytes plus encoding. Every helper uses the
+public R API and never inspects the internal `SEXPREC` layout. The generic codec
+streams through `R_Serialize()`/`R_Unserialize()` callbacks into and out of
+blocks (container-format.md).
 
-Exact signatures may change as the R API is developed. Do not put format logic in
-these functions.
+During decoding, the R thread allocates the destination vector and decodes into
+it. A future ALTREP path may change selected copies without changing the codec.
 
-### R-aware Rust adapter
+### The Rust oracle
 
-The adapter owns semantic dispatch and recursive traversal. Savvy SEXP wrappers
-are neither `Send` nor `Sync`; the adapter must never move them to a worker thread
-or call R from a worker. It may borrow R slices for synchronous work, or copy and
-pack a block into an owned Rust buffer before submitting it to the pipeline.
-
-During decoding, workers return owned decoded blocks. The R thread allocates the
-destination `Owned...Sexp` and copies values into it. A future ALTREP path may
-change selected copies without changing the codec.
-
-### Optional C shim
-
-C must not own dispatch, recursion, encoder state, or file IO. Start with
-`savvy_ffi` and narrowly wrapped public R symbols in `r_adapter/r_api.rs`. Add a
-separate hand-written C shim only if a required public R operation cannot be used
-reliably through direct FFI.
-
-Suitable shim operations expose leaf information such as a character element's
-bytes and encoding, attribute iteration, or the callback bridge for
-`R_Serialize()`/`R_Unserialize()`. A fallback bridge may stream bytes between R's
-serializer and the RDZ block pipeline, but it does not own native type dispatch.
-All helpers must use the public R API and must never inspect the internal
-`SEXPREC` layout. Do not edit Savvy-generated `src/init.c`, `src/rust/api.h`, or
-`R/000-wrappers.R`.
+Until each C stage replaces it, `src/rust/` (Savvy 0.10.2) still writes and
+reads, and its corpus in `tests/testthat/fixtures/rust/` fixes the bytes the C
+implementation must read and reproduce. Savvy's generated `src/init.c`,
+`src/rust/api.h` and `R/000-wrappers.R` are frozen; `src/rdz_init.c` registers
+their routines when configure builds the Rust library and error stubs when it
+does not.
 
 ## Type dispatch
 

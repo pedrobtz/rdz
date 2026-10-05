@@ -6,10 +6,15 @@
 \alias{rdz-package}
 \title{rdz: Versioned Serialization for R Objects}
 \description{
-Writes and reads R objects using a versioned container format implemented in Rust. The format preserves R serialization semantics while adding explicit format identification, length validation, and integrity checking.
+Writes and reads R objects using a versioned, block-structured container format. The format preserves R serialization semantics while adding explicit format identification, length validation, and integrity checking.
 }
 \author{
 \strong{Maintainer}: Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]
+
+Authors:
+\itemize{
+  \item Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]
+}
 
 }
 \keyword{internal}

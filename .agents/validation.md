@@ -4,10 +4,16 @@
 
 Use three complementary layers:
 
-1. Pure Rust tests for tags, lengths, transforms, blocks, checksums, container
-   finalization, and malformed input. These tests must not require R.
-2. Savvy boundary tests for narrow FFI behavior that cannot be exercised without
-   an R session.
+1. The R-free C harness (`tools/run-c-tests`, `tools/c-tests/`) and the libFuzzer
+   targets (`tools/run-fuzz`, `fuzz/`) for records, lengths, blocks, checksums,
+   container finalization, and malformed input. They compile without R, under
+   ASan and UBSan, with warnings as errors, and the fuzz gate trusts a target only
+   after its canary has crashed.
+2. The Rust reference corpus (`tests/testthat/fixtures/rust/`): every fixture
+   must read back `identical()` to its spec and report the Rust build's
+   `rdz_info()`, and the C writer must reproduce the generic fixtures byte for
+   byte. (The Savvy boundary tests of the Rust implementation are retired with
+   it.)
 3. R `testthat` integration tests as the authoritative public-API and semantic
    round-trip suite.
 
