@@ -2,7 +2,7 @@ test_that("write_rdz writes a file and returns its path invisibly", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
 
-  result <- withVisible(write_rdz(list(value = 1L), path))
+  result <- withVisible(write_rdz(list(value = 1L), path, mode = "r"))
 
   expect_false(result$visible)
   expect_identical(result$value, path)
@@ -57,7 +57,7 @@ test_that("truncated and invalid files are rejected", {
   invalid <- tempfile(fileext = ".rdz")
   on.exit(unlink(c(valid, truncated, invalid)), add = TRUE)
 
-  write_rdz(list(value = rep(pi, 100L)), valid)
+  write_rdz(list(value = rep(pi, 100L)), valid, mode = "r")
   bytes <- readBin(valid, what = "raw", n = file.info(valid)$size)
   writeBin(bytes[seq_len(length(bytes) %/% 2L)], truncated)
   writeBin(as.raw(0:15), invalid)
@@ -70,7 +70,7 @@ test_that("payload corruption is detected before deserialization", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
 
-  write_rdz(list(value = rep(pi, 100L)), path)
+  write_rdz(list(value = rep(pi, 100L)), path, mode = "r")
   bytes <- readBin(path, what = "raw", n = file.info(path)$size)
   # The first block payload starts after the 32-byte file header and the
   # 48-byte block header.
@@ -85,7 +85,7 @@ test_that("payload corruption is detected before deserialization", {
 test_that("header and block-header corruption are detected", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  write_rdz(list(value = 1L), path)
+  write_rdz(list(value = 1L), path, mode = "r")
   bytes <- readBin(path, what = "raw", n = file.info(path)$size)
 
   corrupt_header <- bytes
@@ -132,7 +132,7 @@ test_that("the transitional generic payload uses R's XDR stream", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
 
-  write_rdz(list(value = 1L), path)
+  write_rdz(list(value = 1L), path, mode = "r")
   bytes <- readBin(path, what = "raw", n = 82L)
 
   expect_identical(bytes[81:82], charToRaw("X\n"))
@@ -144,14 +144,14 @@ test_that("codec modes distinguish fallback from strict native encoding", {
   native <- tempfile(fileext = ".rdz")
   on.exit(unlink(c(auto, forced_r, native)), add = TRUE)
 
-  write_rdz(list(1L), auto, mode = "auto")
+  write_rdz(function() 1L, auto, mode = "auto")
   write_rdz(1L, forced_r, mode = "r")
 
   expect_identical(rdz_info(auto)$codec, "r_serial_v3")
   expect_identical(rdz_info(forced_r)$codec, "r_serial_v3")
   expect_error(
-    write_rdz(list(1L), native, mode = "native"),
-    "native serialization is not implemented for list"
+    write_rdz(function() 1L, native, mode = "native"),
+    "native serialization is not implemented for closure"
   )
   expect_false(file.exists(native))
   expect_error(write_rdz(1L, native, mode = "invalid"), "arg")
@@ -196,7 +196,7 @@ test_that("rdz_info reads bounded container metadata and a generic synopsis", {
 test_that("rdz_info rejects a corrupt directory without reading the payload", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  write_rdz(list(value = 1L), path)
+  write_rdz(list(value = 1L), path, mode = "r")
   bytes <- readBin(path, what = "raw", n = file.info(path)$size)
   directory_byte <- length(bytes) - 40L
   bytes[[directory_byte]] <- as.raw(

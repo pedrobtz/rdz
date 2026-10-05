@@ -9,7 +9,27 @@
 
 #include "rdz_container.h"
 #include "rdz_native.h"
+#include "rdz_graph.h"
 #include "rdz_vector.h"
+
+/* Every numeric object's values in one arena, at precomputed offsets. */
+typedef struct {
+    double *arena;
+    size_t *offset;
+    rdz_names_sink sink;
+} fuzz_graph;
+
+static void *graph_values(void *ctx, uint32_t object)
+{
+    fuzz_graph *g = (fuzz_graph *)ctx;
+    return g->arena + g->offset[object];
+}
+
+static const rdz_names_sink *graph_strings(void *ctx, uint32_t object)
+{
+    (void)object;
+    return &((fuzz_graph *)ctx)->sink;
+}
 
 static int count_plain(void *ctx, const rdz_str *v, size_t n, rdz_error *e)
 {
@@ -58,6 +78,36 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
             rdz_vec_free(&v);
             free(values);
         }
+    }
+    /* the whole object graph, when its values are small enough to hold */
+    if (r.codec_id == RDZ_CODEC_NATIVE_V1) {
+        size_t total = 0;
+        uint32_t k;
+        fuzz_graph g;
+        g.offset = (size_t *)calloc(r.nobjects ? r.nobjects : 1, sizeof(size_t));
+        for (k = 0; g.offset && k < r.nobjects && total <= ((size_t)1 << 22); k++) {
+            g.offset[k] = total;
+            if (r.objects[k].type_tag != RDZ_TYPE_CHARACTER) total += (size_t)r.objects[k].logical_len;
+        }
+        if (g.offset && total <= ((size_t)1 << 22)) {
+            g.arena = (double *)malloc((total ? total : 1) * sizeof(double));
+            g.sink.ctx = NULL;
+            g.sink.plain = count_plain;
+            g.sink.entries = count_plain;
+            g.sink.indices = count_ids;
+            if (g.arena) {
+                rdz_graph_sinks sinks;
+                rdz_vec v;
+                sinks.ctx = &g;
+                sinks.values = graph_values;
+                sinks.strings = graph_strings;
+                rdz_vec_init(&v);
+                rdz_graph_read(&v, &r, &sinks, 2, NULL, NULL, &e);
+                rdz_vec_free(&v);
+            }
+            free(g.arena);
+        }
+        free(g.offset);
     }
     rdz_reader_close(&r);
     return 0;

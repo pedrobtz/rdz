@@ -1,5 +1,51 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-05: plan-c Stage H
+
+Lists and data frames are native, as object graphs (container-format.md,
+"Native object graphs"): planned breadth-first on the R thread without
+recursion (`src/adapter/rdz_native_r.c`), written in object order through one
+pipeline so columns compress in parallel (`src/core/rdz_graph.c`), validated
+as a general tree (`rdz_check_native_logical_schema`), and read by
+preallocating every object, streaming every block once into its object, and
+assembling containers. Attributes read as stored (compact row names stay
+compact) through `R_mapAttrib()` on R 4.6 and `ATTRIB()` before it. Supported
+anywhere in the graph: logical, integer, double, character, factor, list,
+data frame and NULL; tibbles keep their class; data.table's
+`.internal.selfref` is the registered transient attribute (omitted, then
+restored by `setalloccol()`). Any other part anywhere sends the whole root to
+the generic codec; nesting past 1,000 levels too. Every block is now
+compressed by the preset; the Rust-identity tests use `speed`.
+
+Evidence: every data-frame shape of roadmap Phase 7 (zero rows, zero
+columns, character and integer row names, duplicate and empty names, list and
+factor columns), nested and heterogeneous lists, shared vectors (written as
+copies, as R serializes them), the depth limit, whole-root fallback for a
+call, an environment, an attribute, ALTREP and complex parts, unequal columns
+refused, data.table usable after a read; fuzzing over whole graphs (6.6M
+runs, no finding).
+
+`tools/bench-dataframe.R` (5e6 rows: logical, integer, rounded double,
+character of 20,000 values, factor; 135 MB in memory; ms and MB; same
+machine):
+
+| format | 1 thread w/r | 8 threads w/r | MB |
+|---|---|---|---:|
+| rdz speed | 131/65 | 94/66 | 62.3 |
+| rdz balanced | 180/112 | 86/72 | 53.3 |
+| rdz compact | 234/112 | 104/72 | 53.3 |
+| qdata | 544/277 | 124/180 | 39.6 |
+| qs2 | 681/433 | 197/299 | 42.2 |
+| fst (50) | 254/224 | 206/220 | 113.5 |
+
+fst reads one column in 12 ms; rdz reads whole objects only (selective column
+reads are the format's later opportunity: the directory already records
+every column's blocks). rdz is on the time side of the Pareto frontier at
+every thread count; qdata and qs2 make files 20 to 25% smaller.
+
+Not done in Stage H: attribute access below the root (`rdz_attributes(object
+=)`) and a schema of a graph's children; Stage I.
+
 ## Checkpoint 2026-10-05: plan-c Stage G
 
 Character vectors (optionally named) and factors (plain and ordered) are

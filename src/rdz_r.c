@@ -134,13 +134,26 @@ SEXP rdz_c_info(SEXP path)
                         : r->objects[0].type_tag == RDZ_TYPE_INTEGER ? "integer"
                         : r->objects[0].type_tag == RDZ_TYPE_DOUBLE ? "double"
                         : r->objects[0].type_tag == RDZ_TYPE_CHARACTER ? "character"
-                        : r->objects[0].type_tag == RDZ_TYPE_FACTOR ? "factor" : "logical"));
+                        : r->objects[0].type_tag == RDZ_TYPE_FACTOR ? "factor"
+                        : r->objects[0].type_tag == RDZ_TYPE_LIST ? "list"
+                        : r->objects[0].type_tag == RDZ_TYPE_DATA_FRAME ? "data.frame" : "logical"));
     rdz_set(out, names, 12, "root_length",
-            Rf_ScalarReal(r->nobjects ? (double)r->objects[0].logical_len : -1.0));
+            Rf_ScalarReal(!r->nobjects ? -1.0
+                          : r->objects[0].type_tag == RDZ_TYPE_LIST ||
+                                    r->objects[0].type_tag == RDZ_TYPE_DATA_FRAME
+                              ? (double)r->objects[0].child_count
+                              : (double)r->objects[0].logical_len));
     if (r->nobjects && r->objects[0].type_tag == RDZ_TYPE_FACTOR) {
         SEXP an = PROTECT(Rf_allocVector(STRSXP, 2));
         SET_STRING_ELT(an, 0, Rf_mkChar("levels"));
         SET_STRING_ELT(an, 1, Rf_mkChar("class"));
+        rdz_set(out, names, 13, "attribute_names", an);
+        UNPROTECT(1);
+    } else if (r->nobjects && r->objects[0].type_tag == RDZ_TYPE_DATA_FRAME) {
+        SEXP an = PROTECT(Rf_allocVector(STRSXP, 3));
+        SET_STRING_ELT(an, 0, Rf_mkChar("names"));
+        SET_STRING_ELT(an, 1, Rf_mkChar("row.names"));
+        SET_STRING_ELT(an, 2, Rf_mkChar("class"));
         rdz_set(out, names, 13, "attribute_names", an);
         UNPROTECT(1);
     } else {

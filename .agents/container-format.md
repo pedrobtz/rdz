@@ -276,6 +276,35 @@ whole root goes to the generic codec in automatic mode, and strict native
 mode rejects it. A string must fit one record of one block (1 MiB); a longer
 one does the same. Since Stage G the default dictionary policy is `auto`.
 
+### Native object graphs
+
+Since plan-c Stage H a native file holds an object graph. Object types add
+`0` NULL, `6` list and `7` data frame; roles add `4` child. Object 0 is the
+root. Every other object comes after its parent and is one of: a child (a
+list's element or a data frame's column; a container's children are
+contiguous, `first_child` and `child_count`), a factor's levels (role 3), or
+an attribute's name or value (roles 1 and 2). Writers number objects
+breadth-first: each object, then its levels and attribute objects, then its
+children. A list's `logical_length` is its element count; a data frame's is
+its row count, which every column must match. Containers and NULL have no
+blocks; every other object's blocks follow the previous object's, so blocks
+run in object order. A file may have no block at all (a list of empty
+lists). Nesting is at most 1,000 levels below the root.
+
+Attributes are contiguous per owner, in owner order, `ordinal` counting from
+0. Their flags: `1` names (on any vector, factor excepted, list or data
+frame; as long as the vector or the container's children), `2` row.names (a
+data frame's explicit row names, character or integer, one per row) and `4`
+class (a data frame's class, when it is not exactly `"data.frame"`). The
+attribute-name object holds the R attribute's name, which must match the
+flag. A data frame without a row.names attribute has compact row names; one
+without a class attribute has class `"data.frame"`. A data.table's
+`.internal.selfref` is not stored; readers restore it.
+
+Since Stage H every block, logical ones included, is compressed under the
+writer's preset (raw when that is not smaller): the `speed` preset writes
+the Phase 1 bytes the Rust reference wrote.
+
 ### Character dictionary blocks (experimental)
 
 The `names` value object may mix encoding 2 with dictionary blocks. Encoding 8

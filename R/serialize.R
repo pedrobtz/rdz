@@ -73,7 +73,13 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
 #' @export
 read_rdz <- function(path) {
   path <- validate_existing_rdz_path(path)
-  rdz_check(.Call(rdz_c_read, path, rdz_settings()))
+  value <- rdz_check(.Call(rdz_c_read, path, rdz_settings()))
+  # A data.table's .internal.selfref is not stored (it is a pointer to the
+  # object itself); data.table restores it, as it does for every reader.
+  if (inherits(value, "data.table") && requireNamespace("data.table", quietly = TRUE)) {
+    value <- data.table::setalloccol(value)
+  }
+  value
 }
 
 #' Inspect an rdz Container Without Reading Its Payload
@@ -230,6 +236,7 @@ rdz_attributes <- function(path, object = NULL, names = NULL, allow_full = FALSE
         name,
         names = ,
         levels = ,
+        row.names = ,
         class = rdz_check(.Call(rdz_c_read_native_attribute, path, name)),
         stop("Unsupported native attribute: ", name, call. = FALSE)
       )

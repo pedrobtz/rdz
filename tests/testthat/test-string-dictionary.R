@@ -42,6 +42,9 @@ test_that("names round-trip under every dictionary policy at chunk boundaries", 
 test_that("reading does not depend on the writer's dictionary policy", {
   x <- rep(TRUE, 200000L)
   names(x) <- sprintf("id-%06d", sample.int(50000L, length(x), replace = TRUE))
+  # records alone: compression would make the plain records small too
+  old <- options(rdz.preset = "speed")
+  on.exit(options(old), add = TRUE)
   paths <- vapply(dictionary_policies, function(policy) {
     path <- tempfile(fileext = ".rdz")
     with_string_dictionary(policy, write_rdz(x, path, mode = "native"))

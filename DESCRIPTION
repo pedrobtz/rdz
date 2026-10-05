@@ -20,9 +20,11 @@ Depends:
     R (>= 4.1)
 Suggests:
     bench,
+    data.table,
     devtools,
     fst,
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    tibble
 LinkingTo:
     zubin,
     zufast
