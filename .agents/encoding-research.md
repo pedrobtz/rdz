@@ -577,6 +577,45 @@ reads are prerequisites under [metadata-access.md](metadata-access.md); preserve
 enough offset metadata that broader selective reads can be added without
 rewriting leaf encodings.
 
+## Format decisions of 2026-10-05 (container version 3)
+
+Taken with the move to a C implementation (plan-c.md §3, §10) and recorded in
+container-format.md.
+
+**Checksum: XXH3-64, seed 0, in eight-byte fields — adopt.** Source: xxHash
+0.8.x (XXH3), as vendored by zufast 0.1.0 (`zuf_hash64()`, `zuf_hasher_*`) and,
+for the Rust oracle until it is retired, the `xxhash-rust` 0.8.19 crate (BSL-1.0).
+The two agree bit for bit on every checksum field of the files rdz writes
+(header, directory header, directory, block; checked 2026-10-05 against
+`zufast::fast_hash()`). Measured on Apple arm64, R 4.6.1, one thread, 256 MiB of
+random bytes: XXH3-64 18.6 GB/s; zlib's portable CRC32 (through `digest`)
+0.77 GB/s. crc32fast's hardware path is faster than zlib's but needs a kernel per
+architecture, which a C implementation would have to write or take from zlib;
+zufast already carries XXH3 with run-time SIMD dispatch, and `qs2` uses the same
+hash. CRC32's guaranteed detection of short burst errors is not a property a
+storage format needs over a 64-bit hash, and the wider field lowers the chance of
+an undetected corrupt block from 2^-32 to 2^-64. Cost: four more bytes in the
+file header's checksum slot (which absorbed the old reserved word), eight more in
+each block header, directory header and trailer, and eight more per block entry,
+about 16 bytes per MiB block. Result: **adopt**; container version 3.
+
+**Compression: zstd, vendored, as compression ID 1 — adopt the slot; LZ4 on
+evidence only.** Source: Zstandard's single-file amalgamation at a pinned
+release, vendored under `src/vendor/zstd/` with the family's manifest and
+verification tooling, as `fst` and `zstdlite` do. The speed presets of
+performance.md need zstd's negative and low levels; zukomp registers only the
+DEFLATE family and has no zstd satellite scheduled. Block bytes are zstd frames
+either way, so a later switch to a shared registration is not a format change.
+The ID is reserved in container version 3; no writer emits it and readers reject
+it until the pipeline stage (plan-c Stage D) implements and measures it. Result:
+**adopt** the slot and the dependency; per-type use remains gated on the
+benchmark matrix.
+
+**The generic payload is streamed — adopt.** The C writer serializes through an
+`R_outpstream` straight into blocks and reads through an `R_inpstream` from them,
+so the whole-payload raw vector never exists. The bytes on disk are those of
+`serialize(x, NULL, version = 3, xdr = TRUE)`, so this is not a format change.
+
 ## Candidate register
 
 | Candidate | Applies to | Initial status | Roadmap gate |
@@ -594,7 +633,8 @@ rewriting leaf encodings.
 | Whole-string dictionary | character, factor levels | experiment | Phases 4, 5 |
 | Prefix/delta strings | character | experiment | Phase 4 |
 | FSST | character | defer until dictionary baseline | Phase 4/tuning |
-| Raw/LZ4/Zstandard per block | all leaf blocks | experiment | Phases 1-3 |
+| Zstandard per block (compression ID 1) | all leaf blocks | adopt slot (2026-10-05); per-type use measured | plan-c Stage D |
+| LZ4 per block | all leaf blocks | evidence only | tuning |
 | Filter pipeline metadata | fixed-width blocks | adopt minimal form | Phase 0 |
 | Footer block/column index | container, data frame | adopt minimal form | Phases 0, 7 |
 | Whole-root R serialization XDR stream | rare/complex objects | adopt for coverage | Phase 0/tuning |

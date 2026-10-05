@@ -7,16 +7,6 @@ cc 1.4.0 and find-msvc-tools 0.1.9
   License: MIT OR Apache-2.0
   Source: https://github.com/rust-lang/cc-rs
 
-cfg-if 1.0.4
-  Author and copyright holder: Alex Crichton
-  License: MIT OR Apache-2.0
-  Source: https://github.com/rust-lang/cfg-if
-
-crc32fast 1.5.0
-  Authors and copyright holders: Sam Rijs, Alex Crichton, and contributors
-  License: MIT OR Apache-2.0
-  Source: https://github.com/srijs/rust-crc32fast
-
 proc-macro2 1.0.107
   Authors and copyright holders: David Tolnay, Alex Crichton, and contributors
   License: MIT OR Apache-2.0
@@ -47,3 +37,8 @@ unicode-ident 1.0.24
   Author and copyright holder: David Tolnay and contributors
   License: (MIT OR Apache-2.0) AND Unicode-3.0
   Source: https://github.com/dtolnay/unicode-ident
+
+xxhash-rust 0.8.19
+  Author and copyright holder: Douman
+  License: BSL-1.0
+  Source: https://github.com/DoumanAsh/xxhash-rust

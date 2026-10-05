@@ -2,7 +2,7 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use crate::atomic_file::AtomicFile;
-use crate::checksum::crc32;
+use crate::checksum::xxh3;
 use crate::codec::{logical, string};
 use crate::format::{
     ATTRIBUTE_ENTRY_LEN, ATTRIBUTE_FLAG_NAMES, BLOCK_HEADER_LEN, BLOCK_MAGIC, BLOCK_SIZE,
@@ -261,7 +261,7 @@ fn finish_container<W: Write>(
 ) -> Result<(), FormatError> {
     let directory_offset = file.position();
     let directory = encode_directory(objects, attributes, blocks, synopsis)?;
-    let directory_checksum = crc32(&directory);
+    let directory_checksum = xxh3(&directory);
     file.write_all(&directory)?;
     let directory_len =
         u64::try_from(directory.len()).map_err(|_| FormatError::Limit("directory"))?;
@@ -284,7 +284,7 @@ fn write_block<W: Write>(
         .checked_add(BLOCK_HEADER_LEN as u64)
         .ok_or(FormatError::Invalid("block offset overflow"))?;
     let length = u64::try_from(payload.len()).map_err(|_| FormatError::Limit("block size"))?;
-    let checksum = crc32(payload);
+    let checksum = xxh3(payload);
     let entry = BlockEntry::raw(
         sequence,
         block_header_offset,
@@ -316,7 +316,7 @@ fn write_encoded_block<W: Write>(
     let payload_offset = block_header_offset
         .checked_add(BLOCK_HEADER_LEN as u64)
         .ok_or(FormatError::Invalid("block offset overflow"))?;
-    let checksum = crc32(payload);
+    let checksum = xxh3(payload);
     let entry = BlockEntry::encoded(
         sequence,
         block_header_offset,
@@ -342,9 +342,8 @@ fn encode_header(codec: Codec) -> [u8; HEADER_LEN] {
     put_u16(&mut output, 14, codec.version());
     put_u32(&mut output, 16, BLOCK_SIZE as u32);
     put_u32(&mut output, 20, 0);
-    let checksum = crc32(&output[..24]);
-    put_u32(&mut output, 24, checksum);
-    put_u32(&mut output, 28, 0);
+    let checksum = xxh3(&output[..24]);
+    put_u64(&mut output, 24, checksum);
     output
 }
 
@@ -359,7 +358,8 @@ fn encode_block_header(entry: &BlockEntry) -> [u8; BLOCK_HEADER_LEN] {
     put_u64(&mut output, 16, entry.logical_count);
     put_u64(&mut output, 24, entry.decoded_len);
     put_u32(&mut output, 32, entry.stored_len);
-    put_u32(&mut output, 36, entry.checksum);
+    put_u32(&mut output, 36, 0);
+    put_u64(&mut output, 40, entry.checksum);
     output
 }
 
@@ -406,8 +406,8 @@ fn encode_directory(
     put_u32(&mut output, 20, attribute_count);
     put_u32(&mut output, 24, entry_count);
     put_u32(&mut output, 28, synopsis_len);
-    let header_checksum = crc32(&output[..32]);
-    put_u32(&mut output, 32, header_checksum);
+    let header_checksum = xxh3(&output[..32]);
+    put_u64(&mut output, 32, header_checksum);
 
     let mut table_offset = DIRECTORY_HEADER_LEN;
     for object in objects {
@@ -431,7 +431,8 @@ fn encode_directory(
         put_u64(&mut output, offset + 40, entry.decoded_len);
         put_u16(&mut output, offset + 48, entry.encoding);
         put_u16(&mut output, offset + 50, entry.compression);
-        put_u32(&mut output, offset + 52, entry.checksum);
+        put_u32(&mut output, offset + 52, 0);
+        put_u64(&mut output, offset + 56, entry.checksum);
         table_offset += DIRECTORY_ENTRY_LEN;
     }
     output[table_offset..].copy_from_slice(synopsis);
@@ -441,7 +442,7 @@ fn encode_directory(
 fn encode_trailer(
     directory_offset: u64,
     directory_len: u64,
-    directory_checksum: u32,
+    directory_checksum: u64,
 ) -> [u8; TRAILER_LEN] {
     let mut output = [0_u8; TRAILER_LEN];
     output[0..4].copy_from_slice(TRAILER_MAGIC);
@@ -449,8 +450,9 @@ fn encode_trailer(
     put_u16(&mut output, 6, TRAILER_LEN as u16);
     put_u64(&mut output, 8, directory_offset);
     put_u64(&mut output, 16, directory_len);
-    put_u32(&mut output, 24, directory_checksum);
-    output[28..32].copy_from_slice(CLOSING_MAGIC);
+    put_u64(&mut output, 24, directory_checksum);
+    put_u32(&mut output, 32, 0);
+    output[36..40].copy_from_slice(CLOSING_MAGIC);
     output
 }
 

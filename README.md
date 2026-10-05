@@ -93,7 +93,7 @@ allocation-proxy matrices, long-form `details`, backend settings, and environmen
 metadata. Unsupported, missing, failed, or non-identical
 format/object combinations are reported as `NA` with a reason in `details`.
 The default matrix pins fst, qs2, and qdata to one thread. It enables qs2/qdata
-checksum validation so their read path is comparable with RDZ's mandatory CRC32
+checksum validation so their read path is comparable with RDZ's mandatory XXH3-64
 validation.
 
 Warm-cache reads are the portable default. A genuinely cold-cache run requires

@@ -6,15 +6,15 @@ pub(crate) const DIRECTORY_MAGIC: &[u8; 4] = b"RDIR";
 pub(crate) const TRAILER_MAGIC: &[u8; 4] = b"RDZT";
 pub(crate) const CLOSING_MAGIC: &[u8; 4] = b"ZEND";
 
-pub(crate) const CONTAINER_VERSION: u16 = 2;
+pub(crate) const CONTAINER_VERSION: u16 = 3;
 pub(crate) const DIRECTORY_VERSION: u16 = 1;
 pub(crate) const HEADER_LEN: usize = 32;
-pub(crate) const BLOCK_HEADER_LEN: usize = 40;
-pub(crate) const DIRECTORY_HEADER_LEN: usize = 36;
+pub(crate) const BLOCK_HEADER_LEN: usize = 48;
+pub(crate) const DIRECTORY_HEADER_LEN: usize = 40;
 pub(crate) const OBJECT_ENTRY_LEN: usize = 48;
 pub(crate) const ATTRIBUTE_ENTRY_LEN: usize = 32;
-pub(crate) const DIRECTORY_ENTRY_LEN: usize = 56;
-pub(crate) const TRAILER_LEN: usize = 32;
+pub(crate) const DIRECTORY_ENTRY_LEN: usize = 64;
+pub(crate) const TRAILER_LEN: usize = 40;
 
 pub(crate) const CODEC_R_SERIAL_V3: u16 = 1;
 pub(crate) const CODEC_NATIVE_V1: u16 = 2;

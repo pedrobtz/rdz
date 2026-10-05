@@ -1012,7 +1012,7 @@ benchmark_operation_matrix <- function(
       base_uncompressed = "none"
     )[formats],
     checksum = c(
-      rdz = "always validate IEEE CRC32",
+      rdz = "always validate XXH3-64",
       qs2 = "validate_checksum = TRUE",
       qdata = "validate_checksum = TRUE",
       fst = "format default",
@@ -1065,7 +1065,7 @@ benchmark_operation_matrix <- function(
     object_suite = if (using_default_objects) object_suite else "custom",
     seed = if (using_default_objects) seed else NA_integer_,
     checksum_policy = c(
-      rdz = "always validate CRC32",
+      rdz = "always validate XXH3-64",
       qs2 = "validate_checksum = TRUE",
       qdata = "validate_checksum = TRUE",
       fst = "format default",

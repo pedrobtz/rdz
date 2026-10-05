@@ -153,7 +153,7 @@ test_that("selective names access does not read logical data blocks", {
   bytes <- readBin(path, what = "raw", n = file.info(path)$size)
 
   # The first native payload byte begins after the file and first block headers.
-  bytes[[73L]] <- as.raw(bitwXor(as.integer(bytes[[73L]]), 0xffL))
+  bytes[[81L]] <- as.raw(bitwXor(as.integer(bytes[[81L]]), 0xffL))
   writeBin(bytes, path)
 
   expect_identical(rdz_schema(path)$root_type, "logical")

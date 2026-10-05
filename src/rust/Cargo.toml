@@ -10,7 +10,7 @@ description = "Rust codec for the rdz R package"
 crate-type = ["staticlib"]
 
 [dependencies]
-crc32fast = "=1.5.0"
+xxhash-rust = { version = "=0.8.19", default-features = false, features = ["xxh3"] }
 savvy = "=0.10.2"
 savvy-ffi = "=0.10.2"
 
