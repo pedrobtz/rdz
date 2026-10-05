@@ -219,7 +219,7 @@ test_that("generic synopsis collection does not dispatch an R length method", {
   on.exit(rm(list = method_name, envir = .GlobalEnv), add = TRUE)
   x <- structure(1:3, class = "rdz_phase0b_length_probe")
 
-  expect_no_error(write_rdz(x, path))
+  expect_no_error(write_rdz(x, path, mode = "r"))
   expect_identical(rdz_info(path)$synopsis$length, 3)
   expect_true(identical(read_rdz(path), x))
 })
@@ -231,9 +231,12 @@ test_that("bounded synopsis cannot prevent generic whole-root coverage", {
   x <- structure(1L, class = long_class)
   attr(x, paste0("attribute_", paste(rep.int("x", 1000L), collapse = ""))) <- 2L
 
-  expect_no_error(write_rdz(x, path))
+  expect_no_error(write_rdz(x, path, mode = "r"))
   expect_true(identical(read_rdz(path), x))
   expect_true(rdz_info(path)$synopsis$truncated)
+  # natively, a long attribute name is stored whole
+  write_rdz(x, path)
+  expect_true(identical(read_rdz(path), x))
 })
 
 test_that("Rust temporary files are cleaned after atomic replacement", {

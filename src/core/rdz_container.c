@@ -325,11 +325,14 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
             }
             nm = &r->objects[a->name_object_id];
             val = &r->objects[a->value_object_id];
+            /* only a general attribute's value may be a container or carry
+               attributes of its own */
             if (nm->parent_id != i || nm->role != RDZ_ROLE_ATTRIBUTE_NAME ||
                 nm->type_tag != RDZ_TYPE_CHARACTER || nm->logical_len != 1 ||
                 val->parent_id != i || val->role != RDZ_ROLE_ATTRIBUTE_VALUE ||
-                nm->child_count || nm->attribute_count || val->child_count ||
-                val->attribute_count) {
+                nm->child_count || nm->attribute_count ||
+                (a->flags != RDZ_ATTRIBUTE_FLAG_OTHER &&
+                 (val->child_count || val->attribute_count))) {
                 rdz_invalid(e, "invalid native object descriptor");
                 goto done;
             }
@@ -353,6 +356,13 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
                 if (t != RDZ_TYPE_DATA_FRAME || val->type_tag != RDZ_TYPE_CHARACTER ||
                     val->logical_len == 0) {
                     rdz_invalid(e, "invalid class attribute");
+                    goto done;
+                }
+                break;
+            case RDZ_ATTRIBUTE_FLAG_OTHER:
+                /* R has no NULL attribute value; NULL itself has none */
+                if (t == RDZ_TYPE_NULL || val->type_tag == RDZ_TYPE_NULL) {
+                    rdz_invalid(e, "invalid attribute");
                     goto done;
                 }
                 break;

@@ -235,14 +235,7 @@ rdz_attributes <- function(path, object = NULL, names = NULL, allow_full = FALSE
       return(list())
     }
     values <- lapply(requested, function(name) {
-      switch(
-        name,
-        names = ,
-        levels = ,
-        row.names = ,
-        class = rdz_check(.Call(rdz_c_read_native_attribute, path, name)),
-        stop("Unsupported native attribute: ", name, call. = FALSE)
-      )
+      rdz_check(.Call(rdz_c_read_native_attribute, path, name))
     })
     return(stats::setNames(values, requested))
   }

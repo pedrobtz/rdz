@@ -97,6 +97,8 @@ static void rdz_set(SEXP list, SEXP names, R_xlen_t i, const char *name, SEXP va
     SET_STRING_ELT(names, i, Rf_mkChar(name));
 }
 
+SEXP rdz_native_attribute_names(rdz_reader *r, rdz_error *e); /* adapter/rdz_native_r.c */
+
 SEXP rdz_c_info(SEXP path)
 {
     const char *p = rdz_path(path);
@@ -110,7 +112,6 @@ SEXP rdz_c_info(SEXP path)
         UNPROTECT(1);
         return rdz_failure(&e);
     }
-    rdz_infile_close(&r->file);
     if (r->codec_id == RDZ_CODEC_R_SERIAL_V3) codec = "r_serial_v3";
     if (r->codec_id == RDZ_CODEC_NATIVE_V1) codec = "native_v1";
 
@@ -144,22 +145,18 @@ SEXP rdz_c_info(SEXP path)
                                     r->objects[0].type_tag == RDZ_TYPE_DATA_FRAME
                               ? (double)r->objects[0].child_count
                               : (double)r->objects[0].logical_len));
-    if (r->nobjects && r->objects[0].type_tag == RDZ_TYPE_FACTOR) {
-        SEXP an = PROTECT(Rf_allocVector(STRSXP, 2));
-        SET_STRING_ELT(an, 0, Rf_mkChar("levels"));
-        SET_STRING_ELT(an, 1, Rf_mkChar("class"));
-        rdz_set(out, names, 13, "attribute_names", an);
-        UNPROTECT(1);
-    } else if (r->nobjects && r->objects[0].type_tag == RDZ_TYPE_DATA_FRAME) {
-        SEXP an = PROTECT(Rf_allocVector(STRSXP, 3));
-        SET_STRING_ELT(an, 0, Rf_mkChar("names"));
-        SET_STRING_ELT(an, 1, Rf_mkChar("row.names"));
-        SET_STRING_ELT(an, 2, Rf_mkChar("class"));
+    if (r->codec_id == RDZ_CODEC_NATIVE_V1) {
+        SEXP an = rdz_native_attribute_names(r, &e);
+        if (!an) {
+            rdz_reader_finalize(ptr);
+            UNPROTECT(3);
+            return rdz_failure(&e);
+        }
+        PROTECT(an);
         rdz_set(out, names, 13, "attribute_names", an);
         UNPROTECT(1);
     } else {
-        rdz_set(out, names, 13, "attribute_names",
-                r->nattributes ? Rf_mkString("names") : Rf_allocVector(STRSXP, 0));
+        rdz_set(out, names, 13, "attribute_names", Rf_allocVector(STRSXP, 0));
     }
     {
         /* "rdz 0.1.0", "rdz 0.1.0 (development)", "" when not recorded */

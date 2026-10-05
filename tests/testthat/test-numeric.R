@@ -102,16 +102,26 @@ test_that("the bytes do not depend on the number of threads", {
   }
 })
 
-test_that("ALTREP vectors are left to the generic codec", {
+test_that("ALTREP vectors are written natively from their data", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  write_rdz(1:10, path)
-  expect_identical(rdz_info(path)$codec, "r_serial_v3")
-  expect_identical(read_rdz(path), 1:10)
-  expect_error(write_rdz(1:10, path, mode = "native"), "ALTREP integer",
-               class = "rdz_unsupported_error")
-  write_rdz(structure(1:3 + 0L, class = "myclass"), path)
-  expect_identical(rdz_info(path)$codec, "r_serial_v3")
+  cases <- list(
+    compact = 1:10,
+    compact_double = seq(1, 10, by = 1),
+    empty = integer(),
+    deferred = as.character(1:5),
+    wrapper = sort(c(3L, 1L, 2L))
+  )
+  for (name in names(cases)) {
+    x <- cases[[name]]
+    write_rdz(x, path, mode = "native")
+    expect_identical(rdz_info(path)$codec, "native_v1", label = name)
+    expect_identical(read_rdz(path), x, label = name)
+  }
+  x <- structure(1:3 + 0L, class = "myclass")
+  write_rdz(x, path)
+  expect_identical(rdz_info(path)$codec, "native_v1")
+  expect_identical(read_rdz(path), x)
 })
 
 test_that("a corrupt numeric record is a classed error", {
