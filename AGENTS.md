@@ -8,6 +8,7 @@ Do not edit `R/000-wrappers.R`, `src/init.c`, or `src/rust/api.h`; Savvy generat
 
 Project design and implementation guidance lives in:
 
+- [Plan C: re-implementing rdz in C](.agents/plan-c.md) (proposal, 2026-10-05)
 - [Current implementation assessment](.agents/current-state.md)
 - [Native serializer architecture](.agents/architecture.md)
 - [Pre-0.1 container wire format](.agents/container-format.md)
