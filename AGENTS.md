@@ -70,6 +70,7 @@ native-word-order scalars, pointer widths, addresses, or CPU-specific requiremen
 
 - `Rscript -e 'roxygen2::roxygenise()'` regenerates R documentation.
 - `tools/run-c-tests` runs the R-free C core under its harness (warnings are errors, ASan and UBSan on), against the Rust reference corpus.
+- `tools/run-mutation-check` proves each `/* GUARD: name */` reader guard load-bearing against its hostile file in `tools/c-tests/probe.c`.
 - `tools/run-fuzz [seconds]` fuzzes the container reader after its canary has crashed; `tools/run-fuzz --replay` runs the seeds and corpus once where the compiler has no libFuzzer.
 - `RDZ_RUST=0 R CMD INSTALL --preclean .` builds the C implementation alone.
 - `Rscript -e 'testthat::test_local(reporter = "summary")'` runs R integration tests.
