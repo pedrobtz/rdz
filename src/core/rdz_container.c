@@ -113,12 +113,12 @@ static int rdz_check_logical_blocks(const rdz_object *o, const rdz_block *blocks
 /* An integer or double root: blocks of exactly `per` values but the last,
    each with an encoding and decoded length its type allows. An empty vector
    is one empty raw block. */
-static int rdz_check_numeric_blocks(const rdz_object *o, const rdz_block *blocks,
+static int rdz_check_numeric_blocks(const rdz_object *o, uint16_t type, const rdz_block *blocks,
                                     uint32_t nblocks, rdz_error *e)
 {
     uint32_t i, end;
-    uint64_t total = 0, per = o->type_tag == RDZ_TYPE_INTEGER ? RDZ_INT_BLOCK_VALUES
-                                                              : RDZ_DBL_BLOCK_VALUES;
+    uint64_t total = 0, per = type == RDZ_TYPE_INTEGER ? RDZ_INT_BLOCK_VALUES
+                                                       : RDZ_DBL_BLOCK_VALUES;
     if (rdz_block_range(o, nblocks, &end, e)) return 1;
     if (o->block_count == 0) return rdz_invalid(e, "object has no data block");
     for (i = o->first_block; i < end; i++) {
@@ -131,7 +131,7 @@ static int rdz_check_numeric_blocks(const rdz_object *o, const rdz_block *blocks
         if (b->logical_count == 0) {
             ok = b->decoded_len == 0 && (b->encoding == RDZ_ENCODING_INT_RAW ||
                                          b->encoding == RDZ_ENCODING_DBL_RAW);
-        } else if (o->type_tag == RDZ_TYPE_INTEGER) {
+        } else if (type == RDZ_TYPE_INTEGER) {
             ok = rdz_int_length_ok(b->encoding, b->logical_count, b->decoded_len);
         } else {
             ok = rdz_dbl_length_ok(b->encoding, b->logical_count, b->decoded_len);
@@ -226,62 +226,99 @@ static int rdz_check_generic_schema(const rdz_reader *r, rdz_error *e)
     return 0;
 }
 
+/* A native file: a root of any native type, a factor's levels as its one
+   child, and an optional `names` attribute on any root but a factor; the
+   objects in that order (root, levels, name, value) and their blocks
+   contiguous, in the same order, covering every block. */
 static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
 {
-    const rdz_object *root, *name, *value;
+    const rdz_object *root, *levels = NULL, *name = NULL, *value = NULL;
     const rdz_attribute *a;
-    uint32_t root_end, name_end, value_end;
+    uint32_t next, k;
+    int factor;
     if (r->synopsis_len != 0) {
         return rdz_invalid(e, "native codec cannot contain a generic synopsis");
     }
-    if (!((r->nobjects == 1 && r->nattributes == 0) || (r->nobjects == 3 && r->nattributes == 1))) {
-        return rdz_invalid(e, "invalid logical object directory shape");
-    }
+    if (r->nobjects == 0) return rdz_invalid(e, "invalid logical object directory shape");
     root = &r->objects[0];
-    if (root->type_tag != RDZ_TYPE_LOGICAL && root->type_tag != RDZ_TYPE_INTEGER &&
-        root->type_tag != RDZ_TYPE_DOUBLE) {
+    if (root->type_tag < RDZ_TYPE_LOGICAL || root->type_tag > RDZ_TYPE_FACTOR) {
         return rdz_invalid(e, "invalid native object descriptor");
     }
-    if (rdz_check_object(root, 0, RDZ_ROOT_PARENT_ID, RDZ_ROLE_ROOT, root->type_tag, e)) return 1;
-    if (root->first_child != 0 || root->child_count != 0 || root->first_attribute != 0) {
+    factor = root->type_tag == RDZ_TYPE_FACTOR;
+    if (r->nattributes > 1 || (factor && r->nattributes != 0) ||
+        r->nobjects != 1u + (uint32_t)factor + 2u * r->nattributes) {
+        return rdz_invalid(e, "invalid logical object directory shape");
+    }
+    if (root->object_id != 0 || root->parent_id != RDZ_ROOT_PARENT_ID ||
+        root->role != RDZ_ROLE_ROOT || (root->flags & ~(factor ? RDZ_OBJECT_FLAG_ORDERED : 0u))) {
+        return rdz_invalid(e, "invalid native object descriptor");
+    }
+    if (root->first_child != (uint32_t)factor || root->child_count != (uint32_t)factor ||
+        root->first_attribute != 0) {
         return rdz_invalid(e, "invalid logical root references");
     }
     if (root->attribute_count != r->nattributes) {
         return rdz_invalid(e, "logical attribute count mismatch");
     }
-    if (root->type_tag == RDZ_TYPE_LOGICAL ? rdz_check_logical_blocks(root, r->blocks, r->nblocks, e)
-                                           : rdz_check_numeric_blocks(root, r->blocks, r->nblocks, e)) {
-        return 1;
+    switch (root->type_tag) {
+    case RDZ_TYPE_LOGICAL:
+        if (rdz_check_logical_blocks(root, r->blocks, r->nblocks, e)) return 1;
+        break;
+    case RDZ_TYPE_CHARACTER:
+        if (rdz_check_string_blocks(root, r->blocks, r->nblocks, e)) return 1;
+        break;
+    case RDZ_TYPE_FACTOR:
+        if (rdz_check_numeric_blocks(root, RDZ_TYPE_INTEGER, r->blocks, r->nblocks, e)) return 1;
+        break;
+    default:
+        if (rdz_check_numeric_blocks(root, root->type_tag, r->blocks, r->nblocks, e)) return 1;
+        break;
     }
-    if (r->nattributes == 0) {
-        if (root->first_block != 0 || root->block_count != r->nblocks) {
-            return rdz_invalid(e, "logical blocks are not fully indexed");
+    k = 1;
+    if (factor) {
+        levels = &r->objects[k++];
+        if (rdz_check_object(levels, 1, 0, RDZ_ROLE_LEVELS, RDZ_TYPE_CHARACTER, e) ||
+            rdz_check_leaf(levels, e) || rdz_check_string_blocks(levels, r->blocks, r->nblocks, e)) {
+            return 1;
         }
-        return 0;
     }
-    name = &r->objects[1];
-    value = &r->objects[2];
-    if (rdz_check_object(name, 1, 0, RDZ_ROLE_ATTRIBUTE_NAME, RDZ_TYPE_CHARACTER, e)) return 1;
-    if (rdz_check_object(value, 2, 0, RDZ_ROLE_ATTRIBUTE_VALUE, RDZ_TYPE_CHARACTER, e)) return 1;
-    if (name->logical_len != 1 || value->logical_len != root->logical_len) {
-        return rdz_invalid(e, "names object length mismatch");
+    if (r->nattributes == 1) {
+        name = &r->objects[k];
+        value = &r->objects[k + 1];
+        if (rdz_check_object(name, k, 0, RDZ_ROLE_ATTRIBUTE_NAME, RDZ_TYPE_CHARACTER, e)) return 1;
+        if (rdz_check_object(value, k + 1, 0, RDZ_ROLE_ATTRIBUTE_VALUE, RDZ_TYPE_CHARACTER, e)) {
+            return 1;
+        }
+        if (name->logical_len != 1 || value->logical_len != root->logical_len) {
+            return rdz_invalid(e, "names object length mismatch");
+        }
+        if (rdz_check_leaf(name, e) || rdz_check_leaf(value, e)) return 1;
+        if (rdz_check_object_blocks(name, r->blocks, r->nblocks, RDZ_ENCODING_STRING_PLAIN, e)) {
+            return 1;
+        }
+        if (rdz_check_string_blocks(value, r->blocks, r->nblocks, e)) return 1;
+        a = &r->attributes[0];
+        if (a->owner_id != 0 || a->name_object_id != k || a->value_object_id != k + 1 ||
+            a->ordinal != 0 || a->flags != RDZ_ATTRIBUTE_FLAG_NAMES) {
+            return rdz_invalid(e, "invalid names attribute entry");
+        }
     }
-    if (rdz_check_leaf(name, e) || rdz_check_leaf(value, e)) return 1;
-    if (rdz_check_object_blocks(name, r->blocks, r->nblocks, RDZ_ENCODING_STRING_PLAIN, e)) return 1;
-    if (rdz_check_string_blocks(value, r->blocks, r->nblocks, e)) return 1;
-    a = &r->attributes[0];
-    if (a->owner_id != 0 || a->name_object_id != 1 || a->value_object_id != 2 ||
-        a->ordinal != 0 || a->flags != RDZ_ATTRIBUTE_FLAG_NAMES) {
-        return rdz_invalid(e, "invalid names attribute entry");
+    /* canonical: every object's blocks follow the previous object's; the
+       ranges were checked against nblocks above, so these cannot wrap */
+    next = 0;
+    for (k = 0; k < r->nobjects; k++) {
+        const rdz_object *o = &r->objects[k];
+        if (o->first_block != next) {
+            return rdz_invalid(e, k == 0 || r->nattributes ? "native object blocks are not canonical"
+                                                           : "logical blocks are not fully indexed");
+        }
+        next = o->first_block + o->block_count;
     }
-    /* The ranges were checked against nblocks above, so these cannot wrap. */
-    root_end = root->first_block + root->block_count;
-    name_end = name->first_block + name->block_count;
-    value_end = value->first_block + value->block_count;
-    if (root->first_block != 0 || name->first_block != root_end ||
-        value->first_block != name_end || value_end != r->nblocks) {
-        return rdz_invalid(e, "native object blocks are not canonical");
+    if (next != r->nblocks) {
+        return rdz_invalid(e, r->nattributes || factor ? "native object blocks are not canonical"
+                                                       : "logical blocks are not fully indexed");
     }
+    (void)levels;
     return 0;
 }
 

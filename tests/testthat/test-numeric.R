@@ -102,7 +102,7 @@ test_that("the bytes do not depend on the number of threads", {
   }
 })
 
-test_that("ALTREP and classed vectors are left to the generic codec", {
+test_that("ALTREP vectors are left to the generic codec", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
   write_rdz(1:10, path)
@@ -110,7 +110,7 @@ test_that("ALTREP and classed vectors are left to the generic codec", {
   expect_identical(read_rdz(path), 1:10)
   expect_error(write_rdz(1:10, path, mode = "native"), "ALTREP integer",
                class = "rdz_unsupported_error")
-  write_rdz(factor(c("a", "b")), path)
+  write_rdz(structure(1:3 + 0L, class = "myclass"), path)
   expect_identical(rdz_info(path)$codec, "r_serial_v3")
 })
 

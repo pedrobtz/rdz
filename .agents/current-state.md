@@ -1,5 +1,42 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-05: plan-c Stage G
+
+Character vectors (optionally named) and factors (plain and ordered) are
+native (container-format.md, "Native character and factor representation"):
+strings as bytes plus encoding tag in the Stage A records, packed on the R
+thread and compressed by the pipeline's workers; factor codes as integer
+records with the levels as a child object; selective `levels` and `class`
+reads. The default dictionary policy is now `auto`. Native-encoded non-ASCII
+strings, strings over 1 MiB, factors with other attributes or out-of-range
+codes stay generic.
+
+Evidence: every encoding tag and NA under every policy, strings spanning
+blocks, the oversized-string fallback, factors with unused, empty and `NA`
+levels, ordered factors, and a file read back byte for byte with its tags in
+a C-locale R process; fuzzing decoded character roots and factor levels (10M
+runs, no finding).
+
+`tools/bench-character.R` (2e6 values, ms and MB; one thread / eight; same
+machine and qs2 as above):
+
+| data | native w/r, 1 | native w/r, 8 | native MB | generic w/r, 1 | generic MB | qs2 w/r, 1 | qs2 MB |
+|---|---|---|---:|---|---:|---|---:|
+| chr high cardinality | 80/127 | 48/116 | 0.62 | 119/242 | 0.58 | 120/189 | 0.74 |
+| chr low cardinality | 15/12 | 14/11 | 1.29 | 114/172 | 1.78 | 132/125 | 2.05 |
+| chr repeated long | 17/12 | 12/11 | 0.50 | 160/401 | 4.23 | 189/333 | 3.58 |
+| chr unique long | 146/450 | 103/440 | 2.03 | 143/576 | 2.05 | 164/513 | 2.05 |
+| chr mixed encodings | 16/14 | 13/13 | 0.72 | 146/228 | 3.96 | 149/163 | 3.19 |
+| fct low cardinality | 11/8 | 8/8 | 0.48 | 25/16 | 1.19 | 24/10 | 1.04 |
+| fct high cardinality | 18/8 | 10/8 | 5.68 | 26/21 | 5.11 | 17/9 | 4.19 |
+
+Unique strings are bound by R's string cache on read (`mkCharLenCE()` per
+element), which the deferred-string ALTREP of roadmap's later opportunities
+would remove. High-cardinality factor codes (17 bits) are larger than qs2's;
+a narrower code layout is a tuning item.
+
+Stage H (lists and data frames) is next.
+
 ## Checkpoint 2026-10-05: plan-c Stage F
 
 Integer and double vectors (with optional `names`) are native

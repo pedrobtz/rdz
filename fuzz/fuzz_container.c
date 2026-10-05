@@ -49,7 +49,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
             sink.entries = count_plain;
             sink.indices = count_ids;
             rdz_vec_init(&v);
-            if (values && rdz_vec_read(&v, &r, values, 2, NULL, NULL, &e) == 0) {
+            if (type == RDZ_TYPE_CHARACTER) {
+                rdz_vec_read_strings(&v, &r, 0, &sink, 2, NULL, NULL, &e);
+            } else if (values && rdz_vec_read(&v, &r, values, 2, NULL, NULL, &e) == 0) {
+                if (type == RDZ_TYPE_FACTOR) rdz_vec_read_strings(&v, &r, 1, &sink, 2, NULL, NULL, &e);
                 rdz_native_read_names(&r, &sink, &e);
             }
             rdz_vec_free(&v);

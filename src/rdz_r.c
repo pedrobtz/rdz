@@ -132,11 +132,21 @@ SEXP rdz_c_info(SEXP path)
     rdz_set(out, names, 11, "root_type",
             Rf_mkString(!r->nobjects ? ""
                         : r->objects[0].type_tag == RDZ_TYPE_INTEGER ? "integer"
-                        : r->objects[0].type_tag == RDZ_TYPE_DOUBLE ? "double" : "logical"));
+                        : r->objects[0].type_tag == RDZ_TYPE_DOUBLE ? "double"
+                        : r->objects[0].type_tag == RDZ_TYPE_CHARACTER ? "character"
+                        : r->objects[0].type_tag == RDZ_TYPE_FACTOR ? "factor" : "logical"));
     rdz_set(out, names, 12, "root_length",
             Rf_ScalarReal(r->nobjects ? (double)r->objects[0].logical_len : -1.0));
-    rdz_set(out, names, 13, "attribute_names",
-            r->nattributes ? Rf_mkString("names") : Rf_allocVector(STRSXP, 0));
+    if (r->nobjects && r->objects[0].type_tag == RDZ_TYPE_FACTOR) {
+        SEXP an = PROTECT(Rf_allocVector(STRSXP, 2));
+        SET_STRING_ELT(an, 0, Rf_mkChar("levels"));
+        SET_STRING_ELT(an, 1, Rf_mkChar("class"));
+        rdz_set(out, names, 13, "attribute_names", an);
+        UNPROTECT(1);
+    } else {
+        rdz_set(out, names, 13, "attribute_names",
+                r->nattributes ? Rf_mkString("names") : Rf_allocVector(STRSXP, 0));
+    }
     Rf_setAttrib(out, R_NamesSymbol, names);
 
     rdz_reader_finalize(ptr);
