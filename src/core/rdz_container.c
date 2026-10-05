@@ -74,9 +74,10 @@ static int rdz_check_logical_blocks(const rdz_object *o, const rdz_block *blocks
         if (!rdz_logical_encoding(b->encoding)) {
             return rdz_invalid(e, "unexpected logical block encoding");
         }
-        if (count > RDZ_LOGICAL_BLOCK_VALUES || (o->logical_len != 0 && count == 0) ||
-            (i + 1 < end && count != RDZ_LOGICAL_BLOCK_VALUES)) {
-            return rdz_invalid(e, "non-canonical logical block size");
+        /* any size up to the maximum: the writer's sizes are its policy */
+        if (count > RDZ_LOGICAL_BLOCK_VALUES ||
+            (count == 0 && (o->logical_len != 0 || o->block_count != 1))) {
+            return rdz_invalid(e, "invalid logical block size");
         }
         if (total > UINT64_MAX - count) return rdz_invalid(e, "logical object length overflow");
         total += count;
@@ -91,7 +92,7 @@ static int rdz_check_logical_blocks(const rdz_object *o, const rdz_block *blocks
     return 0;
 }
 
-/* An integer or double root: blocks of exactly `per` values but the last,
+/* An integer or double object: blocks of at most `per` values, none empty,
    each with an encoding and decoded length its type allows. An empty vector
    is one empty raw block. */
 static int rdz_check_numeric_blocks(const rdz_object *o, uint16_t type, const rdz_block *blocks,
@@ -105,9 +106,9 @@ static int rdz_check_numeric_blocks(const rdz_object *o, uint16_t type, const rd
     for (i = o->first_block; i < end; i++) {
         const rdz_block *b = &blocks[i];
         int ok;
-        if (b->logical_count > per || (o->logical_len != 0 && b->logical_count == 0) ||
-            (i + 1 < end && b->logical_count != per)) {
-            return rdz_invalid(e, "non-canonical numeric block size");
+        if (b->logical_count > per ||
+            (b->logical_count == 0 && (o->logical_len != 0 || o->block_count != 1))) {
+            return rdz_invalid(e, "invalid numeric block size");
         }
         if (b->logical_count == 0) {
             ok = b->decoded_len == 0 && (b->encoding == RDZ_ENCODING_INT_RAW ||
@@ -456,8 +457,9 @@ static int rdz_check_codec(uint16_t id, uint16_t version, rdz_error *e)
 static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
 {
     const uint8_t *d = r->directory.data;
-    size_t len = r->directory.len, offset, expected, tables_len;
-    uint32_t nobj, natt, nblk, i;
+    size_t len = r->directory.len, offset, tables_len;
+    uint64_t expected;
+    uint32_t nobj, natt, nblk, i, header_len, object_width, attribute_width, block_width;
     uint64_t synopsis_len, next_block = RDZ_HEADER_LEN;
     rdz_block *blocks;
     rdz_object *objects;
@@ -466,14 +468,22 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
     if (len < RDZ_DIRECTORY_HEADER_LEN || memcmp(d, RDZ_DIRECTORY_MAGIC, 4) != 0) {
         return rdz_invalid(e, "invalid directory header");
     }
+    /* the header and the entries may be wider than this reader knows: a
+       later writer's additions, which it skips */
+    header_len = zb_rd_u16le(d + RDZ_DH_HEADER_LEN);
+    object_width = zb_rd_u16le(d + RDZ_DH_OBJECT_WIDTH);
+    attribute_width = zb_rd_u16le(d + RDZ_DH_ATTRIBUTE_WIDTH);
+    block_width = zb_rd_u16le(d + RDZ_DH_BLOCK_WIDTH);
     if (zb_rd_u16le(d + RDZ_DH_VERSION) != RDZ_DIRECTORY_VERSION ||
-        zb_rd_u16le(d + RDZ_DH_HEADER_LEN) != RDZ_DIRECTORY_HEADER_LEN ||
-        zb_rd_u16le(d + RDZ_DH_OBJECT_WIDTH) != RDZ_OBJECT_ENTRY_LEN ||
-        zb_rd_u16le(d + RDZ_DH_ATTRIBUTE_WIDTH) != RDZ_ATTRIBUTE_ENTRY_LEN ||
-        zb_rd_u16le(d + RDZ_DH_BLOCK_WIDTH) != RDZ_BLOCK_ENTRY_LEN) {
+        header_len < RDZ_DIRECTORY_HEADER_LEN || header_len > RDZ_MAX_ENTRY_WIDTH ||
+        object_width < RDZ_OBJECT_ENTRY_LEN || object_width > RDZ_MAX_ENTRY_WIDTH ||
+        attribute_width < RDZ_ATTRIBUTE_ENTRY_LEN || attribute_width > RDZ_MAX_ENTRY_WIDTH ||
+        block_width < RDZ_BLOCK_ENTRY_LEN || block_width > RDZ_MAX_ENTRY_WIDTH) {
         return rdz_invalid(e, "unsupported directory version or entry size");
     }
-    if (zb_rd_u16le(d + RDZ_DH_FLAGS) != 0) return rdz_invalid(e, "unsupported directory flags");
+    if (zb_rd_u16le(d + RDZ_DH_FLAGS) & RDZ_FLAGS16_REQUIRED) {
+        return rdz_invalid(e, "unsupported directory flags");
+    }
     nobj = zb_rd_u32le(d + RDZ_DH_OBJECTS);
     natt = zb_rd_u32le(d + RDZ_DH_ATTRIBUTES);
     nblk = zb_rd_u32le(d + RDZ_DH_BLOCKS);
@@ -488,11 +498,11 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
     if (RDZ_CHECKSUM_DIFFERS(zb_rd_u64le(d + RDZ_DH_CHECKSUM), rdz_hash(d, RDZ_DH_CHECKSUM))) {
         return rdz_invalid(e, "directory header checksum mismatch");
     }
-    /* The counts are bounded above, so none of these sizes can wrap. */
-    expected = RDZ_DIRECTORY_HEADER_LEN + (size_t)nobj * RDZ_OBJECT_ENTRY_LEN +
-               (size_t)natt * RDZ_ATTRIBUTE_ENTRY_LEN + (size_t)nblk * RDZ_BLOCK_ENTRY_LEN +
-               (size_t)synopsis_len;
-    if (expected != len) return rdz_invalid(e, "directory length mismatch"); /* GUARD: directory-length */
+    /* The counts and widths are bounded above, so none of these sizes can
+       wrap 64 bits. */
+    expected = (uint64_t)header_len + (uint64_t)nobj * object_width +
+               (uint64_t)natt * attribute_width + (uint64_t)nblk * block_width + synopsis_len;
+    if (expected != (uint64_t)len) return rdz_invalid(e, "directory length mismatch"); /* GUARD: directory-length */
 
     tables_len = (size_t)nblk * sizeof(rdz_block) + (size_t)nobj * sizeof(rdz_object) +
                  (size_t)natt * sizeof(rdz_attribute);
@@ -505,22 +515,27 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
     objects = (rdz_object *)(void *)(blocks + nblk);
     attributes = (rdz_attribute *)(void *)(objects + nobj);
 
-    offset = RDZ_DIRECTORY_HEADER_LEN;
-    for (i = 0; i < nobj; i++, offset += RDZ_OBJECT_ENTRY_LEN) {
+    /* every flags word keeps only its must-understand half: the rest is for
+       later writers, and no reader acts on it */
+    offset = header_len;
+    for (i = 0; i < nobj; i++, offset += object_width) {
         rdz_object_decode(d + offset, &objects[i]);
+        objects[i].flags &= RDZ_FLAGS32_REQUIRED;
     }
-    for (i = 0; i < natt; i++, offset += RDZ_ATTRIBUTE_ENTRY_LEN) {
+    for (i = 0; i < natt; i++, offset += attribute_width) {
         if (rdz_attribute_decode(d + offset, &attributes[i])) {
             return rdz_invalid(e, "nonzero attribute directory reserved field");
         }
+        attributes[i].flags &= RDZ_FLAGS32_REQUIRED;
     }
-    for (i = 0; i < nblk; i++, offset += RDZ_BLOCK_ENTRY_LEN) {
+    for (i = 0; i < nblk; i++, offset += block_width) {
         rdz_block *b = &blocks[i];
         uint64_t payload;
         if (rdz_block_entry_decode(d + offset, b)) {
             return rdz_invalid(e, "nonzero block directory reserved field");
         }
-        if (b->sequence != i || b->flags != 0) {
+        /* the flags stay as stored: the block header repeats their low half */
+        if (b->sequence != i || (b->flags & RDZ_FLAGS32_REQUIRED) != 0) {
             return rdz_invalid(e, "invalid block sequence or flags");
         }
         if (b->decoded_len > RDZ_MAX_BLOCK_SIZE) return rdz_limit(e, "block size");
@@ -574,10 +589,11 @@ static int rdz_reader_validate(rdz_reader *r, rdz_error *e)
 {
     uint8_t header[RDZ_HEADER_LEN], trailer[RDZ_TRAILER_LEN];
     uint64_t file_len = r->file.size, trailer_offset, end, directory_len, checksum;
+    /* under 1 GiB, so a size_t on every platform */
     const uint64_t max_directory =
-        RDZ_DIRECTORY_HEADER_LEN + (uint64_t)RDZ_MAX_OBJECTS * RDZ_OBJECT_ENTRY_LEN +
-        (uint64_t)RDZ_MAX_ATTRIBUTES * RDZ_ATTRIBUTE_ENTRY_LEN +
-        (uint64_t)RDZ_MAX_BLOCKS * RDZ_BLOCK_ENTRY_LEN + RDZ_MAX_SYNOPSIS_LEN;
+        RDZ_MAX_ENTRY_WIDTH + (uint64_t)RDZ_MAX_OBJECTS * RDZ_MAX_ENTRY_WIDTH +
+        (uint64_t)RDZ_MAX_ATTRIBUTES * RDZ_MAX_ENTRY_WIDTH +
+        (uint64_t)RDZ_MAX_BLOCKS * RDZ_MAX_ENTRY_WIDTH + RDZ_MAX_SYNOPSIS_LEN;
     uint32_t i;
 
     if (file_len < RDZ_HEADER_LEN + RDZ_DIRECTORY_HEADER_LEN + RDZ_TRAILER_LEN) {
@@ -592,13 +608,14 @@ static int rdz_reader_validate(rdz_reader *r, rdz_error *e)
     if (zb_rd_u16le(header + RDZ_FH_HEADER_LEN) != RDZ_HEADER_LEN) {
         return rdz_invalid(e, "unsupported header length");
     }
-    if (zb_rd_u32le(header + RDZ_FH_FLAGS) != 0 || zb_rd_u32le(header + RDZ_FH_RESERVED) != 0) {
-        return rdz_invalid(e, "unsupported header flags or reserved fields");
+    if (zb_rd_u32le(header + RDZ_FH_FLAGS) & RDZ_FLAGS32_REQUIRED) {
+        return rdz_invalid(e, "unsupported header flags");
     }
     checksum = zb_rd_u64le(header + RDZ_FH_CHECKSUM);
     if (RDZ_CHECKSUM_DIFFERS(checksum, rdz_hash(header, RDZ_FH_CHECKSUM))) { /* GUARD: header-checksum */
         return rdz_invalid(e, "header checksum mismatch");
     }
+    memcpy(r->writer, header + RDZ_FH_WRITER, sizeof r->writer);
     r->codec_id = zb_rd_u16le(header + RDZ_FH_CODEC);
     r->codec_version = zb_rd_u16le(header + RDZ_FH_CODEC_VERSION);
     if (rdz_check_codec(r->codec_id, r->codec_version, e)) return 1;
@@ -682,7 +699,7 @@ int rdz_reader_read_stored(rdz_reader *r, uint32_t index, zb_buf *stored, rdz_er
     if (rdz_infile_read_at(&r->file, b->header_offset, h, sizeof h, e)) return 1;
     if (memcmp(h, RDZ_BLOCK_MAGIC, 4) != 0 ||
         zb_rd_u16le(h + RDZ_BH_HEADER_LEN) != RDZ_BLOCK_HEADER_LEN ||
-        zb_rd_u16le(h + RDZ_BH_FLAGS) != 0 || zb_rd_u32le(h + RDZ_BH_SEQUENCE) != b->sequence ||
+        zb_rd_u16le(h + RDZ_BH_FLAGS) != (b->flags & 0xffffu) || zb_rd_u32le(h + RDZ_BH_SEQUENCE) != b->sequence ||
         zb_rd_u16le(h + RDZ_BH_ENCODING) != b->encoding ||
         zb_rd_u16le(h + RDZ_BH_COMPRESSION) != b->compression ||
         zb_rd_u64le(h + RDZ_BH_LOGICAL_COUNT) != b->logical_count ||
@@ -774,6 +791,10 @@ int rdz_writer_open(rdz_writer *w, const char *path, uint16_t codec_id,
     zb_wr_u16le(h + RDZ_FH_CODEC, codec_id);
     zb_wr_u16le(h + RDZ_FH_CODEC_VERSION, codec_version);
     zb_wr_u32le(h + RDZ_FH_MAX_BLOCK, block_size);
+    h[RDZ_FH_WRITER] = (uint8_t)(RDZ_WRITER_RDZ | (RDZ_WRITER_IS_DEV ? RDZ_WRITER_DEV : 0u));
+    h[RDZ_FH_WRITER + 1] = (uint8_t)RDZ_WRITER_MAJOR;
+    h[RDZ_FH_WRITER + 2] = (uint8_t)RDZ_WRITER_MINOR;
+    h[RDZ_FH_WRITER + 3] = (uint8_t)RDZ_WRITER_PATCH;
     zb_wr_u64le(h + RDZ_FH_CHECKSUM, rdz_hash(h, RDZ_FH_CHECKSUM));
     return rdz_outfile_write(&w->out, h, sizeof h, e);
 }

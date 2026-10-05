@@ -8,6 +8,7 @@
  * owned by an external pointer created before the first one, so its
  * finalizer releases it however R unwinds (plan-c.md section 4).
  */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -113,8 +114,8 @@ SEXP rdz_c_info(SEXP path)
     if (r->codec_id == RDZ_CODEC_R_SERIAL_V3) codec = "r_serial_v3";
     if (r->codec_id == RDZ_CODEC_NATIVE_V1) codec = "native_v1";
 
-    out = PROTECT(Rf_allocVector(VECSXP, 14));
-    names = PROTECT(Rf_allocVector(STRSXP, 14));
+    out = PROTECT(Rf_allocVector(VECSXP, 15));
+    names = PROTECT(Rf_allocVector(STRSXP, 15));
     rdz_set(out, names, 0, "container_version", Rf_ScalarInteger(r->container_version));
     rdz_set(out, names, 1, "codec", Rf_mkString(codec));
     rdz_set(out, names, 2, "codec_id", Rf_ScalarInteger(r->codec_id));
@@ -159,6 +160,22 @@ SEXP rdz_c_info(SEXP path)
     } else {
         rdz_set(out, names, 13, "attribute_names",
                 r->nattributes ? Rf_mkString("names") : Rf_allocVector(STRSXP, 0));
+    }
+    {
+        /* "rdz 0.1.0", "rdz 0.1.0 (development)", "" when not recorded */
+        char w[64], who[16];
+        unsigned impl = r->writer[0] & ~RDZ_WRITER_DEV & 0xffu;
+        if (impl == RDZ_WRITER_RDZ) {
+            snprintf(who, sizeof who, "rdz");
+        } else {
+            snprintf(who, sizeof who, "writer %u", impl);
+        }
+        w[0] = 0;
+        if (r->writer[0] != 0) {
+            snprintf(w, sizeof w, "%s %u.%u.%u%s", who, r->writer[1], r->writer[2], r->writer[3],
+                     (r->writer[0] & RDZ_WRITER_DEV) ? " (development)" : "");
+        }
+        rdz_set(out, names, 14, "writer", Rf_mkString(w));
     }
     Rf_setAttrib(out, R_NamesSymbol, names);
 

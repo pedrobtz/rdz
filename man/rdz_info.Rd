@@ -25,7 +25,9 @@ A named list of container information and a bounded root synopsis.
 \code{rdz_info()} reads the fixed header, closing trailer, and bounded directory.
 For the transitional R-serialization codec, \code{synopsis} is informative and
 exact attribute values still require \code{\link[=read_rdz]{read_rdz()}}. Data block checksums are
-validated by \code{\link[=read_rdz]{read_rdz()}}, not by this metadata-only operation.
+validated by \code{\link[=read_rdz]{read_rdz()}}, not by this metadata-only operation. \code{writer} names
+the implementation and version that wrote the file, or is \code{""} when the file
+does not record one.
 }
 \examples{
 path <- tempfile(fileext = ".rdz")

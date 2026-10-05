@@ -46,7 +46,7 @@
 #define RDZ_ENCODING_STRING_DICT_INDICES     9u
 
 #define RDZ_COMPRESSION_NONE 0u
-#define RDZ_COMPRESSION_ZSTD 1u /* reserved: not written or accepted yet */
+#define RDZ_COMPRESSION_ZSTD 1u /* one zstd frame (RFC 8878) */
 
 #define RDZ_TYPE_NULL      0u
 #define RDZ_TYPE_LOGICAL   1u
@@ -66,6 +66,25 @@
 #define RDZ_ATTRIBUTE_FLAG_ROW_NAMES 2u /* a data frame's explicit row names */
 #define RDZ_ATTRIBUTE_FLAG_CLASS     4u /* a data frame's class */
 #define RDZ_MAX_DEPTH 1000u /* nesting below the root */
+
+/* Every flags word: the low half must be understood (a reader rejects an
+   unknown bit there), the high half may be ignored (a reader drops it). */
+#define RDZ_FLAGS32_REQUIRED 0x0000FFFFu
+#define RDZ_FLAGS16_REQUIRED 0x00FFu
+
+/* The file header's writer field (bytes 20 to 23): implementation, then the
+   major, minor and patch version of its release, or for a development build
+   of the release it follows. Readers never reject it. 0: not recorded. */
+#define RDZ_WRITER_RDZ   1u    /* this package */
+#define RDZ_WRITER_DEV   0x80u /* or-ed into the implementation byte */
+#define RDZ_WRITER_MAJOR 0u    /* the package version; test-format.R checks it */
+#define RDZ_WRITER_MINOR 0u
+#define RDZ_WRITER_PATCH 0u
+#define RDZ_WRITER_IS_DEV 1
+
+/* Directory entries may be wider than these, never narrower; readers skip
+   the extra bytes. */
+#define RDZ_MAX_ENTRY_WIDTH 256u
 #define RDZ_ROOT_PARENT_ID 0xFFFFFFFFu
 
 #define RDZ_BLOCK_SIZE           ((uint32_t)1024 * 1024)

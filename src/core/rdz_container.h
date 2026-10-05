@@ -29,6 +29,7 @@
 typedef struct {
     uint16_t container_version, codec_id, codec_version;
     uint32_t block_size;
+    uint8_t writer[4];       /* the header's writer field, as stored */
     uint32_t nobjects, nattributes, nblocks;
     uint64_t payload_bytes, file_bytes, directory_offset;
     const rdz_object *objects;

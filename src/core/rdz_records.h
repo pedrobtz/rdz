@@ -15,7 +15,7 @@
 
 #define RDZ_SPEC_FILE_HEADER \
     "<magic:b4 version:u16 header_len:u16 flags:u32 codec:u16 codec_version:u16 " \
-    "max_block:u32 reserved:u32 checksum:u64"
+    "max_block:u32 writer:b4 checksum:u64"
 #define RDZ_SPEC_BLOCK_HEADER \
     "<magic:b4 header_len:u16 flags:u16 sequence:u32 encoding:u16 compression:u16 " \
     "logical_count:u64 decoded_len:u64 stored_len:u32 reserved:u32 checksum:u64"
@@ -41,7 +41,7 @@
 enum {
     RDZ_FH_MAGIC = 0, RDZ_FH_VERSION = 4, RDZ_FH_HEADER_LEN = 6, RDZ_FH_FLAGS = 8,
     RDZ_FH_CODEC = 12, RDZ_FH_CODEC_VERSION = 14, RDZ_FH_MAX_BLOCK = 16,
-    RDZ_FH_RESERVED = 20, RDZ_FH_CHECKSUM = 24
+    RDZ_FH_WRITER = 20, RDZ_FH_CHECKSUM = 24
 };
 enum {
     RDZ_BH_MAGIC = 0, RDZ_BH_HEADER_LEN = 4, RDZ_BH_FLAGS = 6, RDZ_BH_SEQUENCE = 8,

@@ -116,8 +116,8 @@ test_that("the streamed writer reproduces the Rust writer's files", {
     # integers and doubles natively.
     write_rdz(spec$value(), copy, mode = "r")
     expect_identical(
-      readBin(copy, "raw", file.size(copy)),
-      readBin(fixture, "raw", file.size(fixture)),
+      bytes_but_writer(copy),
+      bytes_but_writer(fixture),
       label = spec$name
     )
   }
