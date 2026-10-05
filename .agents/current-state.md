@@ -1,5 +1,41 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-05: plan-c Stage J
+
+Double encoding 23, decimals (ALP), added before the 0.1.0 release
+(container-format.md; encoding-research.md, "plan-c Stage J result").
+
+A double that began as a decimal is stored as an integer: frame of reference
+or delta, bit-packed, per 1,024 values, with exact exceptions for everything
+else (NA, NaN payloads, -0, full precision). It decodes by one exact division,
+which gives the double R reads the decimal as; x87 builds decode through
+`strtod()`. The writer chooses it by sampling, only when compressing.
+
+| Measurement | Before | After |
+|---|---|---|
+| Rounded doubles, 1e7 (write / read) | 224 / 70 ms, 22.1 MB | 71 / 28 ms, 11.9 MB |
+| Currency, 1e7 | 92 / 52 ms, 50.6 MB | 79 / 20 ms, 30.0 MB |
+| Mixed frame, 5e6 rows, 1 thread | 162 / 112 ms, 57.8 MB | 138 / 77 ms, 34.7 MB |
+| Dates frame, 5e6 rows, 1 thread | 235 / 102 ms, 64.8 MB | 155 / 59 ms, 60.4 MB |
+
+On the mixed frame, rdz's default is now smaller than fst at level 100 (49.9
+MB), qs2 (42.2 MB) and qdata (39.6 MB), and the fastest of them both ways.
+Repeated values write 29% slower (229 against 178 ms), for a smaller file and
+a faster read.
+
+Tests:
+
+- The C harness checks round trips at every exponent and length, with every
+  special value.
+- It also checks that a division equals `strtod()` on 100,000 decimals, on
+  every architecture.
+- Every single-byte change to a decimal file is caught.
+- Eleven hostile records are refused.
+- The mutation check has a 23rd guard, on exception positions: without it, a
+  hostile file writes past the vector under ASan.
+- The frozen corpus gains `dbl_decimal_*`, and its existing files are unchanged.
+- A CI leg runs the harness through the `strtod()` path.
+
 ## Checkpoint 2026-10-05: plan-c Stage I
 
 The format froze. Four pull requests:

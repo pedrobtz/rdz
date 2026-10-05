@@ -15,6 +15,8 @@ int_runs_speed	speed	native_v1	304	d69a3b62ddebc2af69b92793786302ce98872d1cbc1a7
 int_runs_balanced	balanced	native_v1	304	d69a3b62ddebc2af69b92793786302ce98872d1cbc1a777f3b2859cae9e2c488	14	0	rdz 0.0.0 (development)
 dbl_kinds_speed	speed	native_v1	24672	235653cf3ea52a6b30035de0e1a8aceea4b25f2fe351b8a028a22848eafcd912	20 22	0	rdz 0.0.0 (development)
 dbl_kinds_balanced	balanced	native_v1	6354	61f3d89d51943b561d620f18e2dcced0c2fc897d195e515b1300c4c38a043d27	20 22	1	rdz 0.0.0 (development)
+dbl_decimal_speed	speed	native_v1	144272	b12c053967e8ebea8ca2261c022ed9a81c44ea93b83a515cf5cdea6faa92838c	20	0	rdz 0.0.0 (development)
+dbl_decimal_balanced	balanced	native_v1	25360	457322758105b54c8b173be4e271f2b757a571e499795441e3cbabba748be236	23	1	rdz 0.0.0 (development)
 chr_plain_speed	speed	native_v1	1042	fcee3aad2a7e6a846a9b80034408518e9ec015f07598b69b6d8efbc5629d116d	8 9	0	rdz 0.0.0 (development)
 chr_plain_balanced	balanced	native_v1	460	8892d3d55474a3c0c2f80843004a2d19b71c03bf15045a65c80044bdc16f7924	8 9	0 1	rdz 0.0.0 (development)
 chr_dictionary_speed	speed	native_v1	80538	9da9aa53fff2467490140c87fb8b4c1f8bbeeeeb166d6cd1907e585c2064fe66	8 9	0	rdz 0.0.0 (development)

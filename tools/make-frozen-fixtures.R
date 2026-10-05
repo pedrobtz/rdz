@@ -1,15 +1,20 @@
 # Writes the frozen 0.1.0 corpus (tests/testthat/fixtures/v0.1.0/) from the
 # specs in tests/testthat/helper-frozen-fixtures.R, with the installed rdz,
-# and its manifest. Run once, when the format froze (plan-c Stage I); the
-# corpus is data from then on, and no test rewrites it. From the package
-# root:
+# and its manifest. A file once written is data: this writes only the specs
+# that have no file yet (an addition, such as Stage J's decimals) and keeps
+# every existing file and manifest row as it is. From the package root:
 #
 #   Rscript tools/make-frozen-fixtures.R
 
 source(file.path("tests", "testthat", "helper-frozen-fixtures.R"))
 dir <- file.path("tests", "testthat", "fixtures", "v0.1.0")
 dir.create(dir, recursive = TRUE, showWarnings = FALSE)
-stopifnot(length(list.files(dir, pattern = "[.]rdz$")) == 0L) # never over a corpus
+manifest_path <- file.path(dir, "manifest.tsv")
+old <- if (file.exists(manifest_path)) {
+  utils::read.delim(manifest_path, colClasses = "character", quote = "")
+} else {
+  NULL
+}
 
 encodings <- function(path) {
   bytes <- readBin(path, "raw", file.size(path))
@@ -24,6 +29,10 @@ encodings <- function(path) {
 
 rows <- lapply(frozen_fixture_specs(), function(spec) {
   path <- file.path(dir, paste0(spec$name, ".rdz"))
+  if (file.exists(path)) { # never rewritten
+    stopifnot(!is.null(old), spec$name %in% old$name)
+    return(old[old$name == spec$name, , drop = FALSE])
+  }
   write_frozen_fixture(spec, path)
   info <- rdz::rdz_info(path)
   stopifnot(identical(info$codec, spec$codec), identical(rdz::read_rdz(path), spec$value()))

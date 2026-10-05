@@ -18,6 +18,7 @@
 #endif
 #endif
 
+#include <float.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +28,7 @@
 
 #include <zubin/rw.h>
 
+#include "rdz_alp.h"
 #include "rdz_container.h"
 #include "rdz_graph.h"
 #include "rdz_logical.h"
@@ -637,6 +639,225 @@ static void test_numeric(const char *tmpdir)
     free(dv);
 }
 
+/* ---- the decimal double codec (encoding 23, ALP) ------------------------------------ */
+
+static double bits_double(uint64_t b)
+{
+    double d;
+    memcpy(&d, &b, 8);
+    return d;
+}
+
+/* encode and decode v[0, n) through the double codec, compressing; the
+   encoding chosen, or 0 on a failure (reported) */
+static uint16_t alp_roundtrip(const double *v, size_t n, const char *what)
+{
+    zb_buf out;
+    uint16_t enc = 0;
+    rdz_error e;
+    double *got = (double *)malloc((n ? n : 1) * sizeof *got);
+    zb_buf_alloc(&out, 0, 0);
+    if (rdz_dbl_encode(v, n, 1, &out, &enc, &e)) {
+        CHECK(0, "%s: encode: %s", what, e.message);
+        enc = 0;
+    } else if (rdz_dbl_decode(out.data, out.len, enc, n, got, &e)) {
+        CHECK(0, "%s: decode (encoding %u): %s", what, enc, e.message);
+        enc = 0;
+    } else {
+        CHECK(n == 0 || memcmp(got, v, n * 8) == 0, "%s: values differ (encoding %u)", what, enc);
+        CHECK(enc != RDZ_ENCODING_DBL_DECIMAL || out.len < 8 * n,
+              "%s: a decimal record no smaller than raw", what);
+    }
+    zb_buf_release(&out);
+    free(got);
+    return enc;
+}
+
+/* a hand-made decimal record, decoded: whether it was refused */
+static int alp_refused(const uint8_t *rec, size_t len, size_t n)
+{
+    double *x = (double *)malloc(n * sizeof *x);
+    rdz_error e;
+    int refused = rdz_dbl_decode(rec, len, RDZ_ENCODING_DBL_DECIMAL, n, x, &e) != 0;
+    free(x);
+    return refused;
+}
+
+static void test_alp(const char *tmpdir)
+{
+    static const size_t lengths[] = {64, 100, 1023, 1024, 1025, 3000, 131072};
+    size_t big = 131072, i, li;
+    double *v = (double *)malloc(big * sizeof *v);
+    uint32_t x = 99;
+    char path[512];
+    const double specials[] = {0.0, -0.0, 1.0 / 0.0, -1.0 / 0.0, 4.9e-324, 1e300, -1e-300,
+                               9007199254740992.0, 0.1, 123456.789};
+    snprintf(path, sizeof path, "%s/alp.rdz", tmpdir);
+
+    /* the format's premise: with |m| < 2^53, m / 10^e in double arithmetic is
+       the double strtod() reads "me-e" as (one correctly rounded division) */
+    {
+        static const double p10[] = {1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9,
+                                     1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18};
+        int mismatches = 0, k;
+        uint64_t s = 12345;
+        for (k = 0; k < 100000; k++) {
+            long long m;
+            int p;
+            char buf[48];
+            volatile double q;
+            s = s * 6364136223846793005ull + 1442695040888963407ull;
+            m = (long long)((s >> 11) & ((1ull << 53) - 1)) >> (int)((s >> 3) % 50);
+            if (s & 1) m = -m;
+            p = (int)((s >> 58) % 19);
+            q = (double)m / p10[p];
+            snprintf(buf, sizeof buf, "%llde-%d", m, p);
+            if (q != strtod(buf, NULL)) mismatches++;
+        }
+#if !(defined(FLT_EVAL_METHOD) && FLT_EVAL_METHOD != 0)
+        CHECK(mismatches == 0, "%d of 100,000 divisions differ from strtod()", mismatches);
+#else
+        printf("x87: %d of 100,000 divisions differ from strtod() (why ALP decodes with it)\n",
+               mismatches);
+#endif
+    }
+
+    for (li = 0; li < sizeof lengths / sizeof lengths[0]; li++) {
+        size_t n = lengths[li];
+        int places;
+        for (places = 0; places <= 6; places++) {
+            double scale = 1;
+            int k;
+            char what[64];
+            for (k = 0; k < places; k++) scale *= 10;
+            for (i = 0; i < n; i++) {
+                x = x * 1103515245u + 12345u;
+                /* as R reads a decimal: the nearest double to m / 10^places */
+                v[i] = (double)(int32_t)(x >> 4) / scale;
+            }
+            snprintf(what, sizeof what, "%zu decimals with %d places", n, places);
+            CHECK(alp_roundtrip(v, n, what) == RDZ_ENCODING_DBL_DECIMAL, "%s: not decimal", what);
+            /* with R's NA, NaN payloads, -0, infinities and others among them */
+            for (i = 0; i < n; i += 37) {
+                v[i] = i % 3 == 0 ? bits_double(0x7FF00000000007A2ull)
+                       : i % 3 == 1 ? bits_double(0x7FF8000000000123ull)
+                                    : specials[(i / 37) % 10];
+            }
+            snprintf(what, sizeof what, "%zu decimals with %d places and exceptions", n, places);
+            alp_roundtrip(v, n, what);
+        }
+        /* thousands (a factor f), a random walk (delta), a constant */
+        for (i = 0; i < n; i++) v[i] = (double)((i * 7919) % 1000) * 1000.0;
+        alp_roundtrip(v, n, "multiples of 1000");
+        for (i = 0; i < n; i++) {
+            x = x * 1103515245u + 12345u;
+            v[i] = (i ? v[i - 1] * 100 + (double)((int)(x >> 28) - 8) : 1000000.0) / 100;
+            v[i] = (double)(long long)(v[i] * 100 + (v[i] < 0 ? -0.5 : 0.5)) / 100;
+        }
+        alp_roundtrip(v, n, "a random walk in cents");
+        for (i = 0; i < n; i++) v[i] = 2.75;
+        {
+            uint16_t c = alp_roundtrip(v, n, "a constant");
+            /* runs, or a decimal record when that is smaller (one short vector) */
+            CHECK(c == RDZ_ENCODING_DBL_RUNS || c == RDZ_ENCODING_DBL_DECIMAL,
+                  "a constant is encoding %u", c);
+        }
+    }
+    /* full-precision values stay shuffled; small blocks stay raw */
+    for (i = 0; i < big; i++) {
+        x = x * 1103515245u + 12345u;
+        v[i] = (double)x / 3.0;
+    }
+    CHECK(alp_roundtrip(v, big, "thirds") == RDZ_ENCODING_DBL_SHUFFLE, "thirds are not decimals");
+    for (i = 0; i < 10; i++) v[i] = (double)i / 10;
+    CHECK(alp_roundtrip(v, 10, "ten tenths") != RDZ_ENCODING_DBL_DECIMAL, "ten values are not ALP");
+
+    /* through files: chosen when compressing, never at the speed preset */
+    {
+        double *d = (double *)malloc(300000 * sizeof *d);
+        for (i = 0; i < 300000; i++) d[i] = (double)(long long)((i * 2654435761u) % 100000) / 100;
+        numeric_case(RDZ_TYPE_DOUBLE, d, 300000, 1, 1, path, RDZ_ENCODING_DBL_DECIMAL);
+        numeric_case(RDZ_TYPE_DOUBLE, d, 300000, 1, 4, path, RDZ_ENCODING_DBL_DECIMAL);
+        numeric_case(RDZ_TYPE_DOUBLE, d, 300000, 0, 1, path, RDZ_ENCODING_DBL_RAW);
+        /* every single-byte change to a small decimal file is caught */
+        {
+            rdz_vec vv;
+            rdz_vec_spec spec;
+            rdz_error e;
+            uint8_t *data;
+            size_t len = 0, k;
+            memset(&spec, 0, sizeof spec);
+            spec.type = RDZ_TYPE_DOUBLE;
+            spec.n = 2000;
+            spec.values = d;
+            spec.level = 1;
+            spec.threads = 1;
+            rdz_vec_init(&vv);
+            rdz_vec_write(&vv, path, &spec, &e);
+            rdz_vec_free(&vv);
+            data = slurp(path, &len);
+            for (k = 0; data && k < len; k++) {
+                rdz_reader r;
+                data[k] ^= 0x5a;
+                if (rdz_reader_open_memory(&r, data, len, &e) == 0) {
+                    rdz_vec_init(&vv);
+                    CHECK(rdz_vec_read(&vv, &r, v, 1, NULL, NULL, &e) != 0,
+                          "decimal file: a change at byte %zu went undetected", k);
+                    rdz_vec_free(&vv);
+                    rdz_reader_close(&r);
+                }
+                data[k] ^= 0x5a;
+            }
+            free(data);
+            remove(path);
+        }
+        free(d);
+    }
+
+    /* hand-made records: one vector of 100 values, all 5 (width 0) */
+    {
+        uint8_t rec[64];
+        memset(rec, 0, sizeof rec);
+        rec[0] = 0; rec[1] = 0; rec[2] = 0; rec[3] = 0;
+        zb_wr_u64le(rec + 8, 5);
+        CHECK(!alp_refused(rec, 16, 100), "a minimal decimal record was refused");
+        rec[0] = 19;
+        CHECK(alp_refused(rec, 16, 100), "an exponent past 18 was accepted");
+        rec[0] = 2; rec[1] = 3;
+        CHECK(alp_refused(rec, 16, 100), "a factor past the exponent was accepted");
+        rec[1] = 0; rec[3] = 2;
+        CHECK(alp_refused(rec, 16, 100), "unknown vector flags were accepted");
+        rec[3] = 0; rec[6] = 1;
+        CHECK(alp_refused(rec, 16, 100), "a nonzero reserved field was accepted");
+        rec[6] = 0;
+        CHECK(alp_refused(rec, 17, 100), "trailing bytes were accepted");
+        /* an exception past the vector, and two out of order */
+        zb_wr_u16le(rec + 4, 1);
+        zb_wr_u16le(rec + 16, 100);
+        CHECK(alp_refused(rec, 26, 100), "an exception past the vector was accepted");
+        zb_wr_u16le(rec + 4, 2);
+        zb_wr_u16le(rec + 16, 7);
+        zb_wr_u16le(rec + 18, 7);
+        CHECK(alp_refused(rec, 36, 100), "repeated exception positions were accepted");
+        /* a value too large for an exact decode */
+        memset(rec, 0, sizeof rec);
+        rec[1] = 0;
+        zb_wr_u64le(rec + 8, 9007199254740992ull);
+        CHECK(alp_refused(rec, 16, 100), "a value of 2^53 was accepted");
+        /* width 65 */
+        memset(rec, 0, sizeof rec);
+        rec[2] = 65;
+        CHECK(alp_refused(rec, 16, 1), "a width past 64 was accepted");
+        /* nonzero padding: 3 values of 3 bits */
+        memset(rec, 0, sizeof rec);
+        rec[2] = 3;
+        rec[16] = 0;
+        rec[17] = 0x80;
+        CHECK(alp_refused(rec, 18, 3), "nonzero padding bits were accepted");
+    }
+    free(v);
+}
+
 static void test_pipeline(const char *tmpdir)
 {
     size_t n = 3 * 1024 * 1024, i;
@@ -863,6 +1084,7 @@ int main(int argc, char **argv)
     test_pipeline(tmpdir);
     test_native_manifest(tmpdir);
     test_numeric(tmpdir);
+    test_alp(tmpdir);
     test_extensions(tmpdir);
     printf("logical kernel: %s\n", rdz_logical_kernel());
     printf("%d checks, %d failures\n", checks, failures);

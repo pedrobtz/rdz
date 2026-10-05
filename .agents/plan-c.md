@@ -313,6 +313,16 @@ removed from `main` once the last fixture passes; submission after zubin is on C
 
 **Exit:** on CRAN; the 0.1.0 compatibility rule of roadmap.md in force.
 
+### Stage J — Decimal doubles (ALP), before 0.1.0 · S
+
+**Status:** done 2026-10-05 (current-state.md, "Checkpoint 2026-10-05: plan-c Stage J").
+
+**Do:** encoding-research.md's ALP audit as an experiment against qs2, fst and Pcodec;
+encoding 23 if it moves the frontier; its guard, fuzzing, frozen fixtures.
+
+**Exit:** decimal doubles smaller and faster than every compared format, the other
+distributions unchanged, the corpus extended and not rewritten.
+
 ## 7. Gates
 
 - **Differential against the oracle.** Every Rust fixture is read to an `identical()`

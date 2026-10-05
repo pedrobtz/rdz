@@ -39,11 +39,15 @@ jobs:
 
   c-tests:
     runs-on: ubuntu-latest
-    name: c-tests (${{ matrix.cc }})
+    name: c-tests (${{ matrix.cc }}${{ matrix.cflags && ' strtod' || '' }})
     strategy:
       fail-fast: false
       matrix:
         cc: [gcc, clang]
+        include:
+          # the decimal decoder's x87 path (strtod), which i386 builds take
+          - cc: clang
+            cflags: -DRDZ_ALP_STRTOD
     steps:
       - uses: actions/checkout@v6
       - uses: actions/checkout@v6
@@ -57,6 +61,7 @@ jobs:
       - name: Run the core harness
         env:
           CC: ${{ matrix.cc }}
+          RDZ_CFLAGS: ${{ matrix.cflags }}
           ZUBIN_INCLUDE: ${{ github.workspace }}/.deps/zubin/inst/include
           ZUFAST_INCLUDE: ${{ github.workspace }}/.deps/zufast/inst/include
         run: tools/run-c-tests

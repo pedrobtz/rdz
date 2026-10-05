@@ -23,7 +23,7 @@ test_that("the frozen corpus is complete and unmodified", {
   }
   # every block encoding and both compressions are represented
   encodings <- unique(unlist(strsplit(manifest$encodings, " ", fixed = TRUE)))
-  expect_setequal(encodings, as.character(c(0L, 2:14, 20:22)))
+  expect_setequal(encodings, as.character(c(0L, 2:14, 20:23)))
   compressions <- unique(unlist(strsplit(manifest$compressions, " ", fixed = TRUE)))
   expect_setequal(compressions, c("0", "1"))
 })
