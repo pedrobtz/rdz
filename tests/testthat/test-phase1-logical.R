@@ -88,28 +88,33 @@ test_that("an empty names attribute remains distinct from no names", {
   expect_identical(rdz_info(unnamed_path)$attribute_names, character())
 })
 
-test_that("unsupported logical attributes select whole-root fallback", {
+test_that("logical vectors keep any native attributes", {
   objects <- list(
     custom = structure(c(TRUE, NA), note = "preserve me"),
     classed = structure(c(TRUE, FALSE), class = "custom_logical"),
     matrix = matrix(c(TRUE, FALSE, NA, TRUE), nrow = 2L)
   )
-
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
   for (name in names(objects)) {
-    automatic <- tempfile(fileext = ".rdz")
-    strict <- tempfile(fileext = ".rdz")
-    on.exit(unlink(c(automatic, strict)), add = TRUE)
-    write_rdz(objects[[name]], automatic)
-
-    expect_identical(rdz_info(automatic)$codec, "r_serial_v3", info = name)
-    expect_identical(read_rdz(automatic), objects[[name]], info = name)
-    expect_error(
-      write_rdz(objects[[name]], strict, mode = "native"),
-      "attributes other than names",
-      info = name
-    )
-    expect_false(file.exists(strict))
+    write_rdz(objects[[name]], path, mode = "native")
+    expect_identical(rdz_info(path)$codec, "native_v1", info = name)
+    expect_identical(read_rdz(path), objects[[name]], info = name)
+    expect_setequal(rdz_info(path)$attribute_names, names(attributes(objects[[name]])))
   }
+})
+
+test_that("a logical vector with an attribute that is not native falls back whole", {
+  x <- structure(c(TRUE, NA), env = globalenv())
+  automatic <- tempfile(fileext = ".rdz")
+  strict <- tempfile(fileext = ".rdz")
+  on.exit(unlink(c(automatic, strict)), add = TRUE)
+  write_rdz(x, automatic)
+  expect_identical(rdz_info(automatic)$codec, "r_serial_v3")
+  expect_identical(read_rdz(automatic), x)
+  expect_error(write_rdz(x, strict, mode = "native"), "environment",
+               class = "rdz_unsupported_error")
+  expect_false(file.exists(strict))
 })
 
 test_that("forced R mode bypasses native logical encoding", {
@@ -165,7 +170,7 @@ test_that("generic attribute access requires explicit full-read permission", {
   x <- structure(1:3, note = "generic")
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  write_rdz(x, path)
+  write_rdz(x, path, mode = "r")
 
   expect_error(rdz_attributes(path), "allow_full = TRUE")
   expect_identical(

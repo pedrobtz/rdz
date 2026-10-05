@@ -108,14 +108,18 @@ test_that("factors round-trip with their levels and order", {
   }
 })
 
-test_that("factors with other attributes or bad codes are left generic", {
+test_that("factors keep other attributes; bad codes are left generic", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
   f <- factor(c("a", "b"))
   attr(f, "note") <- "x"
   write_rdz(f, path)
-  expect_identical(rdz_info(path)$codec, "r_serial_v3")
+  expect_identical(rdz_info(path)$codec, "native_v1")
   expect_identical(read_rdz(path), f)
+  named <- structure(factor(c("a", "b")), names = c("x", "y"))
+  write_rdz(named, path)
+  expect_identical(rdz_info(path)$codec, "r_serial_v3")
+  expect_identical(read_rdz(path), named)
   bad <- structure(c(1L, 5L), levels = c("a", "b"), class = "factor")
   write_rdz(bad, path)
   expect_identical(rdz_info(path)$codec, "r_serial_v3")

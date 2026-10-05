@@ -74,10 +74,10 @@ test_that("the Rust reference reads what the C native writer writes", {
 
 test_that("strict native mode raises rdz_unsupported_error and leaves no file", {
   path <- tempfile(fileext = ".rdz")
-  expect_error(write_rdz(1:3, path, mode = "native"), class = "rdz_unsupported_error")
+  expect_error(write_rdz(1i, path, mode = "native"), class = "rdz_unsupported_error")
   expect_error(
-    write_rdz(structure(TRUE, note = 1), path, mode = "native"),
-    "attributes other than names",
+    write_rdz(structure(TRUE, note = globalenv()), path, mode = "native"),
+    "environment",
     class = "rdz_unsupported_error"
   )
   expect_false(file.exists(path))

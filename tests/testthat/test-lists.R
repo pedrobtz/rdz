@@ -49,8 +49,8 @@ test_that("an unsupported part anywhere sends the whole root to the generic code
   cases <- list(
     call = list(1, list(quote(f(x)))),
     environment = list(a = 1, e = globalenv()),
-    attribute = list(structure(1:3, note = "x")),
-    altrep = list(1:10),
+    attribute = list(structure(c(1L, 2L), note = quote(x))),
+    s4 = list(asS4(c(1, 2))),
     complex = list(1i)
   )
   for (name in names(cases)) {
@@ -136,4 +136,20 @@ test_that("columns of different lengths are refused before anything is written",
   expect_error(write_rdz(bad, path, mode = "native"), "differ in length",
                class = "rdz_unsupported_error")
   expect_false(file.exists(path))
+})
+
+test_that("automatic mode leaves an object of many small parts to the generic codec", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  small <- lapply(seq_len(2000L), function(i) c(i, i + 1))
+  write_rdz(small, path)
+  expect_identical(rdz_info(path)$codec, "r_serial_v3")
+  expect_identical(read_rdz(path), small)
+  write_rdz(small, path, mode = "native") # forced native still is
+  expect_identical(rdz_info(path)$codec, "native_v1")
+  expect_identical(read_rdz(path), small)
+  # as many parts, each large enough, stay native
+  large <- lapply(seq_len(1100L), function(i) rep(i, 300L))
+  write_rdz(large, path)
+  expect_identical(rdz_info(path)$codec, "native_v1")
 })

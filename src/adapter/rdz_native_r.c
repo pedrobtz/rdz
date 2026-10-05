@@ -2,24 +2,29 @@
  * rdz_native_r.c -- the native codecs at the R boundary (plan-c Stages E to
  * H): which R objects they take, and the objects they read back.
  *
- * Native: a logical, integer, double or character vector that is not ALTREP,
- * with no attribute or only `names`; a factor (an integer vector whose only
- * attributes are `levels` and a class of "factor" or c("ordered",
- * "factor"), every code a level or NA); a list with no attribute or only
- * `names`; a data frame (a list whose class includes "data.frame", whose
- * attributes are only names, row.names and class, every column as long as
- * it has rows) -- and, as list elements and columns, any of these and NULL,
- * to RDZ_MAX_DEPTH levels. A data.table's `.internal.selfref` is the one
- * registered transient attribute: omitted on write (and restored by R when
- * read). Anything else anywhere in the object leaves the whole root to the
- * generic codec (AGENTS.md). Strings are bytes plus R's encoding tag; a
- * native-encoded non-ASCII string is not portable (portability.md).
+ * Native: a logical, integer, double or character vector (ALTREP ones from
+ * their materialised data); a factor (an integer vector of class "factor"
+ * or c("ordered", "factor") with character levels, every code a level or
+ * NA); a list; a data frame (a list whose class includes "data.frame",
+ * every column as long as it has rows) -- and, as list elements, columns
+ * and attribute values, any of these and NULL, to RDZ_MAX_DEPTH levels.
+ * Each may carry any attributes whose names are ASCII and whose values are
+ * native themselves (Stage I: a Date's class, a POSIXct's tzone, a
+ * matrix's dim and dimnames), its own attributes included; the codecs hold
+ * names, a factor's levels and class, and a data frame's row.names and
+ * class. Not native: S4 objects, row.names off a data frame, and a
+ * `.internal.selfref` off a data.table -- the one registered transient
+ * attribute, omitted on write (and restored by R when read). Anything else
+ * anywhere in the object leaves the whole root to the generic codec
+ * (AGENTS.md). Strings are bytes plus R's encoding tag; a native-encoded
+ * non-ASCII string is not portable (portability.md).
  *
  * The plan is built breadth-first, without recursion, into buffers behind
  * an external pointer; writing and reading run under R_UnwindProtect(), so
  * an interrupt between blocks frees everything at once. R thread only.
  */
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -46,19 +51,30 @@ static R_xlen_t rdz_attribute_count(SEXP x)
 #endif
 }
 
+/* One attribute in R's order. */
+typedef struct {
+    SEXP tag, value;
+} rdz_attr_pair;
+
 typedef struct {
     SEXP names, row_names, cls, levels, selfref;
     int others;
+    zb_buf *all; /* rdz_attr_pair, every attribute in order */
+    int failed;  /* `all` could not grow */
 } rdz_attr_scan;
 
 static void rdz_scan_one(rdz_attr_scan *a, SEXP tag, SEXP value)
 {
+    rdz_attr_pair pair;
     if (tag == R_NamesSymbol) a->names = value;
     else if (tag == R_RowNamesSymbol) a->row_names = value; /* as stored: compact or not */
     else if (tag == R_ClassSymbol) a->cls = value;
     else if (tag == R_LevelsSymbol) a->levels = value;
     else if (strcmp(CHAR(PRINTNAME(tag)), ".internal.selfref") == 0) a->selfref = value;
     else a->others++;
+    pair.tag = tag;
+    pair.value = value;
+    if (a->all && zb_put_bytes(a->all, &pair, sizeof pair)) a->failed = 1;
 }
 
 #if R_VERSION >= R_Version(4, 6, 0)
@@ -71,10 +87,13 @@ static SEXP rdz_scan_fun(SEXP tag, SEXP value, void *data)
 
 /* x's attributes as stored, without the expansion getAttrib() gives
    compact row names. */
-static void rdz_scan_attributes(SEXP x, rdz_attr_scan *a)
+static void rdz_scan_attributes(SEXP x, rdz_attr_scan *a, zb_buf *all)
 {
     a->names = a->row_names = a->cls = a->levels = a->selfref = R_NilValue;
     a->others = 0;
+    a->all = all;
+    a->failed = 0;
+    if (all) zb_buf_reset(all);
 #if R_VERSION >= R_Version(4, 6, 0)
     R_mapAttrib(x, rdz_scan_fun, a);
 #else
@@ -161,6 +180,7 @@ typedef struct {
     zb_buf depth;   /* uint32_t per node */
     zb_buf attrs;   /* rdz_attribute */
     zb_buf sources; /* rdz_str_source per node, filled after planning */
+    zb_buf pairs;   /* scratch: the attributes of the node being visited */
 } rdz_plan;
 
 static void rdz_plan_free(rdz_plan *p)
@@ -172,6 +192,7 @@ static void rdz_plan_free(rdz_plan *p)
     zb_buf_release(&p->depth);
     zb_buf_release(&p->attrs);
     zb_buf_release(&p->sources);
+    zb_buf_release(&p->pairs);
 }
 
 static void rdz_plan_finalize(SEXP ptr)
@@ -236,6 +257,10 @@ static int rdz_plan_attribute(rdz_plan *p, uint32_t owner, const char *name, SEX
     rdz_attribute a;
     rdz_node *n;
     uint32_t id = rdz_plan_count(p);
+    if (flags != RDZ_ATTRIBUTE_FLAG_OTHER && rdz_attribute_count(value) != 0) {
+        *why = "names, row names or a class with attributes of their own";
+        return 1;
+    }
     if (!rdz_plan_add(p, R_NilValue, name, RDZ_ROLE_ATTRIBUTE_NAME, owner, why)) return 1;
     n = rdz_plan_node(p, id);
     n->type = RDZ_TYPE_CHARACTER;
@@ -274,15 +299,36 @@ static int rdz_has_class(SEXP cls, const char *a)
     return 0;
 }
 
-static const char *rdz_altrep_name(SEXP x)
+/* What a node's own codec already holds, so is not a general attribute. */
+enum {
+    RDZ_SKIP_NAMES = 1, RDZ_SKIP_ROW_NAMES = 2, RDZ_SKIP_CLASS = 4, RDZ_SKIP_LEVELS = 8,
+    RDZ_SKIP_SELFREF = 16
+};
+
+/* Plans node i's other attributes, in R's order, as general attributes:
+   each an ASCII name and any native value, attributes of its own included. */
+static const char *rdz_plan_others(rdz_plan *p, uint32_t i, int skip)
 {
-    switch (TYPEOF(x)) {
-    case LGLSXP: return "an ALTREP logical vector";
-    case INTSXP: return "an ALTREP integer vector";
-    case REALSXP: return "an ALTREP double vector";
-    case STRSXP: return "an ALTREP character vector";
-    default: return "an ALTREP list";
+    size_t k, count = p->pairs.len / sizeof(rdz_attr_pair);
+    const char *why = NULL;
+    for (k = 0; k < count; k++) {
+        rdz_attr_pair pr = ((const rdz_attr_pair *)(const void *)p->pairs.data)[k];
+        const char *name = CHAR(PRINTNAME(pr.tag));
+        const unsigned char *c;
+        if ((pr.tag == R_NamesSymbol && (skip & RDZ_SKIP_NAMES)) ||
+            (pr.tag == R_RowNamesSymbol && (skip & RDZ_SKIP_ROW_NAMES)) ||
+            (pr.tag == R_ClassSymbol && (skip & RDZ_SKIP_CLASS)) ||
+            (pr.tag == R_LevelsSymbol && (skip & RDZ_SKIP_LEVELS)) ||
+            ((skip & RDZ_SKIP_SELFREF) && strcmp(name, ".internal.selfref") == 0)) {
+            continue;
+        }
+        if (!*name) return "an attribute with an empty name";
+        for (c = (const unsigned char *)name; *c; c++) {
+            if (*c & 0x80u) return "an attribute with a non-ASCII name";
+        }
+        if (rdz_plan_attribute(p, i, name, pr.value, RDZ_ATTRIBUTE_FLAG_OTHER, &why)) return why;
     }
+    return NULL;
 }
 
 /* Fills node i from its object, appending its levels, attributes and
@@ -292,7 +338,6 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
     SEXP x = rdz_plan_object(p, i);
     rdz_node *n = rdz_plan_node(p, i);
     int type = TYPEOF(x);
-    int value_node = n->role == RDZ_ROLE_ATTRIBUTE_VALUE;
     rdz_attr_scan a;
     const char *why = NULL;
 
@@ -305,20 +350,32 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
     if (type != LGLSXP && type != INTSXP && type != REALSXP && type != STRSXP && type != VECSXP) {
         return Rf_type2char((SEXPTYPE)type);
     }
-    if (ALTREP(x)) return rdz_altrep_name(x);
+    /* an ALTREP vector (a compact sequence, a deferred string, a memory
+       map) is written from its data, which INTEGER_RO() and the others
+       materialise here, on the R thread, before any worker starts */
+    /* setting attributes back would not restore the S4 bit */
+    if (Rf_isS4(x)) return "an S4 object";
     n->length = (uint64_t)XLENGTH(x);
-    if (value_node && rdz_attribute_count(x) != 0) return "an attribute value with attributes";
-    rdz_scan_attributes(x, &a);
+    rdz_scan_attributes(x, &a, &p->pairs);
+    if (a.failed) return "an object too large to plan";
+    if (a.selfref != R_NilValue &&
+        !(type == VECSXP && rdz_has_class(a.cls, "data.table") &&
+          rdz_has_class(a.cls, "data.frame"))) {
+        return "an object with a .internal.selfref attribute that is not a data.table";
+    }
 
-    /* a factor */
-    if (type == INTSXP && a.cls != R_NilValue) {
+    /* a factor: levels and class are the codec's */
+    if (type == INTSXP && rdz_has_class(a.cls, "factor")) {
         SEXP levels = a.levels;
         R_xlen_t k, nlev;
         const int *codes;
         int ordered = rdz_is_class(a.cls, "ordered", "factor");
-        if (!ordered && !rdz_is_class(a.cls, "factor", NULL)) return "a classed integer vector";
-        if (a.others || a.names != R_NilValue || TYPEOF(levels) != STRSXP || ALTREP(levels)) {
-            return "a factor with attributes other than levels and class";
+        if (!ordered && !rdz_is_class(a.cls, "factor", NULL)) {
+            return "a factor whose class is not \"factor\" or c(\"ordered\", \"factor\")";
+        }
+        if (a.names != R_NilValue || a.row_names != R_NilValue || TYPEOF(levels) != STRSXP ||
+            rdz_attribute_count(levels) != 0) {
+            return "a factor with names or malformed levels";
         }
         nlev = XLENGTH(levels);
         codes = INTEGER_RO(x);
@@ -333,21 +390,15 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
         n->first_child = rdz_plan_count(p);
         n->child_count = 1;
         if (!rdz_plan_add(p, levels, NULL, RDZ_ROLE_LEVELS, i, &why)) return why;
-        return NULL; /* the levels node is visited in its turn */
+        return rdz_plan_others(p, i, RDZ_SKIP_CLASS | RDZ_SKIP_LEVELS);
     }
 
-    /* a data frame */
-    if (type == VECSXP && a.cls != R_NilValue) {
+    /* a data frame: names, row.names and class are the codec's */
+    if (type == VECSXP && rdz_has_class(a.cls, "data.frame")) {
         R_xlen_t k, ncol = XLENGTH(x);
         uint64_t nrow;
         int compact;
-        if (!rdz_has_class(a.cls, "data.frame")) return "a classed list";
-        if (a.others || a.levels != R_NilValue ||
-            (a.selfref != R_NilValue && !rdz_has_class(a.cls, "data.table"))) {
-            return "a data frame with attributes other than names, row.names and class";
-        }
-        if (a.names == R_NilValue || TYPEOF(a.names) != STRSXP || XLENGTH(a.names) != ncol ||
-            ALTREP(a.names)) {
+        if (a.names == R_NilValue || TYPEOF(a.names) != STRSXP || XLENGTH(a.names) != ncol) {
             return "a data frame with malformed names";
         }
         /* compact row names are c(NA_integer_, n) or c(NA_integer_, -n) */
@@ -356,8 +407,7 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
         if (compact) {
             int m = INTEGER_RO(a.row_names)[1];
             nrow = (uint64_t)(m < 0 ? -(int64_t)m : m);
-        } else if ((TYPEOF(a.row_names) == INTSXP || TYPEOF(a.row_names) == STRSXP) &&
-                   !ALTREP(a.row_names)) {
+        } else if (TYPEOF(a.row_names) == INTSXP || TYPEOF(a.row_names) == STRSXP) {
             nrow = (uint64_t)XLENGTH(a.row_names);
         } else {
             return "a data frame with malformed row names";
@@ -378,6 +428,10 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
             rdz_plan_attribute(p, i, "class", a.cls, RDZ_ATTRIBUTE_FLAG_CLASS, &why)) {
             return why;
         }
+        if ((why = rdz_plan_others(p, i, RDZ_SKIP_NAMES | RDZ_SKIP_ROW_NAMES | RDZ_SKIP_CLASS |
+                                             RDZ_SKIP_SELFREF)) != NULL) {
+            return why;
+        }
         n = rdz_plan_node(p, i);
         n->first_child = rdz_plan_count(p);
         n->child_count = (uint32_t)ncol;
@@ -387,18 +441,15 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
         return NULL;
     }
 
-    /* anything else: no attribute or only names */
-    if (a.others || a.cls != R_NilValue || a.row_names != R_NilValue || a.selfref != R_NilValue ||
-        a.levels != R_NilValue) {
-        return type == LGLSXP ? "a logical vector with attributes other than names"
-               : type == VECSXP ? "a list with attributes other than names"
-                                : "a vector with attributes other than names";
+    /* anything else: names are the codec's, every other attribute general */
+    if (rdz_has_class(a.cls, "factor") || rdz_has_class(a.cls, "data.frame")) {
+        return "a factor or data frame of the wrong type";
     }
+    if (a.row_names != R_NilValue) return "a vector with row names";
     if (a.names != R_NilValue) {
         if (TYPEOF(a.names) != STRSXP || XLENGTH(a.names) != XLENGTH(x)) {
             return type == LGLSXP ? "a malformed logical vector" : "a malformed vector";
         }
-        if (ALTREP(a.names)) return "a vector with ALTREP names";
     }
     switch (type) {
     case LGLSXP:
@@ -424,6 +475,7 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
         rdz_plan_attribute(p, i, "names", a.names, RDZ_ATTRIBUTE_FLAG_NAMES, &why)) {
         return why;
     }
+    if ((why = rdz_plan_others(p, i, RDZ_SKIP_NAMES)) != NULL) return why;
     if (type == VECSXP) {
         R_xlen_t k, len = XLENGTH(x);
         n = rdz_plan_node(p, i);
@@ -469,6 +521,33 @@ static const char *rdz_plan_build(rdz_plan *p, SEXP x)
         n->strings = &src[i];
     }
     return NULL;
+}
+
+/* Many small parts: every object with data costs a directory entry, a block
+   entry and header (160 bytes) and a compression frame of its own, so a list
+   of 500,000 short vectors is 88 MB native against 1 MB generic. Automatic
+   mode leaves an object of at least this many parts averaging less than
+   this many bytes of data to the generic codec (a writer policy). */
+#define RDZ_SMALL_PARTS_MIN   1024u
+#define RDZ_SMALL_PARTS_BYTES 1024u
+
+static int rdz_plan_small_parts(rdz_plan *p)
+{
+    uint32_t i, parts = 0, count = rdz_plan_count(p);
+    double bytes = 0;
+    if (count < RDZ_SMALL_PARTS_MIN) return 0;
+    for (i = 0; i < count; i++) {
+        const rdz_node *n = rdz_plan_node(p, i);
+        switch (n->type) {
+        case RDZ_TYPE_LOGICAL:
+        case RDZ_TYPE_INTEGER:
+        case RDZ_TYPE_FACTOR: bytes += 4.0 * (double)n->length; parts++; break;
+        case RDZ_TYPE_DOUBLE: bytes += 8.0 * (double)n->length; parts++; break;
+        case RDZ_TYPE_CHARACTER: bytes += 8.0 * (double)n->length; parts++; break;
+        default: break;
+        }
+    }
+    return parts >= RDZ_SMALL_PARTS_MIN && bytes < (double)RDZ_SMALL_PARTS_BYTES * parts;
 }
 
 static void rdz_tick(void *ctx)
@@ -526,9 +605,13 @@ SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy, SEXP se
     zb_buf_alloc(&call.p->depth, 0, 0);
     zb_buf_alloc(&call.p->attrs, 0, 0);
     zb_buf_alloc(&call.p->sources, 0, 0);
+    zb_buf_alloc(&call.p->pairs, 0, 0);
     R_SetExternalPtrAddr(ptr, call.p);
 
     why = rdz_plan_build(call.p, x);
+    if (!why && !Rf_asLogical(strict) && rdz_plan_small_parts(call.p)) {
+        why = "an object of many small parts";
+    }
     if (why) {
         rdz_plan_finalize(ptr);
         UNPROTECT(2);
@@ -655,6 +738,35 @@ static const rdz_names_sink *rdz_r_sink(void *ctx, uint32_t object)
     return &((rdz_r_names *)(void *)g->sinks.data)[object].sink;
 }
 
+/* Rf_setAttrib() for an attribute read from a file, which R may refuse
+   (a dim that does not fit, a class R checks): a format error, not R's. */
+typedef struct {
+    SEXP x, sym, value;
+} rdz_set_attr;
+
+static SEXP rdz_set_attr_body(void *data)
+{
+    rdz_set_attr *s = (rdz_set_attr *)data;
+    Rf_setAttrib(s->x, s->sym, s->value);
+    return R_NilValue;
+}
+
+static SEXP rdz_set_attr_refused(SEXP cond, void *data)
+{
+    (void)cond;
+    *(int *)data = 1;
+    return R_NilValue;
+}
+
+/* The attribute name object's one string as a symbol name: ASCII, native or
+   UTF-8, not empty (what writers write). NULL when it is not. */
+static const char *rdz_attr_name(SEXP nm)
+{
+    SEXP c = STRING_ELT(nm, 0);
+    if (c == NA_STRING || LENGTH(c) == 0 || !rdz_ascii(c)) return NULL;
+    return CHAR(c);
+}
+
 /* Builds the whole value of an open native file. */
 static SEXP rdz_graph_body(void *data)
 {
@@ -706,8 +818,10 @@ static SEXP rdz_graph_body(void *data)
     sinks.strings = rdz_r_sink;
     if (rdz_graph_read(&g->v, r, &sinks, g->threads, rdz_tick, NULL, &g->e)) return R_NilValue;
 
+    /* last to first: every child, level and attribute value comes after
+       its owner, so each is complete before it is attached */
     names = (rdz_r_names *)(void *)g->sinks.data;
-    for (i = 0; i < n; i++) {
+    for (i = n; i-- > 0;) {
         const rdz_object *o = &r->objects[i];
         SEXP x = VECTOR_ELT(g->holder, i);
         int have_rn = 0, have_class = 0;
@@ -745,16 +859,42 @@ static SEXP rdz_graph_body(void *data)
             const rdz_attribute *a = &r->attributes[o->first_attribute + k];
             SEXP nm = VECTOR_ELT(g->holder, a->name_object_id);
             SEXP value = VECTOR_ELT(g->holder, a->value_object_id);
-            const char *want = a->flags == RDZ_ATTRIBUTE_FLAG_NAMES       ? "names"
-                               : a->flags == RDZ_ATTRIBUTE_FLAG_ROW_NAMES ? "row.names"
-                                                                          : "class";
-            if (STRING_ELT(nm, 0) == NA_STRING || strcmp(CHAR(STRING_ELT(nm, 0)), want) != 0) {
-                rdz_invalid(&g->e, "an attribute's name does not match its kind");
+            const char *name = rdz_attr_name(nm);
+            rdz_set_attr set;
+            int refused = 0;
+            if (!name) {
+                rdz_invalid(&g->e, "an attribute's name is not a plain ASCII name");
                 return R_NilValue;
             }
-            if (a->flags == RDZ_ATTRIBUTE_FLAG_ROW_NAMES) have_rn = 1;
-            if (a->flags == RDZ_ATTRIBUTE_FLAG_CLASS) have_class = 1;
-            Rf_setAttrib(x, Rf_install(want), value);
+            if (a->flags == RDZ_ATTRIBUTE_FLAG_OTHER) {
+                /* never one the codecs hold, so never twice */
+                int factor = o->type_tag == RDZ_TYPE_FACTOR,
+                    frame = o->type_tag == RDZ_TYPE_DATA_FRAME;
+                if (strcmp(name, "names") == 0 || strcmp(name, "row.names") == 0 ||
+                    ((factor || frame) && strcmp(name, "class") == 0) ||
+                    (factor && strcmp(name, "levels") == 0)) {
+                    rdz_invalid(&g->e, "a general attribute the codec holds");
+                    return R_NilValue;
+                }
+            } else {
+                const char *want = a->flags == RDZ_ATTRIBUTE_FLAG_NAMES       ? "names"
+                                   : a->flags == RDZ_ATTRIBUTE_FLAG_ROW_NAMES ? "row.names"
+                                                                              : "class";
+                if (strcmp(name, want) != 0) {
+                    rdz_invalid(&g->e, "an attribute's name does not match its kind");
+                    return R_NilValue;
+                }
+                if (a->flags == RDZ_ATTRIBUTE_FLAG_ROW_NAMES) have_rn = 1;
+                if (a->flags == RDZ_ATTRIBUTE_FLAG_CLASS) have_class = 1;
+            }
+            set.x = x;
+            set.sym = Rf_install(name);
+            set.value = value;
+            R_tryCatchError(rdz_set_attr_body, &set, rdz_set_attr_refused, &refused);
+            if (refused) {
+                rdz_invalid(&g->e, "R refuses an attribute's value");
+                return R_NilValue;
+            }
         }
         if (o->type_tag == RDZ_TYPE_DATA_FRAME) {
             if (!have_rn) {
@@ -832,6 +972,77 @@ SEXP rdz_native_read_r(rdz_reader *opened, int threads, rdz_error *e, int *faile
 
 /* ---- one root attribute, read alone ---------------------------------------------- */
 
+/* Attribute a's name into out (at most cap - 1 bytes): its kind's, or for a
+   general attribute the one string of its name object, read from that
+   object's one block. */
+static int rdz_read_attr_name(rdz_reader *r, const rdz_attribute *a, char *out, size_t cap,
+                              rdz_error *e)
+{
+    const rdz_object *o = &r->objects[a->name_object_id];
+    const char *kind = a->flags == RDZ_ATTRIBUTE_FLAG_NAMES       ? "names"
+                       : a->flags == RDZ_ATTRIBUTE_FLAG_ROW_NAMES ? "row.names"
+                       : a->flags == RDZ_ATTRIBUTE_FLAG_CLASS     ? "class"
+                                                                  : NULL;
+    rdz_str s;
+    size_t k;
+    if (kind) {
+        snprintf(out, cap, "%s", kind);
+        return 0;
+    }
+    if (o->block_count != 1) return rdz_invalid(e, "an attribute name in more than one block");
+    if (rdz_reader_read_block(r, o->first_block, &r->decoded, e) ||
+        rdz_string_decode_records(r->decoded.data, r->decoded.len, 1, &s, e)) {
+        return 1;
+    }
+    if (s.tag == RDZ_STR_NA || s.len == 0 || s.len >= cap) {
+        return rdz_invalid(e, "an attribute's name is not a plain ASCII name");
+    }
+    for (k = 0; k < s.len; k++) {
+        if (s.bytes[k] == 0 || (s.bytes[k] & 0x80u)) {
+            return rdz_invalid(e, "an attribute's name is not a plain ASCII name");
+        }
+    }
+    memcpy(out, s.bytes, s.len);
+    out[s.len] = 0;
+    return 0;
+}
+
+/* The root's attribute names as R would list them, implied ones included,
+   reading only the general attributes' name blocks; NULL on failure. */
+SEXP rdz_native_attribute_names(rdz_reader *r, rdz_error *e)
+{
+    const rdz_object *root;
+    uint32_t k, implied = 0;
+    SEXP out;
+    char name[10001]; /* R caps a symbol at 10,000 bytes */
+    if (!r->nobjects) return Rf_allocVector(STRSXP, 0);
+    root = &r->objects[0];
+    if (root->type_tag == RDZ_TYPE_FACTOR || root->type_tag == RDZ_TYPE_DATA_FRAME) {
+        implied = root->type_tag == RDZ_TYPE_FACTOR ? 2 : 3;
+    }
+    out = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)implied + root->attribute_count));
+    if (root->type_tag == RDZ_TYPE_FACTOR) {
+        SET_STRING_ELT(out, 0, Rf_mkChar("levels"));
+        SET_STRING_ELT(out, 1, Rf_mkChar("class"));
+    } else if (root->type_tag == RDZ_TYPE_DATA_FRAME) {
+        SET_STRING_ELT(out, 0, Rf_mkChar("names"));
+        SET_STRING_ELT(out, 1, Rf_mkChar("row.names"));
+        SET_STRING_ELT(out, 2, Rf_mkChar("class"));
+    }
+    for (k = 0; k < root->attribute_count; k++) {
+        const rdz_attribute *a = &r->attributes[root->first_attribute + k];
+        if (implied && a->flags != RDZ_ATTRIBUTE_FLAG_OTHER) continue; /* listed above */
+        if (rdz_read_attr_name(r, a, name, sizeof name, e)) {
+            UNPROTECT(1);
+            return NULL;
+        }
+        SET_STRING_ELT(out, implied++, Rf_mkChar(name));
+    }
+    out = Rf_lengthgets(out, (R_xlen_t)implied);
+    UNPROTECT(1);
+    return out;
+}
+
 /* The root attribute `which` of a native file (names, levels, class or
    row.names), reading only the blocks of the object that holds it. */
 SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
@@ -855,11 +1066,24 @@ SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
     if (strcmp(w, "levels") == 0 && root->type_tag == RDZ_TYPE_FACTOR) object = root->first_child;
     for (k = 0; !object && k < root->attribute_count; k++) {
         const rdz_attribute *a = &r.attributes[root->first_attribute + k];
-        if ((strcmp(w, "names") == 0 && a->flags == RDZ_ATTRIBUTE_FLAG_NAMES) ||
-            (strcmp(w, "row.names") == 0 && a->flags == RDZ_ATTRIBUTE_FLAG_ROW_NAMES) ||
-            (strcmp(w, "class") == 0 && a->flags == RDZ_ATTRIBUTE_FLAG_CLASS)) {
-            object = a->value_object_id;
+        char name[10001]; /* R caps a symbol at 10,000 bytes */
+        if (rdz_read_attr_name(&r, a, name, sizeof name, &e)) {
+            rdz_reader_close(&r);
+            return rdz_failure(&e);
         }
+        if (strcmp(w, name) == 0) object = a->value_object_id;
+    }
+    if (object && (r.objects[object].child_count || r.objects[object].attribute_count)) {
+        /* a value with parts of its own: read with the whole object */
+        SEXP x, sym = Rf_install(w);
+        x = PROTECT(rdz_native_read_r(&r, 1, &e, &failed)); /* closes r */
+        if (failed) {
+            UNPROTECT(1);
+            return rdz_failure(&e);
+        }
+        out = Rf_getAttrib(x, sym);
+        UNPROTECT(1);
+        return out;
     }
     if (!object) {
         /* attributes implied by the root rather than stored */

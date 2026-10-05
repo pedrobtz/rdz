@@ -65,6 +65,7 @@
 #define RDZ_ATTRIBUTE_FLAG_NAMES     1u
 #define RDZ_ATTRIBUTE_FLAG_ROW_NAMES 2u /* a data frame's explicit row names */
 #define RDZ_ATTRIBUTE_FLAG_CLASS     4u /* a data frame's class */
+#define RDZ_ATTRIBUTE_FLAG_OTHER     8u /* any other attribute: its value any object */
 #define RDZ_MAX_DEPTH 1000u /* nesting below the root */
 
 /* Every flags word: the low half must be understood (a reader rejects an

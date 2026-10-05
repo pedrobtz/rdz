@@ -13,7 +13,7 @@ test_that("the synopsis never shortens a name without setting `truncated`", {
   x <- structure(1L, class = class_name)
   attr(x, attribute_name) <- 2L
 
-  write_rdz(x, path)
+  write_rdz(x, path, mode = "r") # the synopsis is the generic codec's
   synopsis <- rdz_info(path)$synopsis
 
   # Both names are pure ASCII and well inside the documented 256-byte bound, so
@@ -37,7 +37,7 @@ test_that("a name past the synopsis bound is still reported as truncated", {
 
   x <- structure(1L, class = strrep("c", 1000L))
 
-  write_rdz(x, path)
+  write_rdz(x, path, mode = "r")
   synopsis <- rdz_info(path)$synopsis
 
   expect_true(synopsis$truncated)

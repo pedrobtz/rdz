@@ -343,7 +343,16 @@ frame; as long as the vector or the container's children), `2` row.names (a
 data frame's explicit row names, character or integer, one per row) and `4`
 class (a data frame's class, when it is not exactly `"data.frame"`). The
 attribute-name object holds the R attribute's name, which must match the
-flag. A data frame without a row.names attribute has compact row names; one
+flag. Since plan-c Stage I, flag `8` is a general attribute: any other
+attribute, its name in the name object (ASCII, not empty, and never one a
+codec holds: `names` and `row.names` anywhere, `class` on a factor or data
+frame, `levels` on a factor), its value any object but NULL -- a vector, a
+factor, a list or a data frame, with children and attributes of its own,
+each level counted against the nesting limit. NULL has no attributes. A
+reader sets general attributes in ordinal order after the codec's own, and
+a value R refuses (a `dim` that does not fit) is a format error. This is how
+a Date's class, a POSIXct's `tzone`, a matrix's `dim` and `dimnames`, or a
+data.table's `sorted` key are native. A data frame without a row.names attribute has compact row names; one
 without a class attribute has class `"data.frame"`. A data.table's
 `.internal.selfref` is not stored; readers restore it. Compact row names read
 back as R's own compact form `c(NA, -n)` whatever sign they were written with:
@@ -420,9 +429,18 @@ The native adapter attempts eligibility and native writing in one call. It
 returns success only after the native file is complete, the distinguished
 unsupported-native outcome, or a fatal error. `auto` may fall back only for the
 distinguished outcome; `native` surfaces it; `r` bypasses the attempt and forces
-`R_SERIAL_V3`. Phase 1 accepts non-ALTREP logical roots with no attributes or an
-eligible `names` attribute. Any other logical attribute, unsupported name
-representation, or root type produces the distinguished whole-root fallback.
+`R_SERIAL_V3`. Since plan-c Stage I the native codecs take logical, integer,
+double and character vectors (ALTREP ones from their materialised data),
+factors, lists and data frames, nested, each with any attributes whose names
+are ASCII and whose values are native in turn. S4 objects, other types
+anywhere (environments, calls, complex, raw), row names off a data frame, a
+data frame column longer than its rows, and a non-ASCII native-encoded string
+produce the distinguished whole-root fallback. Automatic mode also leaves to
+the generic codec an object of at least 1,024 parts with data averaging under
+1 KiB each: every part costs about 160 bytes of directory and headers and a
+compression frame of its own (a list of 500,000 pairs is 88 MB native, 1 MB
+generic). This is writer policy; forced native mode writes such objects
+natively.
 
 The generic payload is streamed (since plan-c Stage C): `R_Serialize()` writes
 through a callback that fills 1 MiB blocks into a same-directory temporary
