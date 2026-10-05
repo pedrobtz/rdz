@@ -1,0 +1,108 @@
+#!/bin/sh
+# Proves the reader's guards are not vacuous (plan-c Stage I): each guard in
+# src/core, marked "/* GUARD: name */" on its if-line, is disabled in turn in
+# a scratch copy, and its hostile file (tools/c-tests/probe.c) must then get
+# a different answer: another message, "OK", or a sanitizer report. A guard
+# whose removal changes nothing was never doing anything. Every marker needs a
+# case and every case a marker. Run from the package root; zubin's and
+# zufast's headers come from $ZUBIN_INCLUDE and $ZUFAST_INCLUDE, or their
+# installed packages.
+#
+# Not marked, because no file reaches them: an object's parent_id coming
+# before it (every object must already be referenced by its parent, which
+# checks parent_id) and a frame-of-reference width above 32 (the length
+# check allows at most 32 bits a value).
+set -eu
+
+CC=${CC:-cc}
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+ZUBIN=${ZUBIN_INCLUDE:-$(Rscript -e 'cat(system.file("include", package = "zubin"))')}
+ZUFAST=${ZUFAST_INCLUDE:-$(Rscript -e 'cat(system.file("include", package = "zufast"))')}
+[ -n "$ZUBIN" ] && [ -n "$ZUFAST" ] || { echo "run-mutation-check: install zubin and zufast first" >&2; exit 2; }
+
+SAN="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+printf 'int main(void){return 0;}\n' > "$WORK/p.c"
+$CC $SAN "$WORK/p.c" -o "$WORK/p" 2>/dev/null || SAN=
+ZSTD="-DZSTDLIB_VISIBLE= -DZSTDERRORLIB_VISIBLE="
+$CC -std=gnu99 -O1 $ZSTD $SAN -c src/vendor/zstd/zstd.c -o "$WORK/zstd.o"
+
+build() {  # build CORE OUT
+  $CC -std=c99 -O1 -DRDZ_STANDALONE -pthread $SAN $ZSTD -I"$ZUBIN" -I"$ZUFAST" -I"$1" \
+    "$1"/*.c tools/c-tests/probe.c "$WORK/zstd.o" -o "$2"
+}
+
+# guard | the reader's answer with the guard
+cases='
+header-checksum|invalid rdz file: header checksum mismatch
+directory-checksum|invalid rdz file: directory checksum mismatch
+block-checksum|invalid rdz file: checksum mismatch in block 0
+object-count|invalid rdz file: object count exceeds its format limit
+directory-length|invalid rdz file: directory length mismatch
+block-offsets|invalid rdz file: non-canonical block offsets
+compressed-smaller|invalid rdz file: a compressed block is not smaller than its decoded bytes
+declared-block-size|invalid rdz file: decoded block length exceeds the declared block size
+block-range|invalid rdz file: object block range is out of bounds
+numeric-length|invalid rdz file: numeric object length mismatch
+logical-length|invalid rdz file: logical object length mismatch
+string-length|invalid rdz file: object logical length mismatch
+children-range|invalid rdz file: invalid native object children
+depth|invalid rdz file: object nesting exceeds its format limit
+frame-rows|invalid rdz file: a data frame column'"'"'s length differs from its rows
+attribute-range|invalid rdz file: an attribute refers to a missing object
+delta-width|invalid rdz file: invalid delta width
+int-run-end|invalid rdz file: an integer run ends past its block
+logical-run-end|invalid rdz file: a logical run ends past its block
+string-record-length|invalid rdz file: truncated character bytes
+dict-index-range|invalid rdz file: dictionary index refers to an undefined entry
+zstd-length|invalid rdz file: block 0 does not decompress to its decoded length
+'
+
+mkdir "$WORK/out" "$WORK/src"
+ln -s "$(pwd)/src/vendor" "$WORK/src/vendor"  # rdz_codec.c includes ../vendor
+build src/core "$WORK/probe"
+# every probe case is listed above, and every marker has a case
+for c in $("$WORK/probe" "$WORK/out"); do
+  echo "$cases" | grep -q "^$c|" || { echo "FAIL: probe case $c has no expected answer" >&2; echo 1 > "$WORK/failed"; }
+done
+for g in $(grep -ho 'GUARD: [a-z0-9-]*' src/core/*.c | cut -d' ' -f2); do
+  echo "$cases" | grep -q "^$g|" || { echo "FAIL: guard $g has no case" >&2; echo 1 > "$WORK/failed"; }
+done
+
+echo "$cases" | while IFS='|' read -r guard want; do
+  [ -n "$guard" ] || continue
+  got=$("$WORK/probe" "$WORK/out" "$guard")
+  if [ "$got" != "$want" ]; then
+    echo "FAIL: $guard: the reader answers \"$got\" with the guard, expected \"$want\"" >&2
+    echo 1 > "$WORK/failed"
+    continue
+  fi
+  file=$(grep -l "GUARD: $guard \*/" src/core/*.c || true)
+  n=$(cat src/core/*.c | grep -c "GUARD: $guard \*/" || true)
+  if [ "$n" != 1 ]; then
+    echo "FAIL: $guard: found $n guard markers in src/core, expected 1" >&2
+    echo 1 > "$WORK/failed"
+    continue
+  fi
+  rm -rf "$WORK/src/core"
+  cp -R src/core "$WORK/src/core"
+  # if (COND) -> if (0 && (COND)), COND balanced on the marked line
+  perl -pe 'if (m{/\* GUARD: '"$guard"' \*/}) { s/\bif (\((?:[^()]++|(?1))*\))/if (0 \&\& $1)/ }' \
+    "$file" > "$WORK/src/core/$(basename "$file")"
+  if cmp -s "$file" "$WORK/src/core/$(basename "$file")"; then
+    echo "FAIL: $guard: the mutation did not apply" >&2
+    echo 1 > "$WORK/failed"
+    continue
+  fi
+  build "$WORK/src/core" "$WORK/probe-$guard"
+  # a mutant may crash or trip a sanitizer: a changed outcome too
+  mutant=$("$WORK/probe-$guard" "$WORK/out" "$guard" 2>/dev/null) || mutant="a crash (exit $?)"
+  if [ "$mutant" = "$want" ]; then
+    echo "FAIL: $guard: removing the guard changes nothing (still \"$want\")" >&2
+    echo 1 > "$WORK/failed"
+  else
+    echo "==> $guard: \"$want\" with the guard, \"$mutant\" without"
+  fi
+done
+[ ! -f "$WORK/failed" ] || exit 1
+echo "==> every reader guard is load-bearing"

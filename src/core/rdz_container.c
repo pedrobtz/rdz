@@ -58,7 +58,7 @@ static int rdz_block_range(const rdz_object *o, uint32_t nblocks, uint32_t *end,
         return rdz_invalid(e, "block range overflow");
     }
     *end = o->first_block + o->block_count;
-    if (*end > nblocks) return rdz_invalid(e, "object block range is out of bounds");
+    if (*end > nblocks) return rdz_invalid(e, "object block range is out of bounds"); /* GUARD: block-range */
     return 0;
 }
 
@@ -81,7 +81,7 @@ static int rdz_check_logical_blocks(const rdz_object *o, const rdz_block *blocks
         if (total > UINT64_MAX - count) return rdz_invalid(e, "logical object length overflow");
         total += count;
     }
-    if (total != o->logical_len) return rdz_invalid(e, "logical object length mismatch");
+    if (total != o->logical_len) return rdz_invalid(e, "logical object length mismatch"); /* GUARD: logical-length */
     for (i = o->first_block; i < end; i++) {
         if (!rdz_logical_length_ok(blocks[i].encoding, blocks[i].logical_count,
                                    blocks[i].decoded_len)) {
@@ -120,7 +120,7 @@ static int rdz_check_numeric_blocks(const rdz_object *o, uint16_t type, const rd
         if (!ok) return rdz_invalid(e, "numeric block encoding length mismatch");
         total += b->logical_count;
     }
-    if (total != o->logical_len) return rdz_invalid(e, "numeric object length mismatch");
+    if (total != o->logical_len) return rdz_invalid(e, "numeric object length mismatch"); /* GUARD: numeric-length */
     return 0;
 }
 
@@ -185,7 +185,7 @@ static int rdz_check_string_blocks(const rdz_object *o, const rdz_block *blocks,
             return rdz_invalid(e, "object block encoding mismatch");
         }
     }
-    if (elements != o->logical_len) return rdz_invalid(e, "object logical length mismatch");
+    if (elements != o->logical_len) return rdz_invalid(e, "object logical length mismatch"); /* GUARD: string-length */
     if (entries > o->logical_len) {
         return rdz_invalid(e, "string dictionary is larger than its vector");
     }
@@ -237,7 +237,7 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
         const rdz_object *o = &r->objects[i];
         uint16_t t = o->type_tag;
         int container = t == RDZ_TYPE_LIST || t == RDZ_TYPE_DATA_FRAME;
-        uint32_t k;
+        uint32_t k, last;
         if (o->object_id != i || t > RDZ_TYPE_DATA_FRAME ||
             (o->flags & ~(t == RDZ_TYPE_FACTOR ? RDZ_OBJECT_FLAG_ORDERED : 0u))) {
             rdz_invalid(e, "invalid native object descriptor");
@@ -250,6 +250,7 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
             }
         } else {
             const rdz_object *pa;
+            int column;
             if (o->parent_id >= i || o->role == RDZ_ROLE_ROOT || o->role > RDZ_ROLE_CHILD ||
                 !referenced[i]) {
                 rdz_invalid(e, "invalid native object descriptor");
@@ -257,12 +258,12 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
             }
             pa = &r->objects[o->parent_id];
             depth[i] = depth[o->parent_id] + 1;
-            if (depth[i] > RDZ_MAX_DEPTH) {
+            if (depth[i] > RDZ_MAX_DEPTH) { /* GUARD: depth */
                 rdz_limit(e, "object nesting");
                 goto done;
             }
-            if (o->role == RDZ_ROLE_CHILD && pa->type_tag == RDZ_TYPE_DATA_FRAME &&
-                o->logical_len != pa->logical_len) {
+            column = o->role == RDZ_ROLE_CHILD && pa->type_tag == RDZ_TYPE_DATA_FRAME;
+            if (column && o->logical_len != pa->logical_len) { /* GUARD: frame-rows */
                 rdz_invalid(e, "a data frame column's length differs from its rows");
                 goto done;
             }
@@ -274,8 +275,8 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
                 rdz_invalid(e, "invalid native object children");
                 goto done;
             }
-            if (o->first_child <= i || o->first_child > r->nobjects ||
-                o->child_count > r->nobjects - o->first_child) {
+            last = r->nobjects - o->first_child;
+            if (o->first_child <= i || o->first_child > r->nobjects || o->child_count > last) { /* GUARD: children-range */
                 rdz_invalid(e, "invalid native object children");
                 goto done;
             }
@@ -311,9 +312,12 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
             const rdz_attribute *a = &r->attributes[next_attribute + k];
             const rdz_object *nm, *val;
             uint64_t want_len;
+            if (a->name_object_id >= r->nobjects || a->value_object_id >= r->nobjects) { /* GUARD: attribute-range */
+                rdz_invalid(e, "an attribute refers to a missing object");
+                goto done;
+            }
             if (a->owner_id != i || a->ordinal != k || a->name_object_id <= i ||
-                a->value_object_id <= i || a->name_object_id >= r->nobjects ||
-                a->value_object_id >= r->nobjects || referenced[a->name_object_id] ||
+                a->value_object_id <= i || referenced[a->name_object_id] ||
                 referenced[a->value_object_id] || a->name_object_id == a->value_object_id) {
                 rdz_invalid(e, "invalid names attribute entry");
                 goto done;
@@ -474,7 +478,7 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
     natt = zb_rd_u32le(d + RDZ_DH_ATTRIBUTES);
     nblk = zb_rd_u32le(d + RDZ_DH_BLOCKS);
     synopsis_len = zb_rd_u32le(d + RDZ_DH_SYNOPSIS_LEN);
-    if (nobj > RDZ_MAX_OBJECTS) return rdz_limit(e, "object count");
+    if (nobj > RDZ_MAX_OBJECTS) return rdz_limit(e, "object count"); /* GUARD: object-count */
     if (natt > RDZ_MAX_ATTRIBUTES) return rdz_limit(e, "attribute count");
     /* a native object graph of empty containers has no blocks */
     if ((nblk == 0 && r->codec_id != RDZ_CODEC_NATIVE_V1) || nblk > RDZ_MAX_BLOCKS) {
@@ -488,7 +492,7 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
     expected = RDZ_DIRECTORY_HEADER_LEN + (size_t)nobj * RDZ_OBJECT_ENTRY_LEN +
                (size_t)natt * RDZ_ATTRIBUTE_ENTRY_LEN + (size_t)nblk * RDZ_BLOCK_ENTRY_LEN +
                (size_t)synopsis_len;
-    if (expected != len) return rdz_invalid(e, "directory length mismatch");
+    if (expected != len) return rdz_invalid(e, "directory length mismatch"); /* GUARD: directory-length */
 
     tables_len = (size_t)nblk * sizeof(rdz_block) + (size_t)nobj * sizeof(rdz_object) +
                  (size_t)natt * sizeof(rdz_attribute);
@@ -526,18 +530,18 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
             break;
         case RDZ_COMPRESSION_ZSTD:
             /* canonical: a block is compressed only when that makes it smaller */
-            if (b->stored_len == 0 || (uint64_t)b->stored_len >= b->decoded_len) {
+            if (b->stored_len == 0 || (uint64_t)b->stored_len >= b->decoded_len) { /* GUARD: compressed-smaller */
                 return rdz_invalid(e, "a compressed block is not smaller than its decoded bytes");
             }
             break;
         default:
             return rdz_invalid(e, "unsupported block compression");
         }
-        if (b->decoded_len > r->block_size) {
+        if (b->decoded_len > r->block_size) { /* GUARD: declared-block-size */
             return rdz_invalid(e, "decoded block length exceeds the declared block size");
         }
         if (rdz_add_u64(b->header_offset, RDZ_BLOCK_HEADER_LEN, &payload, e)) return 1;
-        if (b->header_offset != next_block || b->payload_offset != payload) {
+        if (b->header_offset != next_block || b->payload_offset != payload) { /* GUARD: block-offsets */
             return rdz_invalid(e, "non-canonical block offsets");
         }
         if (rdz_add_u64(b->payload_offset, b->stored_len, &next_block, e)) return 1;
@@ -591,8 +595,8 @@ static int rdz_reader_validate(rdz_reader *r, rdz_error *e)
     if (zb_rd_u32le(header + RDZ_FH_FLAGS) != 0 || zb_rd_u32le(header + RDZ_FH_RESERVED) != 0) {
         return rdz_invalid(e, "unsupported header flags or reserved fields");
     }
-    if (RDZ_CHECKSUM_DIFFERS(zb_rd_u64le(header + RDZ_FH_CHECKSUM),
-                             rdz_hash(header, RDZ_FH_CHECKSUM))) {
+    checksum = zb_rd_u64le(header + RDZ_FH_CHECKSUM);
+    if (RDZ_CHECKSUM_DIFFERS(checksum, rdz_hash(header, RDZ_FH_CHECKSUM))) { /* GUARD: header-checksum */
         return rdz_invalid(e, "header checksum mismatch");
     }
     r->codec_id = zb_rd_u16le(header + RDZ_FH_CODEC);
@@ -633,7 +637,7 @@ static int rdz_reader_validate(rdz_reader *r, rdz_error *e)
                            r->directory.len, e)) {
         return 1;
     }
-    if (RDZ_CHECKSUM_DIFFERS(checksum, rdz_hash(r->directory.data, r->directory.len))) {
+    if (RDZ_CHECKSUM_DIFFERS(checksum, rdz_hash(r->directory.data, r->directory.len))) { /* GUARD: directory-checksum */
         return rdz_invalid(e, "directory checksum mismatch");
     }
     if (rdz_parse_directory(r, e)) return 1;
@@ -699,7 +703,7 @@ int rdz_block_decode(const rdz_block *b, const zb_buf *stored, zb_buf *out, rdz_
                      rdz_error *e)
 {
     if (stored->len != b->stored_len) return rdz_invalid(e, "block length mismatch");
-    if (RDZ_CHECKSUM_DIFFERS(b->checksum, rdz_hash(stored->data, stored->len))) {
+    if (RDZ_CHECKSUM_DIFFERS(b->checksum, rdz_hash(stored->data, stored->len))) { /* GUARD: block-checksum */
         return rdz_invalid_block(e, "checksum mismatch in block %lu", b->sequence);
     }
     if (b->compression == RDZ_COMPRESSION_NONE) return 0;

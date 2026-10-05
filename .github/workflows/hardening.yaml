@@ -3,6 +3,8 @@
 #   c-tests   tools/run-c-tests under gcc and clang: warnings are errors, ASan
 #             and UBSan on, against the Rust reference corpus
 #   vendor    tools/vendor/verify: the vendored zstd is what the manifest pins
+#   mutation  tools/run-mutation-check: every marked reader guard is
+#             load-bearing
 #   fuzz      libFuzzer over the container reader, the canary first; the
 #             grown corpus is cached, so fuzzing time accumulates: 10 minutes
 #             per push, an hour nightly
@@ -58,6 +60,25 @@ jobs:
           ZUBIN_INCLUDE: ${{ github.workspace }}/.deps/zubin/inst/include
           ZUFAST_INCLUDE: ${{ github.workspace }}/.deps/zufast/inst/include
         run: tools/run-c-tests
+
+  mutation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        with:
+          repository: pedrobtz/zubin
+          path: .deps/zubin
+      - uses: actions/checkout@v6
+        with:
+          repository: pedrobtz/zufast
+          path: .deps/zufast
+      - name: Disable each reader guard in turn
+        env:
+          CC: clang
+          ZUBIN_INCLUDE: ${{ github.workspace }}/.deps/zubin/inst/include
+          ZUFAST_INCLUDE: ${{ github.workspace }}/.deps/zufast/inst/include
+        run: tools/run-mutation-check
 
   fuzz:
     runs-on: ubuntu-latest
