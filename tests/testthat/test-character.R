@@ -79,7 +79,9 @@ test_that("a file's strings read the same in another locale", {
     'x <- rdz::read_rdz("%s"); cat(Encoding(x), sep = ","); cat("|"); cat(vapply(x, function(s) paste(as.integer(charToRaw(s)), collapse = "."), ""), sep = ",")',
     path), script)
   out <- system2(file.path(R.home("bin"), "Rscript"), c("--vanilla", script),
-                 stdout = TRUE, env = c("LC_ALL=C", "LANG=C"))
+                 stdout = TRUE,
+                 env = c("LC_ALL=C", "LANG=C",
+                         paste0("R_LIBS=", paste(.libPaths(), collapse = .Platform$path.sep))))
   expected <- paste0(
     paste(Encoding(x), collapse = ","), "|",
     paste(vapply(x, function(s) paste(as.integer(charToRaw(s)), collapse = "."), ""),

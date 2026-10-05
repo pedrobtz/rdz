@@ -107,8 +107,9 @@ static const char *rdz_native_ineligible(SEXP x, SEXP *names, SEXP *levels, int 
     if (count == 0) return NULL;
     if (type == INTSXP && count == 2) {
         /* getAttrib() returns these stored attributes without allocating */
-        SEXP cls = Rf_getAttrib(x, R_ClassSymbol);
+        SEXP cls = PROTECT(Rf_getAttrib(x, R_ClassSymbol));
         *levels = Rf_getAttrib(x, R_LevelsSymbol);
+        UNPROTECT(1); /* both are x's own attributes, alive with x */
         if (TYPEOF(cls) == STRSXP && TYPEOF(*levels) == STRSXP && !ALTREP(*levels)) {
             R_xlen_t i, n = XLENGTH(x), nlev = XLENGTH(*levels);
             const int *codes = INTEGER_RO(x);
