@@ -300,7 +300,8 @@ static int pipeline_roundtrip(const uint8_t *data, size_t n, uint32_t block, int
         free(got);
         return 1;
     }
-    for (i = 0; i < r.nblocks || rdz_pipeline_oldest(&p, 0);) {
+    /* until every block is read and every submitted one consumed */
+    for (i = 0; i < r.nblocks || p.next_consume != p.next_submit;) {
         while (i < r.nblocks && p.next_submit - p.next_consume < p.nslots) {
             s = rdz_pipeline_next(&p, &must);
             if (rdz_reader_read_stored(&r, i, &s->in, &e)) break;
