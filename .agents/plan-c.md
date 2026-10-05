@@ -1,7 +1,7 @@
 # RDZ Plan C: re-implementing rdz in C
 
-**Status:** proposal, 2026-10-05. A decision document and a staged plan; nothing in it is
-implemented. It is written against zubin 0.1.0 (implemented, release branch prepared,
+**Status:** adopted, 2026-10-05: the maintainer decided to re-implement rdz in C on this plan
+(§10). The stages are under way from Stage A; nothing below Stage A is implemented yet. It is written against zubin 0.1.0 (implemented, release branch prepared,
 waiting for zufast on CRAN), zufast 0.1.0 (tagged, CRAN pending) and the rdz tree at
 `a80264f` plus the in-flight character dictionary work (encodings 8 and 9).
 
@@ -352,12 +352,17 @@ removed from `main` once the last fixture passes; submission after zubin is on C
 | `current-state.md` | a dated checkpoint at Stage A and at each stage close | each stage |
 | `portability.md`, `metadata-access.md`, `sexp-coverage.md`, `performance.md`, `research.md` | unchanged | — |
 
-## 10. Decisions requested
+## 10. Decisions
 
-- [ ] Re-implement in C on zubin and zufast, as §1 recommends.
-- [ ] Checksum: XXH3-64 with eight-byte fields and container version 3 (recommended), or
-      CRC32 through a zufast addition.
-- [ ] Compression: vendored zstd (recommended); LZ4 only on evidence.
-- [ ] Land the in-flight character dictionary work in Rust before Stage A (recommended), or
-      port it from the working-tree diff.
-- [ ] The R floor, decided by the attribute-iteration API rather than inherited.
+Taken on 2026-10-05. The first is the maintainer's; the rest follow this plan's
+recommendations, which the maintainer's instruction to proceed on the plan adopted, and any of
+them can be reopened before Stage B freezes the format.
+
+- [x] Re-implement in C on zubin and zufast, as §1 recommends. **Decided by the maintainer.**
+- [x] Checksum: XXH3-64 with eight-byte fields and container version 3 (recommended).
+- [x] Compression: vendored zstd (recommended); LZ4 only on evidence.
+- [x] Land the in-flight character dictionary work in Rust before Stage A (recommended):
+      pedrobtz/rdz#3.
+- [x] The R floor, decided by the attribute-iteration API rather than inherited: taken at
+      Stage B, where the C adapter's attribute iteration is written, and recorded there with
+      its reason.
