@@ -52,9 +52,12 @@
 #define RDZ_TYPE_INTEGER   2u
 #define RDZ_TYPE_DOUBLE    3u
 #define RDZ_TYPE_CHARACTER 4u
+#define RDZ_TYPE_FACTOR    5u
 #define RDZ_ROLE_ROOT            0u
 #define RDZ_ROLE_ATTRIBUTE_NAME  1u
 #define RDZ_ROLE_ATTRIBUTE_VALUE 2u
+#define RDZ_ROLE_LEVELS          3u /* a factor's levels, its one child */
+#define RDZ_OBJECT_FLAG_ORDERED  1u /* a factor root: class c("ordered", "factor") */
 #define RDZ_ATTRIBUTE_FLAG_NAMES 1u
 #define RDZ_ROOT_PARENT_ID 0xFFFFFFFFu
 

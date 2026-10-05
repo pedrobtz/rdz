@@ -33,14 +33,30 @@ void rdz_vec_init(rdz_vec *v);
 /* Joins any workers and removes an uncommitted temporary file. */
 void rdz_vec_free(rdz_vec *v);
 
-/* values: n int32 (logical, integer) or double, by type. */
-int rdz_vec_write(rdz_vec *v, const char *path, uint16_t type, const void *values, size_t n,
-                  const rdz_str_source *names, int policy, int level, int threads,
-                  rdz_tick_fn tick, void *tick_ctx, rdz_error *e);
+/* What to write. */
+typedef struct {
+    uint16_t type;                  /* RDZ_TYPE_* */
+    size_t n;
+    const void *values;             /* logical, integer and factor codes: int32;
+                                       double: double */
+    const rdz_str_source *strings;  /* a character root's values */
+    const rdz_str_source *levels;   /* a factor's levels */
+    int ordered;                    /* a factor: c("ordered", "factor") */
+    const rdz_str_source *names;    /* NULL: no names */
+    int policy, level, threads;
+    rdz_tick_fn tick;
+    void *tick_ctx;
+} rdz_vec_spec;
+
+int rdz_vec_write(rdz_vec *v, const char *path, const rdz_vec_spec *spec, rdz_error *e);
 
 /* The root's type tag and length, for a native file. */
 int rdz_vec_shape(const rdz_reader *r, uint16_t *type, size_t *n, rdz_error *e);
-/* Reads the root's values into out (n elements of the root's type). */
+/* Reads a string object's blocks through v's pipeline into the sink. */
+int rdz_vec_read_strings(rdz_vec *v, rdz_reader *r, uint32_t object, const rdz_names_sink *sink,
+                         int threads, rdz_tick_fn tick, void *tick_ctx, rdz_error *e);
+/* Reads the root's values into out (n elements: int32 for logical,
+   integer and factor codes, double for double). */
 int rdz_vec_read(rdz_vec *v, rdz_reader *r, void *out, int threads, rdz_tick_fn tick,
                  void *tick_ctx, rdz_error *e);
 

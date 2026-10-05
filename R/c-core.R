@@ -69,13 +69,14 @@ rdz_zstd_version <- function() {
   .Call(rdz_c_zstd_version)
 }
 
-# Experimental: RDZ_STRING_DICT selects how native character values (names,
-# for now) store repeats: "plain" (default), "block", "global" or "auto".
+# RDZ_STRING_DICT selects how native character values store repeats:
+# "auto" (default: a dictionary when a sample suggests under 75% distinct
+# values), "plain", "block" or "global". An experiment knob, not interface.
 rdz_dictionary_policy <- function() {
-  switch(Sys.getenv("RDZ_STRING_DICT", "plain"),
+  switch(Sys.getenv("RDZ_STRING_DICT", "auto"),
+    plain = 0L,
     block = 1L,
     global = 2L,
-    auto = 3L,
-    0L
+    3L
   )
 }

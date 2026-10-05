@@ -525,8 +525,15 @@ static void numeric_case(uint16_t type, const void *values, size_t n, int level,
     void *got = malloc(n * size + 8);
     uint32_t i;
     int seen = want_encoding == 0;
+    rdz_vec_spec spec;
+    memset(&spec, 0, sizeof spec);
+    spec.type = type;
+    spec.n = n;
+    spec.values = values;
+    spec.level = level;
+    spec.threads = threads;
     rdz_vec_init(&v);
-    if (rdz_vec_write(&v, path, type, values, n, NULL, 0, level, threads, NULL, NULL, &e)) {
+    if (rdz_vec_write(&v, path, &spec, &e)) {
         CHECK(0, "vector write: %s", e.message);
         rdz_vec_free(&v);
         free(got);
@@ -588,8 +595,15 @@ static void test_numeric(const char *tmpdir)
         rdz_vec v;
         rdz_error e;
         for (i = 0; i < 3000; i++) iv[i] = i < 1000 ? (int32_t)i : i < 2000 ? 7 : (int32_t)(i % 9);
+        rdz_vec_spec spec;
+        memset(&spec, 0, sizeof spec);
+        spec.type = RDZ_TYPE_INTEGER;
+        spec.n = 3000;
+        spec.values = iv;
+        spec.level = 1;
+        spec.threads = 1;
         rdz_vec_init(&v);
-        rdz_vec_write(&v, path, RDZ_TYPE_INTEGER, iv, 3000, NULL, 0, 1, 1, NULL, NULL, &e);
+        rdz_vec_write(&v, path, &spec, &e);
         rdz_vec_free(&v);
         data = slurp(path, &len);
         for (k = 0; data && k < len; k++) {

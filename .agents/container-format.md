@@ -257,6 +257,25 @@ stores shuffled planes when the block will be compressed, unless a sample of
 finds. Neither choice is recorded beyond the encoding ID, and readers accept
 any record that decodes.
 
+### Native character and factor representation
+
+Since plan-c Stage G the native root may also be a character vector (type tag
+4), optionally named, stored as the same character records as `names`
+(encodings 2, 8 and 9 below; the R thread packs them, workers compress them),
+or a factor (type tag 5). A factor root's blocks are its integer codes (the
+integer encodings 10 to 14, `NA` as `INT32_MIN`); its levels are its one child
+object (object 1, role 3 = levels, type character, a leaf); root flag bit 0
+marks an ordered factor (class `c("ordered", "factor")`, otherwise
+`"factor"`). A native factor has no `names` and no other attribute. Readers
+reject a code outside `1..length(levels)` that is not `NA`. Objects and their
+blocks come in the order root, levels, attribute name, attribute value.
+
+Strings are bytes plus R's encoding tag. A native-encoded string that is not
+ASCII is not portable (portability.md) and is never written natively: the
+whole root goes to the generic codec in automatic mode, and strict native
+mode rejects it. A string must fit one record of one block (1 MiB); a longer
+one does the same. Since Stage G the default dictionary policy is `auto`.
+
 ### Character dictionary blocks (experimental)
 
 The `names` value object may mix encoding 2 with dictionary blocks. Encoding 8
