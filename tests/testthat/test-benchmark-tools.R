@@ -104,7 +104,7 @@ test_that("paired benchmark reports latency throughput size and allocations", {
   expect_true(all(result$details$status == "ok"))
   expect_identical(result$parameters$read$warmups, 1L)
   expect_identical(result$backend_settings$threads, c(1L, 1L))
-  expect_true(all(c("cpu_model", "memory_bytes", "rustc_version") %in% names(result$environment)))
+  expect_true(all(c("cpu_model", "memory_bytes") %in% names(result$environment)))
 })
 
 test_that("cold-cache reads require and invoke a labeled hook outside timing", {

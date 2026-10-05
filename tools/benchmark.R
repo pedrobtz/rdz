@@ -36,7 +36,7 @@ common <- list(
   iterations = iterations,
   warmups = warmups,
   threads = threads,
-  build_mode = "devtools::load_all(debug=FALSE, recompile=TRUE); Rust release profile",
+  build_mode = "devtools::load_all(debug=FALSE, recompile=TRUE)",
   memory = memory,
   progress = TRUE
 )

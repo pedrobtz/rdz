@@ -4,16 +4,32 @@
 [![R-CMD-check](https://github.com/pedrobtz/rdz/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/rdz/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
 
-`rdz` writes and reads R objects in a versioned, seekable block container.
-Logical vectors use an adaptive native codec with SIMD classification and
-constant, bitplane, sparse, run, and periodic block records; unsupported objects
-retain whole-root semantics through R's XDR serializer. Rust performs direct
-checked file IO, validates bounded headers/directories, and checks each payload
-block.
+`rdz` writes and reads R objects in a versioned, seekable, checksummed block
+container. Common objects are stored natively, column by column and block by
+block, compressed with Zstandard on a pool of threads; everything else goes
+through R's own serializer, streamed through the same blocks.
+
+- **Native:** logical, integer, double and character vectors, factors, lists
+  and data frames (data.table and tibble included), nested, with their
+  attributes: names, classes, a Date's or POSIXct's metadata, a matrix's
+  dimensions. Each vector picks its own block records (runs, frame of
+  reference, delta, byte planes, sparse and bitplane logicals, string
+  dictionaries).
+- **Generic:** anything else, such as environments, closures, calls, complex
+  and raw vectors, and S4 objects, goes through R serialization as one whole
+  root, so sharing and references are kept.
+- **Inspectable:** `rdz_info()`, `rdz_schema()` and `rdz_attributes()` read a
+  native file's directory and attributes without decoding its data.
+- **Checked:** every header, directory and block carries an XXH3-64 checksum,
+  and every length and offset is bounded before anything is allocated.
+- **Portable:** files are byte-identical on every platform, little- and
+  big-endian alike.
 
 ## Installation
 
-The development version requires R 4.5 or newer and Cargo/rustc 1.88 or newer.
+rdz needs R 4.1 or newer and a C compiler. It links against
+[zubin](https://github.com/pedrobtz/zubin) and
+[zufast](https://github.com/pedrobtz/zufast), which are installed with it.
 
 ```r
 # install.packages("pak")
@@ -26,16 +42,21 @@ pak::pak("pedrobtz/rdz")
 library(rdz)
 
 path <- tempfile(fileext = ".rdz")
-write_rdz(c(first = TRUE, missing = NA), path)
+write_rdz(mtcars, path)
 read_rdz(path)
 rdz_info(path)
-rdz_schema(path)
 rdz_attributes(path, names = "names")
 
-# `mode = "native"` requires the root to be supported by a native codec.
+options(rdz.preset = "compact", rdz.threads = 4)  # smaller files, more threads
+write_rdz(mtcars, path, mode = "native")           # fail rather than fall back
 ```
 
-Pre-0.1.0 development files have no compatibility guarantee.
+## Compatibility
+
+The file format froze at 0.1.0. Every later rdz reads 0.1.0 files, and a
+writer adds new block records or attributes without changing the meaning of
+existing ones; see `.agents/container-format.md`. Files written before 0.1.0
+have no compatibility guarantee.
 
 ## Serialization benchmark matrix
 

@@ -33,7 +33,7 @@ FLAGS="-std=c99 -g -O1 -pthread -fno-omit-frame-pointer -fno-sanitize-recover=un
        -DRDZ_STANDALONE -DRDZ_FUZZ_SKIP_CHECKSUMS -DZSTDLIB_VISIBLE= -DZSTDERRORLIB_VISIBLE= -Isrc/core -I$ZUBIN -I$ZUFAST"
 
 mkdir -p "$WORK/seeds" "$CORPUS" "$WORK/artifacts"
-for f in tests/testthat/fixtures/rust/*.rdz fuzz/seeds/*.rdz; do
+for f in tests/testthat/fixtures/rust/*.rdz tests/testthat/fixtures/v0.1.0/*.rdz fuzz/seeds/*.rdz; do
   [ "$(wc -c < "$f")" -le 65536 ] && cp "$f" "$WORK/seeds/"
 done
 

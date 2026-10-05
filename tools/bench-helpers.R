@@ -133,8 +133,6 @@ benchmark_machine_metadata <- function(dir) {
     logical_cores = logical_cores,
     physical_cores = physical_cores,
     memory_bytes = memory_bytes,
-    rustc_version = benchmark_command_output("rustc", "--version"),
-    cargo_version = benchmark_command_output("cargo", "--version"),
     filesystem_path = normalizePath(dir, winslash = "/", mustWork = TRUE),
     filesystem_description = benchmark_command_output("df", c("-P", normalizePath(dir))),
     git_commit = git_commit,

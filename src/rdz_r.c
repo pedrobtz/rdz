@@ -181,15 +181,6 @@ SEXP rdz_c_info(SEXP path)
     return out;
 }
 
-SEXP rdz_c_has_rust(void)
-{
-#ifdef RDZ_HAVE_RUST
-    return Rf_ScalarLogical(1);
-#else
-    return Rf_ScalarLogical(0);
-#endif
-}
-
 SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, int fail_after);
 SEXP rdz_generic_read(SEXP path, SEXP settings);
 
