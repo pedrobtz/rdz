@@ -1,5 +1,45 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-05: plan-c Stage E
+
+The native logical codec is C (`src/core/rdz_logical.c`, `rdz_string.c`,
+`rdz_native.c`, `src/adapter/rdz_native_r.c`): the tri-state classifier
+(scalar reference; AVX2 on x86-64 by run-time dispatch; NEON on AArch64), the
+five written record kinds and all six decoders, the character records and
+every dictionary policy for `names`, the native writer and reader, and
+selective `names` reads. `write_rdz()`, `read_rdz()` and `rdz_attributes()`
+no longer call Rust; the Rust implementation remains only as the oracle the
+tests compare against.
+
+- Every one of the 21 native reference fixtures is reproduced byte for byte,
+  with the SIMD and with the scalar classifier (C harness and R suite), and
+  the Rust reader reads every file the C writer writes. A planted change to
+  the dictionary width or to record selection is caught.
+- Eligibility, fallback and messages are the Rust adapter's; strict mode now
+  raises `rdz_unsupported_error`.
+- The R floor stays 4.1: attribute counting uses `R_getAttribCount()` from R
+  4.6 and `ATTRIB()` before it, as the Rust shim did; nothing else needs more
+  than 4.1.
+- Roadmap Phase 1's six distributions (`tools/bench-logical.R`; 1e7 values,
+  one thread, median of 5 after a `gc()`, NEON, Apple arm64; ms):
+
+  | data | C write | Rust write | qs2 write | C read | Rust read | qs2 read | rdz MB | qs2 MB |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|
+  | random | 5 | 5 | 73 | 7 | 10 | 27 | 2.40 | 3.55 |
+  | sparse | 5 | 6 | 19 | 2 | 1 | 8 | 0.31 | 0.37 |
+  | mostly TRUE | 5 | 6 | 18 | 2 | 2 | 6 | 0.30 | 0.44 |
+  | mostly NA | 5 | 6 | 21 | 2 | 2 | 8 | 0.40 | 0.59 |
+  | runs | 4 | 3 | 13 | 1 | 1 | 5 | 0.02 | 0.00 |
+  | alternating | 4 | 7 | 7 | 1 | 1 | 11 | 0.02 | 0.00 |
+
+  The first port was 1.5x slower than Rust on writes; three changes closed it:
+  classifier counts kept in kernel-local state (stores through the planes'
+  byte pointers had forced reloads), the sparse encoder scanning planes 64
+  bits at a time, and a 1 MiB stdio buffer on output files (one write call
+  per MiB rather than per small block, which also helps every writer).
+
+Stage F (integer and double) is next.
+
 ## Checkpoint 2026-10-05: plan-c Stage D
 
 The block pipeline and compression are in place:

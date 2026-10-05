@@ -1,5 +1,3 @@
-skip_without_rust()
-
 test_that("logical vectors use the native adaptive codec", {
   cases <- list(
     empty = logical(),

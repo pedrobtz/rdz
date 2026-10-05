@@ -25,10 +25,8 @@ without decoding the root data blocks. Generic files require
 \code{allow_full = TRUE}, which explicitly permits a complete object read.
 }
 \examples{
-\dontshow{if (rdz:::rdz_has_rust()) withAutoprint(\{ # examplesIf}
 path <- tempfile(fileext = ".rdz")
 write_rdz(c(first = TRUE, second = FALSE), path)
 rdz_attributes(path, names = "names")
 unlink(path)
-\dontshow{\}) # examplesIf}
 }

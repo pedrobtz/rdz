@@ -26,6 +26,8 @@
 #include "../core/rdz_pipeline.h"
 #include "../rdz_r.h"
 
+SEXP rdz_native_value_r(rdz_reader *r, rdz_error *e, int *failed);
+
 /* settings: c(level, threads, block_size); level 0 stores raw, block_size 0
    is the format's 1 MiB. */
 typedef struct {
@@ -342,12 +344,11 @@ SEXP rdz_generic_read(SEXP path, SEXP settings)
         return rdz_failure(&e);
     }
     if (g->r.codec_id == RDZ_CODEC_NATIVE_V1) {
-        /* Native codecs are read by the Rust oracle until Stage E. */
+        int failed;
+        out = PROTECT(rdz_native_value_r(&g->r, &e, &failed));
         rdz_gen_in_finalize(ptr);
-        out = PROTECT(Rf_mkString("native_v1"));
-        Rf_setAttrib(out, R_ClassSymbol, PROTECT(Rf_mkString("rdz_native_codec")));
-        UNPROTECT(4);
-        return out;
+        UNPROTECT(3);
+        return failed ? rdz_failure(&e) : out;
     }
     /* A one-block file needs no workers. */
     if (rdz_pipeline_init(&g->pipe, g->r.nblocks > 1 ? set.threads : 1, rdz_job_decode,

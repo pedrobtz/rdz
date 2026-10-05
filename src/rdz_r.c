@@ -14,6 +14,7 @@
 #include <R.h>
 #include <Rinternals.h>
 
+#include "core/rdz_logical.h"
 #include "rdz_r.h"
 
 static const char *rdz_kind(rdz_code code)
@@ -24,6 +25,7 @@ static const char *rdz_kind(rdz_code code)
     case RDZ_E_CODEC: return "codec";
     case RDZ_E_IO: return "io";
     case RDZ_E_MEMORY: return "memory";
+    case RDZ_E_UNSUPPORTED: return "unsupported";
     default: return "invalid";
     }
 }
@@ -159,6 +161,15 @@ SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path, SEXP settings)
 SEXP rdz_c_read(SEXP path, SEXP settings)
 {
     return rdz_generic_read(path, settings);
+}
+
+/* The logical classifier in use; force_scalar TRUE or FALSE switches the
+   scalar reference on or off first, NA leaves it (tests compare kernels). */
+SEXP rdz_c_logical_kernel(SEXP force_scalar)
+{
+    int f = Rf_asLogical(force_scalar);
+    if (f != NA_LOGICAL) rdz_logical_force_scalar(f);
+    return Rf_mkString(rdz_logical_kernel());
 }
 
 SEXP rdz_c_zstd_version(void)

@@ -13,8 +13,10 @@ PKG_CFLAGS = $(C_VISIBILITY)
 PKG_LIBS = @RUST_LIBS@ -lpthread
 
 CORE_OBJECTS = core/rdz_codec.o core/rdz_container.o core/rdz_error.o core/rdz_io.o \
-	core/rdz_pipeline.o core/rdz_records.o
-OBJECTS = rdz_init.o rdz_r.o adapter/rdz_generic.o $(CORE_OBJECTS) vendor/zstd/zstd.o \
+	core/rdz_logical.o core/rdz_native.o core/rdz_pipeline.o core/rdz_records.o \
+	core/rdz_string.o
+OBJECTS = rdz_init.o rdz_r.o adapter/rdz_generic.o adapter/rdz_native_r.o $(CORE_OBJECTS) \
+	vendor/zstd/zstd.o \
 	@RUST_OBJECTS@
 RUST_STATLIB = @RUST_STATLIB@
 

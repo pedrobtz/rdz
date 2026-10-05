@@ -39,6 +39,9 @@ typedef struct {
     zb_buf directory;        /* the directory as stored */
     zb_buf tables;           /* objects, attributes and blocks, decoded */
     zb_buf scratch;          /* stored bytes, for rdz_reader_read_block() */
+    zb_buf decoded;          /* a decoded block, for the native readers */
+    zb_buf records;          /* decoded character records (rdz_native.c) */
+    zb_buf ids;              /* decoded dictionary indices (rdz_native.c) */
     rdz_codec codec;         /* for rdz_reader_read_block() */
     rdz_infile file;
 } rdz_reader;

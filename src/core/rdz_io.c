@@ -319,7 +319,11 @@ int rdz_outfile_open(rdz_outfile *f, const char *path, rdz_error *e)
         snprintf(suffix, sizeof suffix, "-rdz-%lu-%lu.tmp", rdz_pid(), rdz_name_counter++);
         f->temporary = rdz_sibling(path, suffix);
         if (!f->temporary) return rdz_memory(e, "the output path");
-        if (rdz_create_exclusive(f->temporary, &f->fp) == 0) return 0;
+        if (rdz_create_exclusive(f->temporary, &f->fp) == 0) {
+            /* one write per MiB, as a block's worth, not one per small block */
+            setvbuf(f->fp, NULL, _IOFBF, (size_t)1 << 20);
+            return 0;
+        }
         {
             int saved = errno;
             free(f->temporary);

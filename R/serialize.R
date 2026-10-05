@@ -38,17 +38,11 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
   }
 
   if (!identical(mode, "r")) {
-    if (rdz_has_rust()) {
-      native_written <- rdz_try_write_native(x, path, identical(mode, "native"))
-      if (isTRUE(native_written)) {
-        return(invisible(path))
-      }
-    } else if (identical(mode, "native")) {
-      stop(
-        "Native serialization is not available in this build of rdz; ",
-        "use `mode = \"auto\"` or `mode = \"r\"`.",
-        call. = FALSE
-      )
+    native_written <- rdz_check(.Call(
+      rdz_c_try_write_native, x, path, identical(mode, "native"), rdz_dictionary_policy()
+    ))
+    if (isTRUE(native_written)) {
+      return(invisible(path))
     }
   }
 
@@ -78,13 +72,7 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
 #' @export
 read_rdz <- function(path) {
   path <- validate_existing_rdz_path(path)
-  result <- rdz_check(.Call(rdz_c_read, path, rdz_settings()))
-  if (inherits(result, "rdz_native_codec")) {
-    # Native codecs are read by the Rust implementation until plan-c Stage E.
-    result <- rdz_read(path)
-    return(result$value)
-  }
-  result
+  rdz_check(.Call(rdz_c_read, path, rdz_settings()))
 }
 
 #' Inspect an rdz Container Without Reading Its Payload
@@ -206,7 +194,7 @@ rdz_schema <- function(path) {
 #' @param names Optional character vector selecting attribute names.
 #' @param allow_full Whether generic files may be fully deserialized.
 #' @returns A named list of attribute values.
-#' @examplesIf rdz:::rdz_has_rust()
+#' @examples
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(c(first = TRUE, second = FALSE), path)
 #' rdz_attributes(path, names = "names")
@@ -239,7 +227,7 @@ rdz_attributes <- function(path, object = NULL, names = NULL, allow_full = FALSE
     values <- lapply(requested, function(name) {
       switch(
         name,
-        names = rdz_read_native_names(path),
+        names = rdz_check(.Call(rdz_c_read_native_names, path)),
         stop("Unsupported native attribute: ", name, call. = FALSE)
       )
     })

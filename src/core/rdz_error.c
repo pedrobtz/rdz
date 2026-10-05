@@ -63,6 +63,14 @@ int rdz_memory(rdz_error *e, const char *what)
     return rdz_set(e, RDZ_E_MEMORY, "rdz could not allocate memory for %s", what);
 }
 
+int rdz_unsupported(rdz_error *e, const char *what)
+{
+    return rdz_set(e, RDZ_E_UNSUPPORTED,
+                   "native serialization is not implemented for %s; use `mode = \"auto\"` or "
+                   "`mode = \"r\"`",
+                   what);
+}
+
 int rdz_add_u64(uint64_t a, uint64_t b, uint64_t *out, rdz_error *e)
 {
     if (a > UINT64_MAX - b) return rdz_invalid(e, "offset arithmetic overflow");

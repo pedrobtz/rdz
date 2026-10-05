@@ -253,6 +253,9 @@ void rdz_reader_init(rdz_reader *r)
     zb_buf_init(&r->tables);
     /* growable, empty: allocating nothing, this cannot fail */
     zb_buf_alloc(&r->scratch, 0, (size_t)RDZ_MAX_BLOCK_SIZE);
+    zb_buf_alloc(&r->decoded, 0, (size_t)RDZ_MAX_BLOCK_SIZE);
+    zb_buf_alloc(&r->records, 0, 0);
+    zb_buf_alloc(&r->ids, 0, 0);
     rdz_codec_init(&r->codec);
     r->file.fp = NULL;
     r->file.mem = NULL;
@@ -264,6 +267,9 @@ void rdz_reader_close(rdz_reader *r)
     zb_buf_release(&r->directory);
     zb_buf_release(&r->tables);
     zb_buf_release(&r->scratch);
+    zb_buf_release(&r->decoded);
+    zb_buf_release(&r->records);
+    zb_buf_release(&r->ids);
     rdz_codec_free(&r->codec);
     r->objects = NULL;
     r->attributes = NULL;
