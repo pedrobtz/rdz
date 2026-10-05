@@ -20,8 +20,9 @@
 #define RDZ_COMPRESS_MIN 64u
 
 typedef struct {
-    void *cctx; /* ZSTD_CCtx, created on first use */
-    void *dctx; /* ZSTD_DCtx, created on first use */
+    void *cctx;     /* ZSTD_CCtx, created on first use */
+    void *dctx;     /* ZSTD_DCtx, created on first use */
+    zb_buf scratch; /* a type codec's working memory (logical bitplanes) */
 } rdz_codec;
 
 void rdz_codec_init(rdz_codec *c);

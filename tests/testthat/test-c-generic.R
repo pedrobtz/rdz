@@ -112,7 +112,9 @@ test_that("the streamed writer reproduces the Rust writer's files", {
   for (spec in rust_fixture_specs()) {
     if (manifest$codec[manifest$name == spec$name] != "r_serial_v3") next
     fixture <- file.path(rust_fixture_dir(), paste0(spec$name, ".rdz"))
-    write_rdz(spec$value(), copy, mode = spec$mode)
+    # The Rust writer took these generically; the C writer would now take
+    # integers and doubles natively.
+    write_rdz(spec$value(), copy, mode = "r")
     expect_identical(
       readBin(copy, "raw", file.size(copy)),
       readBin(fixture, "raw", file.size(fixture)),

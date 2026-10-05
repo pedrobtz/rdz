@@ -33,6 +33,14 @@ whole-root generic codec.
 | Block encoding | 7 | Short periodic logical pattern |
 | Block encoding | 8 | Character dictionary entries (experimental) |
 | Block encoding | 9 | Character dictionary indices (experimental) |
+| Block encoding | 10 | Integer raw (`i32` LE) |
+| Block encoding | 11 | Integer shuffled raw (4 byte planes) |
+| Block encoding | 12 | Integer frame of reference, bit-packed |
+| Block encoding | 13 | Integer delta, bit-packed |
+| Block encoding | 14 | Integer runs |
+| Block encoding | 20 | Double raw (`f64` bits LE) |
+| Block encoding | 21 | Double shuffled raw (8 byte planes) |
+| Block encoding | 22 | Double runs |
 | Compression | 0 | No compression |
 | Compression | 1 | One Zstandard frame (since plan-c Stage D) |
 | Checksum | implicit v3 | XXH3-64, seed 0, stored little-endian |
@@ -213,6 +221,41 @@ strings select whole-root fallback because their interpretation is locale
 dependent. Each character record must fit in one 1 MiB block. Attribute-name and
 value blocks are independently addressable, so reading `names` does not touch
 the logical data blocks.
+
+### Native integer and double representation
+
+Since plan-c Stage F the native root may be an integer (type tag 2) or double
+(type tag 3) vector, with the same optional `names` attribute as a logical
+root. Blocks hold 262,144 integers or 131,072 doubles (1 MiB raw), every block
+but the last exactly that many; an empty vector is one empty raw block. Each
+block's record, before any compression:
+
+- **10, integer raw:** `n` little-endian `i32`, `NA` as `INT32_MIN`.
+- **11, integer shuffled raw:** the same bytes as four planes, byte `k` of
+  value `i` at `k * n + i`.
+- **12, frame of reference:** `width:u8` (0 to 32), `has_na:u8` (0 or 1),
+  two zero bytes, `base:i32`, then `n` codes of `width` bits, packed least
+  significant bit first; a value is `base + code`, and with `has_na` the
+  all-ones code is `NA` (the width leaves room for it). Unused high bits of
+  the last byte are zero. An all-`NA` block has base 0.
+- **13, delta:** `width:u8`, three zero bytes, `first:i32`, `min_delta:i64`,
+  then the `n - 1` codes `value[i] - value[i - 1] - min_delta`, packed as
+  above. No `NA`; `n >= 2`.
+- **14, integer runs:** `runs:u32`, `0:u32`, then per run `value:i32` and
+  `end:u32` (exclusive); consecutive runs differ, ends increase to `n`.
+- **20, double raw:** `n` little-endian 64-bit patterns, exact: every NaN
+  payload, `NA` and `-0` survive.
+- **21, double shuffled raw:** the same bytes as eight planes.
+- **22, double runs:** `runs:u32`, `0:u32`, then per run `bits:u64`,
+  `end:u32`, `0:u32`; runs compare bit patterns.
+
+Every decoded value is checked: an integer record cannot produce `INT32_MIN`
+except through its `NA` code. The writer chooses the smallest record from one
+pass of block statistics; between raw and shuffled raw (the same size) it
+stores shuffled planes when the block will be compressed, unless a sample of
+4,096 values is under half distinct, when plain bytes keep the repeats zstd
+finds. Neither choice is recorded beyond the encoding ID, and readers accept
+any record that decodes.
 
 ### Character dictionary blocks (experimental)
 

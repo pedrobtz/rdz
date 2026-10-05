@@ -407,6 +407,18 @@ describe the adoption gate as fully passed.
 
 ### Integer vectors
 
+#### 2026-10-05 plan-c Stage F result
+
+Implemented: raw, shuffled raw, frame of reference with bit packing (the
+all-ones code as `NA`), delta with bit packing, and runs, chosen per 262,144
+values as the smallest record. Byte shuffle is only a pre-compression layout
+(equal size to raw). Measured on the expanded suite's distributions (1e7
+values; current-state.md): native integer writes beat the generic codec on
+every distribution and qs2 on random, low-cardinality and missing values; at
+one thread qs2 writes the full-range, sequential and all-missing vectors
+faster. Native integer reads take 1 to 20 ms. Zigzag and per-block
+dictionary coding remain candidates for factor codes (Stage G).
+
 Baseline: exact little-endian `i32`, optionally byte-shuffled.
 
 Experiments:
@@ -424,6 +436,19 @@ Decision questions:
 - Is transform time recovered after including direct file IO and R allocation?
 
 ### Numeric vectors
+
+#### 2026-10-05 plan-c Stage F result
+
+Implemented: exact raw bits, eight-byte shuffle (byte-stream split), and
+bit-exact runs. Shuffling is not always better under zstd: on rounded or
+repeated values the plain bytes keep 8-byte repeats that LZ matching finds
+(rounded normal deviates: 18.9 MB generic, 42.7 MB shuffled, 22.1 MB plain),
+while on decimal-like but rarely repeating values the planes win (currency:
+50.6 MB shuffled, 63.2 MB plain). Comparing compressed 32 KiB samples chose
+wrongly (zstd's advantage on the planes appears only at block scale); the
+retained selector is the distinct share of 4,096 sampled values (under half:
+plain). ALP/ALP-RD stays deferred: its audit gate (above) is not yet run, and
+qs2's lead on currency (42 MB) is the evidence that motivates it.
 
 Baseline: exact little-endian `u64` bits.
 

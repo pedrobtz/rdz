@@ -29,6 +29,7 @@
 #include "rdz_logical.h"
 #include "rdz_native.h"
 #include "rdz_pipeline.h"
+#include "rdz_vector.h"
 
 static int failures;
 static int checks;
@@ -511,6 +512,105 @@ static void test_native_manifest(const char *tmpdir)
     CHECK(rows == 2 * 21, "%d native fixture passes, expected 42", rows);
 }
 
+/* Integer and double vectors through the vector writer and reader, every
+   record kind, at 1 and 4 threads, compressed and not; and every
+   single-byte change of a small file is rejected or decodes in bounds. */
+static void numeric_case(uint16_t type, const void *values, size_t n, int level, int threads,
+                         const char *path, uint16_t want_encoding)
+{
+    rdz_vec v;
+    rdz_reader r;
+    rdz_error e;
+    size_t size = type == RDZ_TYPE_DOUBLE ? 8 : 4;
+    void *got = malloc(n * size + 8);
+    uint32_t i;
+    int seen = want_encoding == 0;
+    rdz_vec_init(&v);
+    if (rdz_vec_write(&v, path, type, values, n, NULL, 0, level, threads, NULL, NULL, &e)) {
+        CHECK(0, "vector write: %s", e.message);
+        rdz_vec_free(&v);
+        free(got);
+        return;
+    }
+    rdz_vec_free(&v);
+    rdz_vec_init(&v);
+    if (rdz_reader_open(&r, path, &e) == 0) {
+        for (i = 0; i < r.nblocks; i++) seen |= r.blocks[i].encoding == want_encoding;
+        CHECK(rdz_vec_read(&v, &r, got, threads, NULL, NULL, &e) == 0, "vector read: %s", e.message);
+        rdz_reader_close(&r);
+        CHECK(memcmp(got, values, n * size) == 0, "type %u: values differ (level %d, %d threads)",
+              type, level, threads);
+    } else {
+        CHECK(0, "vector open: %s", e.message);
+    }
+    CHECK(seen, "type %u: encoding %u never chosen", type, want_encoding);
+    rdz_vec_free(&v);
+    free(got);
+    remove(path);
+}
+
+static void test_numeric(const char *tmpdir)
+{
+    size_t n = 600000, i;
+    int32_t *iv = (int32_t *)malloc(n * sizeof *iv);
+    double *dv = (double *)malloc(n * sizeof *dv);
+    char path[512];
+    uint32_t x = 7;
+    int level, threads;
+    snprintf(path, sizeof path, "%s/numeric.rdz", tmpdir);
+    for (level = 0; level <= 1; level++) {
+        for (threads = 1; threads <= 4; threads += 3) {
+            for (i = 0; i < n; i++) iv[i] = (int32_t)(i * 3);
+            numeric_case(RDZ_TYPE_INTEGER, iv, n, level, threads, path, 13);
+            for (i = 0; i < n; i++) iv[i] = i % 5 == 0 ? INT32_MIN : (int32_t)(i % 100);
+            numeric_case(RDZ_TYPE_INTEGER, iv, n, level, threads, path, 12);
+            for (i = 0; i < n; i++) iv[i] = (int32_t)(i / 1000);
+            numeric_case(RDZ_TYPE_INTEGER, iv, n, level, threads, path, 14);
+            for (i = 0; i < n; i++) {
+                x = x * 1103515245u + 12345u;
+                iv[i] = (int32_t)(x | 1u) == INT32_MIN ? 1 : (int32_t)(x | 1u);
+            }
+            numeric_case(RDZ_TYPE_INTEGER, iv, n, level, threads, path, level ? 11 : 10);
+            for (i = 0; i < n; i++) {
+                x = x * 1103515245u + 12345u;
+                dv[i] = (double)x / 3.0;
+            }
+            numeric_case(RDZ_TYPE_DOUBLE, dv, n, level, threads, path, level ? 21 : 20);
+            for (i = 0; i < n; i++) dv[i] = i < n / 2 ? -0.0 : 2.5;
+            numeric_case(RDZ_TYPE_DOUBLE, dv, n, level, threads, path, 22);
+            numeric_case(RDZ_TYPE_DOUBLE, dv, 0, level, threads, path, 0);
+        }
+    }
+    /* mutations of a small multi-encoding file */
+    {
+        uint8_t *data;
+        size_t len = 0, k;
+        rdz_vec v;
+        rdz_error e;
+        for (i = 0; i < 3000; i++) iv[i] = i < 1000 ? (int32_t)i : i < 2000 ? 7 : (int32_t)(i % 9);
+        rdz_vec_init(&v);
+        rdz_vec_write(&v, path, RDZ_TYPE_INTEGER, iv, 3000, NULL, 0, 1, 1, NULL, NULL, &e);
+        rdz_vec_free(&v);
+        data = slurp(path, &len);
+        for (k = 0; data && k < len; k++) {
+            rdz_reader r;
+            data[k] ^= 0x5a;
+            if (rdz_reader_open_memory(&r, data, len, &e) == 0) {
+                rdz_vec_init(&v);
+                CHECK(rdz_vec_read(&v, &r, dv, 1, NULL, NULL, &e) != 0,
+                      "a change at byte %zu went undetected", k);
+                rdz_vec_free(&v);
+                rdz_reader_close(&r);
+            }
+            data[k] ^= 0x5a;
+        }
+        free(data);
+        remove(path);
+    }
+    free(iv);
+    free(dv);
+}
+
 static void test_pipeline(const char *tmpdir)
 {
     size_t n = 3 * 1024 * 1024, i;
@@ -562,6 +662,7 @@ int main(int argc, char **argv)
     test_writer_errors(tmpdir);
     test_pipeline(tmpdir);
     test_native_manifest(tmpdir);
+    test_numeric(tmpdir);
     printf("logical kernel: %s\n", rdz_logical_kernel());
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

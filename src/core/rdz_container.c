@@ -3,6 +3,7 @@
 #include <zubin/rw.h>
 
 #include "rdz_container.h"
+#include "rdz_numeric.h"
 
 /* ---- validation helpers --------------------------------------------------------- */
 
@@ -109,6 +110,39 @@ static int rdz_check_logical_blocks(const rdz_object *o, const rdz_block *blocks
     return 0;
 }
 
+/* An integer or double root: blocks of exactly `per` values but the last,
+   each with an encoding and decoded length its type allows. An empty vector
+   is one empty raw block. */
+static int rdz_check_numeric_blocks(const rdz_object *o, const rdz_block *blocks,
+                                    uint32_t nblocks, rdz_error *e)
+{
+    uint32_t i, end;
+    uint64_t total = 0, per = o->type_tag == RDZ_TYPE_INTEGER ? RDZ_INT_BLOCK_VALUES
+                                                              : RDZ_DBL_BLOCK_VALUES;
+    if (rdz_block_range(o, nblocks, &end, e)) return 1;
+    if (o->block_count == 0) return rdz_invalid(e, "object has no data block");
+    for (i = o->first_block; i < end; i++) {
+        const rdz_block *b = &blocks[i];
+        int ok;
+        if (b->logical_count > per || (o->logical_len != 0 && b->logical_count == 0) ||
+            (i + 1 < end && b->logical_count != per)) {
+            return rdz_invalid(e, "non-canonical numeric block size");
+        }
+        if (b->logical_count == 0) {
+            ok = b->decoded_len == 0 && (b->encoding == RDZ_ENCODING_INT_RAW ||
+                                         b->encoding == RDZ_ENCODING_DBL_RAW);
+        } else if (o->type_tag == RDZ_TYPE_INTEGER) {
+            ok = rdz_int_length_ok(b->encoding, b->logical_count, b->decoded_len);
+        } else {
+            ok = rdz_dbl_length_ok(b->encoding, b->logical_count, b->decoded_len);
+        }
+        if (!ok) return rdz_invalid(e, "numeric block encoding length mismatch");
+        total += b->logical_count;
+    }
+    if (total != o->logical_len) return rdz_invalid(e, "numeric object length mismatch");
+    return 0;
+}
+
 static int rdz_check_object_blocks(const rdz_object *o, const rdz_block *blocks,
                                    uint32_t nblocks, uint16_t encoding, rdz_error *e)
 {
@@ -204,14 +238,21 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
         return rdz_invalid(e, "invalid logical object directory shape");
     }
     root = &r->objects[0];
-    if (rdz_check_object(root, 0, RDZ_ROOT_PARENT_ID, RDZ_ROLE_ROOT, RDZ_TYPE_LOGICAL, e)) return 1;
+    if (root->type_tag != RDZ_TYPE_LOGICAL && root->type_tag != RDZ_TYPE_INTEGER &&
+        root->type_tag != RDZ_TYPE_DOUBLE) {
+        return rdz_invalid(e, "invalid native object descriptor");
+    }
+    if (rdz_check_object(root, 0, RDZ_ROOT_PARENT_ID, RDZ_ROLE_ROOT, root->type_tag, e)) return 1;
     if (root->first_child != 0 || root->child_count != 0 || root->first_attribute != 0) {
         return rdz_invalid(e, "invalid logical root references");
     }
     if (root->attribute_count != r->nattributes) {
         return rdz_invalid(e, "logical attribute count mismatch");
     }
-    if (rdz_check_logical_blocks(root, r->blocks, r->nblocks, e)) return 1;
+    if (root->type_tag == RDZ_TYPE_LOGICAL ? rdz_check_logical_blocks(root, r->blocks, r->nblocks, e)
+                                           : rdz_check_numeric_blocks(root, r->blocks, r->nblocks, e)) {
+        return 1;
+    }
     if (r->nattributes == 0) {
         if (root->first_block != 0 || root->block_count != r->nblocks) {
             return rdz_invalid(e, "logical blocks are not fully indexed");

@@ -26,7 +26,9 @@
 #include "../core/rdz_pipeline.h"
 #include "../rdz_r.h"
 
-SEXP rdz_native_value_r(rdz_reader *r, rdz_error *e, int *failed);
+#include "../core/rdz_vector.h"
+
+SEXP rdz_native_value_r(rdz_reader *r, rdz_vec *v, int threads, rdz_error *e, int *failed);
 
 /* settings: c(level, threads, block_size); level 0 stores raw, block_size 0
    is the format's 1 MiB. */
@@ -85,9 +87,8 @@ static void rdz_gen_consume(rdz_gen_out *g, rdz_slot *s)
             g->e = s->e;
             g->failed = 1;
         } else {
-            const zb_buf *stored = s->compression == RDZ_COMPRESSION_NONE ? &s->in : &s->out;
             if (rdz_writer_stored(&g->w, RDZ_ENCODING_RAW, s->compression, s->decoded_len,
-                                  s->decoded_len, stored->data, stored->len, s->checksum,
+                                  s->decoded_len, s->result->data, s->result->len, s->checksum,
                                   &g->e)) {
                 g->failed = 1;
             }
@@ -230,6 +231,10 @@ SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, int fail
 typedef struct {
     rdz_reader r;
     rdz_pipeline pipe;
+    rdz_vec vec;         /* a native file's pipeline */
+    int threads;
+    rdz_error e;
+    int failed;
     rdz_slot *cur;       /* the slot being read from */
     const zb_buf *bytes; /* its decoded bytes: the slot's in or out */
     size_t pos;
@@ -241,6 +246,7 @@ static void rdz_gen_in_finalize(SEXP ptr)
     rdz_gen_in *g = (rdz_gen_in *)R_ExternalPtrAddr(ptr);
     if (g) {
         rdz_pipeline_free(&g->pipe);
+        rdz_vec_free(&g->vec);
         rdz_reader_close(&g->r);
         free(g);
         R_ClearExternalPtr(ptr);
@@ -289,7 +295,7 @@ static void rdz_in_bytes(R_inpstream_t stream, void *buf, int n)
                 rdz_raise(&e);
             }
             if (g->cur->failed) rdz_raise(&g->cur->e);
-            g->bytes = g->cur->compression == RDZ_COMPRESSION_NONE ? &g->cur->in : &g->cur->out;
+            g->bytes = g->cur->result;
             g->pos = 0;
             continue;
         }
@@ -317,6 +323,12 @@ static SEXP rdz_gen_unserialize(void *data)
     return R_Unserialize(&in);
 }
 
+static SEXP rdz_native_body(void *data)
+{
+    rdz_gen_in *g = (rdz_gen_in *)data;
+    return rdz_native_value_r(&g->r, &g->vec, g->threads, &g->e, &g->failed);
+}
+
 static void rdz_gen_in_cleanup(void *data, Rboolean jump)
 {
     if (jump) rdz_gen_in_finalize((SEXP)data);
@@ -336,6 +348,8 @@ SEXP rdz_generic_read(SEXP path, SEXP settings)
     g = (rdz_gen_in *)calloc(1, sizeof *g);
     if (!g) Rf_error("rdz could not allocate memory for a reader");
     rdz_reader_init(&g->r);
+    rdz_vec_init(&g->vec);
+    g->threads = set.threads;
     R_SetExternalPtrAddr(ptr, g);
 
     if (rdz_reader_open(&g->r, p, &e)) {
@@ -344,11 +358,16 @@ SEXP rdz_generic_read(SEXP path, SEXP settings)
         return rdz_failure(&e);
     }
     if (g->r.codec_id == RDZ_CODEC_NATIVE_V1) {
-        int failed;
-        out = PROTECT(rdz_native_value_r(&g->r, &e, &failed));
+        out = PROTECT(R_UnwindProtect(rdz_native_body, g, rdz_gen_in_cleanup, ptr, cont));
+        e = g->e;
+        if (g->failed) {
+            rdz_gen_in_finalize(ptr);
+            UNPROTECT(3);
+            return rdz_failure(&e);
+        }
         rdz_gen_in_finalize(ptr);
         UNPROTECT(3);
-        return failed ? rdz_failure(&e) : out;
+        return out;
     }
     /* A one-block file needs no workers. */
     if (rdz_pipeline_init(&g->pipe, g->r.nblocks > 1 ? set.threads : 1, rdz_job_decode,

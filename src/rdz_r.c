@@ -129,7 +129,10 @@ SEXP rdz_c_info(SEXP path)
     if (r->synopsis_len) memcpy(RAW(synopsis), r->synopsis, r->synopsis_len);
     rdz_set(out, names, 10, "synopsis", synopsis);
     UNPROTECT(1);
-    rdz_set(out, names, 11, "root_type", Rf_mkString(r->nobjects ? "logical" : ""));
+    rdz_set(out, names, 11, "root_type",
+            Rf_mkString(!r->nobjects ? ""
+                        : r->objects[0].type_tag == RDZ_TYPE_INTEGER ? "integer"
+                        : r->objects[0].type_tag == RDZ_TYPE_DOUBLE ? "double" : "logical"));
     rdz_set(out, names, 12, "root_length",
             Rf_ScalarReal(r->nobjects ? (double)r->objects[0].logical_len : -1.0));
     rdz_set(out, names, 13, "attribute_names",

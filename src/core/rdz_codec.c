@@ -8,12 +8,14 @@ void rdz_codec_init(rdz_codec *c)
 {
     c->cctx = NULL;
     c->dctx = NULL;
+    zb_buf_alloc(&c->scratch, 0, 0); /* empty: cannot fail */
 }
 
 void rdz_codec_free(rdz_codec *c)
 {
     ZSTD_freeCCtx((ZSTD_CCtx *)c->cctx);
     ZSTD_freeDCtx((ZSTD_DCtx *)c->dctx);
+    zb_buf_release(&c->scratch);
     c->cctx = NULL;
     c->dctx = NULL;
 }
