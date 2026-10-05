@@ -91,7 +91,9 @@ typedef enum {
     RDZ_E_VERSION = 3, /* "unsupported rdz format version <n>" */
     RDZ_E_CODEC = 4,   /* "unsupported rdz codec <id> version <n>" */
     RDZ_E_IO = 5,      /* "rdz file IO failed: <reason>" */
-    RDZ_E_MEMORY = 6   /* "rdz could not allocate memory for <what>" */
+    RDZ_E_MEMORY = 6,  /* "rdz could not allocate memory for <what>" */
+    RDZ_E_UNSUPPORTED = 7 /* a value a native codec cannot write: automatic mode
+                             falls back to R serialization, never an error */
 } rdz_code;
 
 typedef struct {
@@ -108,6 +110,9 @@ int rdz_codec_error(rdz_error *e, unsigned id, unsigned version);
 int rdz_io_error(rdz_error *e, const char *reason);
 int rdz_io_errno(rdz_error *e, int errnum);
 int rdz_memory(rdz_error *e, const char *what);
+/* "native serialization is not implemented for <what>; use `mode = "auto"`
+   or `mode = "r"`" */
+int rdz_unsupported(rdz_error *e, const char *what);
 
 /* Checked arithmetic on file offsets: nonzero on overflow, which is
    "invalid rdz file: offset arithmetic overflow". */

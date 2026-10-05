@@ -8,6 +8,8 @@
 #   rdz_codec_error    an unsupported payload codec
 #   rdz_io_error       the operating system refused a read or write
 #   rdz_memory_error   an allocation failed
+#   rdz_unsupported_error  mode = "native" given a value the native codecs
+#                          do not take
 
 rdz_check <- function(result) {
   if (inherits(result, "rdz_failure")) {
@@ -17,6 +19,7 @@ rdz_check <- function(result) {
       codec = "rdz_codec_error",
       io = "rdz_io_error",
       memory = "rdz_memory_error",
+      unsupported = "rdz_unsupported_error",
       "rdz_format_error"
     )
     stop(structure(
@@ -64,4 +67,15 @@ rdz_settings <- function() {
 # zstd's version as compiled into rdz.
 rdz_zstd_version <- function() {
   .Call(rdz_c_zstd_version)
+}
+
+# Experimental: RDZ_STRING_DICT selects how native character values (names,
+# for now) store repeats: "plain" (default), "block", "global" or "auto".
+rdz_dictionary_policy <- function() {
+  switch(Sys.getenv("RDZ_STRING_DICT", "plain"),
+    block = 1L,
+    global = 2L,
+    auto = 3L,
+    0L
+  )
 }

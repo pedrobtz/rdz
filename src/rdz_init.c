@@ -16,6 +16,9 @@ SEXP rdz_c_info(SEXP path);
 SEXP rdz_c_has_rust(void);
 SEXP rdz_c_read(SEXP path, SEXP settings);
 SEXP rdz_c_zstd_version(void);
+SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy);
+SEXP rdz_c_read_native_names(SEXP path);
+SEXP rdz_c_logical_kernel(SEXP force_scalar);
 SEXP rdz_c_root_length(SEXP x);
 SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path, SEXP settings);
 SEXP rdz_test_write_generic_unwind(SEXP x, SEXP path, SEXP blocks, SEXP settings);
@@ -59,6 +62,9 @@ static const R_CallMethodDef call_entries[] = {
     {"rdz_c_has_rust", (DL_FUNC)&rdz_c_has_rust, 0},
     {"rdz_c_read", (DL_FUNC)&rdz_c_read, 2},
     {"rdz_c_zstd_version", (DL_FUNC)&rdz_c_zstd_version, 0},
+    {"rdz_c_try_write_native", (DL_FUNC)&rdz_c_try_write_native, 4},
+    {"rdz_c_read_native_names", (DL_FUNC)&rdz_c_read_native_names, 1},
+    {"rdz_c_logical_kernel", (DL_FUNC)&rdz_c_logical_kernel, 1},
     {"rdz_c_root_length", (DL_FUNC)&rdz_c_root_length, 1},
     {"rdz_c_write_generic", (DL_FUNC)&rdz_c_write_generic, 4},
     {"rdz_test_write_generic_unwind", (DL_FUNC)&rdz_test_write_generic_unwind, 4},

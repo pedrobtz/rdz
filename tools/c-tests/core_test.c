@@ -26,6 +26,8 @@
 #endif
 
 #include "rdz_container.h"
+#include "rdz_logical.h"
+#include "rdz_native.h"
 #include "rdz_pipeline.h"
 
 static int failures;
@@ -341,6 +343,174 @@ static int pipeline_roundtrip(const uint8_t *data, size_t n, uint32_t block, int
     return 0;
 }
 
+/* ---- the native codec against the Rust writer's files ---- */
+
+typedef struct {
+    rdz_str *values; /* the names, pointing into `arena` */
+    size_t n, cap;
+    rdz_str *dict;
+    size_t ndict, dcap;
+    uint8_t *arena; /* copies of every string's bytes */
+    size_t used, acap;
+} names_buf;
+
+static const uint8_t *keep_bytes(names_buf *b, const rdz_str *v)
+{
+    if (b->used + v->len + 1 > b->acap) {
+        b->acap = (b->acap + v->len + 1) * 2;
+        b->arena = (uint8_t *)realloc(b->arena, b->acap);
+    }
+    memcpy(b->arena + b->used, v->bytes, v->len);
+    b->used += v->len;
+    return (const uint8_t *)(uintptr_t)(b->used - v->len); /* an offset until fixed up */
+}
+
+static void push_value(rdz_str **arr, size_t *n, size_t *cap, rdz_str v)
+{
+    if (*n == *cap) {
+        *cap = *cap ? *cap * 2 : 1024;
+        *arr = (rdz_str *)realloc(*arr, *cap * sizeof **arr);
+    }
+    (*arr)[(*n)++] = v;
+}
+
+static int sink_plain(void *ctx, const rdz_str *v, size_t count, rdz_error *e)
+{
+    names_buf *b = (names_buf *)ctx;
+    size_t i;
+    (void)e;
+    for (i = 0; i < count; i++) {
+        rdz_str c = v[i];
+        c.bytes = keep_bytes(b, &v[i]);
+        push_value(&b->values, &b->n, &b->cap, c);
+    }
+    return 0;
+}
+
+static int sink_entries(void *ctx, const rdz_str *v, size_t count, rdz_error *e)
+{
+    names_buf *b = (names_buf *)ctx;
+    size_t i;
+    (void)e;
+    for (i = 0; i < count; i++) {
+        rdz_str c = v[i];
+        c.bytes = keep_bytes(b, &v[i]);
+        push_value(&b->dict, &b->ndict, &b->dcap, c);
+    }
+    return 0;
+}
+
+static int sink_indices(void *ctx, const uint32_t *ids, size_t count, rdz_error *e)
+{
+    names_buf *b = (names_buf *)ctx;
+    size_t i;
+    (void)e;
+    for (i = 0; i < count; i++) push_value(&b->values, &b->n, &b->cap, b->dict[ids[i]]);
+    return 0;
+}
+
+/* Identity by content, as R's string cache gives it. */
+static uintptr_t names_key(void *ctx, size_t i)
+{
+    const rdz_str *v = &((names_buf *)ctx)->values[i];
+    uint64_t h = 1469598103934665603ull ^ v->tag;
+    size_t k;
+    for (k = 0; k < v->len; k++) h = (h ^ v->bytes[k]) * 1099511628211ull;
+    return (uintptr_t)(h ^ ((uint64_t)v->len << 56));
+}
+
+static int names_value(void *ctx, size_t i, rdz_str *out, rdz_error *e)
+{
+    (void)e;
+    *out = ((names_buf *)ctx)->values[i];
+    return 0;
+}
+
+static void test_native_fixture(const char *name, const char *policy, const char *tmpdir)
+{
+    char path[512], copy[600];
+    rdz_reader r;
+    rdz_error e;
+    size_t n = 0, len = 0, dict = 0, i, a = 0, b2 = 0;
+    int present = 0, pol;
+    int32_t *values;
+    names_buf nb;
+    rdz_names_sink sink;
+    rdz_str_source src;
+    uint8_t *original, *rewritten;
+
+    memset(&nb, 0, sizeof nb);
+    snprintf(path, sizeof path, FIXTURES "%s.rdz", name);
+    if (rdz_reader_open(&r, path, &e) || rdz_native_length(&r, &n, &e)) {
+        CHECK(0, "%s: %s", name, e.message);
+        return;
+    }
+    values = (int32_t *)malloc((n ? n : 1) * sizeof *values);
+    CHECK(rdz_native_read_logical(&r, values, &e) == 0, "%s: %s", name, e.message);
+    rdz_native_names_info(&r, &present, &len, &dict, &e);
+    sink.ctx = &nb;
+    sink.plain = sink_plain;
+    sink.entries = sink_entries;
+    sink.indices = sink_indices;
+    if (present) CHECK(rdz_native_read_names(&r, &sink, &e) == 0, "%s names: %s", name, e.message);
+    rdz_reader_close(&r);
+    /* fix up the arena offsets now that it has stopped moving */
+    for (i = 0; i < nb.n; i++) nb.values[i].bytes = nb.arena + (uintptr_t)nb.values[i].bytes;
+    CHECK(!present || nb.n == len, "%s: %zu names, expected %zu", name, nb.n, len);
+
+    pol = strcmp(policy, "block") == 0 ? RDZ_DICT_BLOCK : strcmp(policy, "global") == 0
+              ? RDZ_DICT_GLOBAL : strcmp(policy, "auto") == 0 ? RDZ_DICT_AUTO : RDZ_DICT_PLAIN;
+    src.n = nb.n;
+    src.ctx = &nb;
+    src.key = names_key;
+    src.value = names_value;
+    snprintf(copy, sizeof copy, "%s/native-%s.rdz", tmpdir, name);
+    if (rdz_write_native_logical(copy, values, n, present ? &src : NULL, pol, &e)) {
+        CHECK(0, "%s: rewrite: %s", name, e.message);
+    } else {
+        original = slurp(path, &a);
+        rewritten = slurp(copy, &b2);
+        CHECK(original && rewritten && a == b2 && memcmp(original, rewritten, a) == 0,
+              "%s: the C writer's native bytes differ from the Rust writer's", name);
+        free(original);
+        free(rewritten);
+        remove(copy);
+    }
+    free(values);
+    free(nb.values);
+    free(nb.dict);
+    free(nb.arena);
+}
+
+static void test_native_manifest(const char *tmpdir)
+{
+    FILE *f = fopen(FIXTURES "manifest.tsv", "r");
+    char line[4096];
+    int rows = 0, pass;
+    if (!f) return;
+    for (pass = 0; pass < 2; pass++) {
+        rewind(f);
+        if (!fgets(line, sizeof line, f)) break;
+        rdz_logical_force_scalar(pass == 1);
+        while (fgets(line, sizeof line, f)) {
+            char *field[10];
+            int k = 0;
+            char *p = line;
+            while (k < 10 && p) {
+                field[k++] = p;
+                p = strchr(p, '\t');
+                if (p) *p++ = '\0';
+            }
+            if (k < 4 || strcmp(field[3], "native_v1") != 0) continue;
+            test_native_fixture(field[0], field[2], tmpdir);
+            rows++;
+        }
+    }
+    rdz_logical_force_scalar(0);
+    fclose(f);
+    CHECK(rows == 2 * 21, "%d native fixture passes, expected 42", rows);
+}
+
 static void test_pipeline(const char *tmpdir)
 {
     size_t n = 3 * 1024 * 1024, i;
@@ -391,6 +561,8 @@ int main(int argc, char **argv)
     test_mutations("lgl_names_encodings_global");
     test_writer_errors(tmpdir);
     test_pipeline(tmpdir);
+    test_native_manifest(tmpdir);
+    printf("logical kernel: %s\n", rdz_logical_kernel());
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

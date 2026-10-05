@@ -1,5 +1,3 @@
-skip_without_rust()
-
 with_string_dictionary <- function(policy, code) {
   previous <- Sys.getenv("RDZ_STRING_DICT", unset = NA)
   Sys.setenv(RDZ_STRING_DICT = policy)
