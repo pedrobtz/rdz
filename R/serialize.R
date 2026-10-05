@@ -87,7 +87,9 @@ read_rdz <- function(path) {
 #' `rdz_info()` reads the fixed header, closing trailer, and bounded directory.
 #' For the transitional R-serialization codec, `synopsis` is informative and
 #' exact attribute values still require [read_rdz()]. Data block checksums are
-#' validated by [read_rdz()], not by this metadata-only operation.
+#' validated by [read_rdz()], not by this metadata-only operation. `writer` names
+#' the implementation and version that wrote the file, or is `""` when the file
+#' does not record one.
 #'
 #' @param path A single, non-missing path to inspect.
 #' @returns A named list of container information and a bounded root synopsis.
@@ -148,6 +150,7 @@ print.rdz_info <- function(x, ...) {
   cat("<rdz_info>\n")
   cat("  codec: ", x$codec, " (version ", x$codec_version, ")\n", sep = "")
   cat("  container version: ", x$container_version, "\n", sep = "")
+  if (nzchar(x$writer)) cat("  written by: ", x$writer, "\n", sep = "")
   cat("  blocks: ", x$block_count, " (maximum ", x$block_size, " bytes)\n", sep = "")
   cat("  payload: ", format(x$payload_bytes, big.mark = ","), " bytes\n", sep = "")
   cat(

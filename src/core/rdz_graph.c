@@ -23,6 +23,12 @@ static int consume(rdz_vec *v, rdz_slot *s, rdz_error *e)
 
 static rdz_slot *next_slot(rdz_vec *v, rdz_error *e)
 {
+    /* unsupported, not a limit: automatic mode writes the object through the
+       generic codec instead */
+    if (v->pipe.next_submit >= RDZ_MAX_BLOCKS) {
+        rdz_unsupported(e, "an object of more than a million native blocks");
+        return NULL;
+    }
     for (;;) {
         int must;
         rdz_slot *s = rdz_pipeline_next(&v->pipe, &must);

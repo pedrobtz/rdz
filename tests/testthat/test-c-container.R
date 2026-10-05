@@ -102,6 +102,20 @@ test_that("files the C writer writes are read by the Rust reference", {
   synopsis <- serialize(rdz:::build_rdz_synopsis(x), NULL, xdr = TRUE, version = 3L)
   payload <- serialize(x, NULL, xdr = TRUE, version = 3L)
   rdz:::rdz_check(.Call(rdz:::rdz_test_write_generic, payload, synopsis, path))
+  as_rust_header(path)
   expect_identical(unserialize(rdz:::rdz_read(path)$value), x)
   expect_identical(rdz_info(path)$synopsis$root_type, "list")
+})
+
+test_that("files record the writer, which matches the package version", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  write_rdz(1:3, path)
+  v <- unclass(utils::packageVersion("rdz"))[[1L]]
+  want <- paste0("rdz ", paste(v[1:3], collapse = "."),
+                 if (length(v) > 3L) " (development)" else "")
+  expect_identical(rdz_info(path)$writer, want)
+  # bytes 20 to 23 of the header
+  bytes <- readBin(path, "raw", 24L)[21:24]
+  expect_identical(bytes[[1L]] & as.raw(0x7f), as.raw(1L))
 })

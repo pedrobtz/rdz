@@ -34,8 +34,8 @@ test_that("every native fixture is reproduced byte for byte, with every kernel",
       fixture <- file.path(rust_fixture_dir(), paste0(spec$name, ".rdz"))
       with_dictionary_policy(spec$policy, write_rdz(spec$value(), copy, mode = "native"))
       expect_identical(
-        readBin(copy, "raw", file.size(copy)),
-        readBin(fixture, "raw", file.size(fixture)),
+        bytes_but_writer(copy),
+        bytes_but_writer(fixture),
         label = paste(spec$name, kernel)
       )
     }
@@ -67,6 +67,7 @@ test_that("the Rust reference reads what the C native writer writes", {
   on.exit(unlink(path), add = TRUE)
   for (spec in native_specs()) {
     with_dictionary_policy(spec$policy, write_rdz(spec$value(), path, mode = "native"))
+    as_rust_header(path)
     expect_identical(rdz:::rdz_read(path)$value, spec$value(), label = spec$name)
   }
 })

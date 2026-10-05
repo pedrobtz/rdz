@@ -8,7 +8,9 @@ container version is 3 (2026-10-05, plan-c.md §3): every checksum is an
 eight-byte XXH3-64 with seed 0, bit-identical to the reference xxHash and to
 zufast's `zuf_hash64()`, in place of version 2's four-byte IEEE CRC32. Readers
 reject version 2 files; no version 2 file was ever released. All multibyte integers are unsigned little-endian values;
-there is no implicit padding and every reserved field must be zero.
+there is no implicit padding and every reserved field must be zero. Since
+plan-c Stage I the format has the extension points of "Compatibility and
+extension" below, decided before the 0.1.0 freeze.
 
 The container and directory layouts are shared by the generic `R_SERIAL_V3`
 codec and `NATIVE_V1`. Phase 1 populates native object records for logical
@@ -45,14 +47,46 @@ whole-root generic codec.
 | Compression | 1 | One Zstandard frame (since plan-c Stage D) |
 | Checksum | implicit v3 | XXH3-64, seed 0, stored little-endian |
 
-The writer uses 1 MiB blocks. Readers accept at most 64 MiB per block, 1,000,000
-blocks, and a 64 KiB generic synopsis. Counts, lengths, offsets, additions, and
-host-size conversions are checked before allocation or seeking.
+The writer uses 1 MiB blocks. Readers accept at most 64 MiB per block (the hard
+cap; the file header records the file's own maximum), 1,000,000 blocks, and a
+64 KiB generic synopsis. Counts, lengths, offsets, additions, and host-size
+conversions are checked before allocation or seeking.
 
 Native type tags are reserved as `0=NULL`, `1=logical`, `2=integer`, `3=double`,
 `4=character`, `5=factor`, `6=list`, and `7=data frame`. A tag is not usable
 until its codec phase defines its logical and physical record representation.
 Unknown IDs, versions, mandatory flags, or nonzero reserved fields are errors.
+
+## Compatibility and extension
+
+Decided in plan-c Stage I, before the 0.1.0 freeze, so that later writers can
+add to the format without locking 0.1.0 readers out of every new file:
+
+- **Versions bump only for changed meaning.** Every block encoding, compression,
+  type tag, role, attribute kind and flag bit is versioned by its own ID: a
+  reader rejects one it does not know. A writer adds a new one without
+  bumping the container, directory or codec version, so a new writer's file
+  that uses only 0.1.0 features stays readable by 0.1.0 readers. A version
+  bumps only when the meaning of an existing field or ID changes.
+- **Flags have two halves.** In every flags word the low half (bits 0 to 15 of
+  a `u32`, 0 to 7 of a `u16`) must be understood: a reader rejects an unknown
+  bit there. The high half may be ignored: readers drop bits they do not know.
+  All flags written today are zero but the defined bits named below. A block
+  header's `u16` flags repeat the low 16 bits of its directory entry's flags.
+- **Directory records may grow.** The directory header's length and each entry
+  width may exceed the widths below (up to 256 bytes each); readers read the
+  fields they know at their offsets and skip the rest. Fields are only ever
+  appended.
+- **Block sizes are the writer's policy.** A block holds from 1 value to its
+  type's maximum (65,536 logicals, which the `u16` sparse positions require;
+  262,144 integers; 131,072 doubles); only an empty object has one block of 0.
+  Today's writer fills every block but an object's last.
+- **The writer is recorded** (file header bytes 20 to 23, below), so readers can
+  work around a writer's bugs in files already written.
+- **Fixtures.** The frozen 0.1.0 fixtures are read-compatibility tests: every
+  later reader reads them to the same values. Byte equality is required only
+  of uncompressed (`speed` preset) files, since zstd's output may change between
+  its versions.
 
 ## File sequence
 
@@ -79,12 +113,18 @@ directory; metadata inspection never scans or allocates the data payload.
 | 0 | 4 | Magic bytes `52 44 5a 1a` |
 | 4 | 2 | Container version, currently 3 |
 | 6 | 2 | Header length, 32 |
-| 8 | 4 | Flags, currently zero |
+| 8 | 4 | Flags, two halves (see "Compatibility and extension"); zero today |
 | 12 | 2 | Payload codec ID |
 | 14 | 2 | Payload codec version |
 | 16 | 4 | Maximum decoded block size |
-| 20 | 4 | Reserved zero |
+| 20 | 4 | Writer: implementation `u8`, then the major, minor and patch version `u8`s |
 | 24 | 8 | XXH3-64 of bytes 0 through 23 |
+
+The writer field is informational and never rejected: implementation `0` means
+not recorded (the Rust reference and earlier files), `1` this package; bit 7 of
+the implementation byte marks a development build, whose version is the release
+it follows (0.1.0.9000 is written as 0.1.0 with bit 7). `rdz_info()` reports it
+as `writer`, for example `"rdz 0.1.0"`.
 
 ## Block header: 48 bytes
 
@@ -92,7 +132,7 @@ directory; metadata inspection never scans or allocates the data payload.
 |---:|---:|---|
 | 0 | 4 | Magic `RBLK` |
 | 4 | 2 | Header length, 48 |
-| 6 | 2 | Flags, currently zero |
+| 6 | 2 | Flags: the low 16 bits of the block entry's flags |
 | 8 | 4 | Zero-based consecutive sequence number |
 | 12 | 2 | Encoding ID |
 | 14 | 2 | Compression ID |
@@ -106,8 +146,12 @@ Generic (raw-encoded) blocks require logical count and decoded length to agree.
 An uncompressed block's stored and decoded lengths agree; for a native block the
 logical count records the number of R elements those codec bytes represent.
 
-Compression 1 stores the block's decoded bytes as exactly one Zstandard frame:
-the frame fills the stored bytes and decompresses to exactly the decoded length,
+Compression 1 stores the block's decoded bytes as exactly one Zstandard frame
+(RFC 8878): no dictionary, no skippable or legacy frames, an optional content
+size that must equal the decoded length when present, and an optional content
+checksum that readers verify (it covers the decoded bytes, which the block
+checksum does not). The frame fills the stored bytes and decompresses to exactly
+the decoded length,
 and the checksum covers the stored (compressed) bytes, so a reader verifies a
 block before it decompresses it. A block is compressed only when that makes it
 smaller, and readers reject a compressed block whose stored length is not less
@@ -129,11 +173,11 @@ unused high bits in the final byte must be zero.
 |---:|---:|---|
 | 0 | 4 | Magic `RDIR` |
 | 4 | 2 | Directory version, 1 |
-| 6 | 2 | Directory header length, 40 |
-| 8 | 2 | Object entry width, 48 |
-| 10 | 2 | Attribute entry width, 32 |
-| 12 | 2 | Block entry width, 64 |
-| 14 | 2 | Flags, currently zero |
+| 6 | 2 | Directory header length, at least 40 |
+| 8 | 2 | Object entry width, at least 48 |
+| 10 | 2 | Attribute entry width, at least 32 |
+| 12 | 2 | Block entry width, at least 64 |
+| 14 | 2 | Flags, two halves (see "Compatibility and extension"); zero today |
 | 16 | 4 | Object entry count |
 | 20 | 4 | Attribute entry count |
 | 24 | 4 | Block entry count |
@@ -159,7 +203,7 @@ bit 0 for `names`. All other role, object, and attribute flags are rejected.
 | Offset | Width | Field |
 |---:|---:|---|
 | 0 | 4 | Sequence number |
-| 4 | 4 | Flags, currently zero |
+| 4 | 4 | Flags, two halves (see "Compatibility and extension"); zero today |
 | 8 | 8 | Block-header file offset |
 | 16 | 8 | Stored-payload file offset |
 | 24 | 4 | Stored byte length |
@@ -218,7 +262,9 @@ byte length, and exact bytes. Tag 0 is `NA_STRING` and requires length zero;
 tags 1 through 4 mean R native, UTF-8, Latin-1, and bytes encodings. Phase 1
 accepts native-encoded names only when all bytes are ASCII; non-ASCII native
 strings select whole-root fallback because their interpretation is locale
-dependent. Each character record must fit in one 1 MiB block. Attribute-name and
+dependent. Today's writer puts each character record in one 1 MiB block, a
+writer policy: readers bound a block only by the header's maximum, at most
+64 MiB, so a later writer may give a long string its own larger block. Attribute-name and
 value blocks are independently addressable, so reading `names` does not touch
 the logical data blocks.
 
@@ -226,8 +272,8 @@ the logical data blocks.
 
 Since plan-c Stage F the native root may be an integer (type tag 2) or double
 (type tag 3) vector, with the same optional `names` attribute as a logical
-root. Blocks hold 262,144 integers or 131,072 doubles (1 MiB raw), every block
-but the last exactly that many; an empty vector is one empty raw block. Each
+root. Blocks hold up to 262,144 integers or 131,072 doubles (1 MiB raw); the
+writer fills every block but the last; an empty vector is one empty raw block. Each
 block's record, before any compression:
 
 - **10, integer raw:** `n` little-endian `i32`, `NA` as `INT32_MIN`.
@@ -240,7 +286,7 @@ block's record, before any compression:
   the last byte are zero. An all-`NA` block has base 0.
 - **13, delta:** `width:u8`, three zero bytes, `first:i32`, `min_delta:i64`,
   then the `n - 1` codes `value[i] - value[i - 1] - min_delta`, packed as
-  above. No `NA`; `n >= 2`.
+  above; the width is at most 32. No `NA`; `n >= 2`.
 - **14, integer runs:** `runs:u32`, `0:u32`, then per run `value:i32` and
   `end:u32` (exclusive); consecutive runs differ, ends increase to `n`.
 - **20, double raw:** `n` little-endian 64-bit patterns, exact: every NaN
@@ -273,8 +319,8 @@ blocks come in the order root, levels, attribute name, attribute value.
 Strings are bytes plus R's encoding tag. A native-encoded string that is not
 ASCII is not portable (portability.md) and is never written natively: the
 whole root goes to the generic codec in automatic mode, and strict native
-mode rejects it. A string must fit one record of one block (1 MiB); a longer
-one does the same. Since Stage G the default dictionary policy is `auto`.
+mode rejects it. Today's writer sends a string longer than its 1 MiB blocks
+the same way (a writer policy; see above). Since Stage G the default dictionary policy is `auto`.
 
 ### Native object graphs
 
@@ -299,7 +345,9 @@ class (a data frame's class, when it is not exactly `"data.frame"`). The
 attribute-name object holds the R attribute's name, which must match the
 flag. A data frame without a row.names attribute has compact row names; one
 without a class attribute has class `"data.frame"`. A data.table's
-`.internal.selfref` is not stored; readers restore it.
+`.internal.selfref` is not stored; readers restore it. Compact row names read
+back as R's own compact form `c(NA, -n)` whatever sign they were written with:
+`identical()` holds, and only `.row_names_info(x, 1)`'s sign can differ.
 
 Since Stage H every block, logical ones included, is compressed under the
 writer's preset (raw when that is not smaller): the `speed` preset writes
@@ -333,7 +381,7 @@ exceed 2^22 entries, so one object may contain dictionary blocks followed by
 plain blocks. Deduplication uses CHARSXP addresses, which R's global string
 cache makes unique per bytes and encoding; addresses are never written. The
 experimental `RDZ_STRING_DICT` environment variable selects the policy; the
-default is `plain`.
+default is `auto` (since plan-c Stage G).
 
 ## Generic synopsis
 

@@ -35,7 +35,11 @@ test_that("rdz_info() reports what the Rust build reported for every fixture", {
   infos <- readRDS(file.path(rust_fixture_dir(), "info.rds"))
   for (spec in rust_fixture_specs()) {
     path <- file.path(rust_fixture_dir(), paste0(spec$name, ".rdz"))
-    expect_identical(unclass(rdz_info(path)), infos[[spec$name]], label = spec$name)
+    info <- unclass(rdz_info(path))
+    # the Rust reference recorded no writer, and its build had no such field
+    expect_identical(info$writer, "", label = spec$name)
+    info$writer <- NULL
+    expect_identical(info, infos[[spec$name]], label = spec$name)
   }
 })
 
@@ -61,8 +65,8 @@ test_that("the C writer reproduces every generic fixture byte for byte", {
     copy <- file.path(dir, basename(path))
     rdz:::rdz_check(.Call(rdz:::rdz_test_write_generic, payload, synopsis, copy))
     expect_identical(
-      readBin(copy, "raw", file.size(copy)),
-      readBin(path, "raw", file.size(path)),
+      bytes_but_writer(copy),
+      bytes_but_writer(path),
       label = spec$name
     )
   }

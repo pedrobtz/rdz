@@ -227,3 +227,24 @@ rdz_block_encodings <- function(path) {
     compression = vapply(entry, function(at) le(at + 50L, 2L), numeric(1L))
   )
 }
+
+# A file's bytes without the header's writer field and checksum (bytes 21 to
+# 32, 1-based): the Rust reference recorded no writer.
+bytes_but_writer <- function(path) {
+  bytes <- readBin(path, "raw", file.size(path))
+  bytes[21:32] <- as.raw(0L)
+  bytes
+}
+
+# Rewrites a file the C writer wrote as the Rust reference would have: no
+# writer recorded, the header checksum recomputed. The Rust reader refuses a
+# nonzero writer field, which postdates it.
+as_rust_header <- function(path) {
+  testthat::skip_if_not_installed("zufast")
+  bytes <- readBin(path, "raw", file.size(path))
+  bytes[21:24] <- as.raw(0L)
+  h <- zufast::fast_hash(bytes[1:24])
+  bytes[25:32] <- rev(as.raw(strtoi(substring(h, seq(1, 15, 2), seq(2, 16, 2)), 16L)))
+  writeBin(bytes, path)
+  invisible(path)
+}

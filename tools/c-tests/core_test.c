@@ -25,9 +25,13 @@
 #include <sys/stat.h>
 #endif
 
+#include <zubin/rw.h>
+
 #include "rdz_container.h"
+#include "rdz_graph.h"
 #include "rdz_logical.h"
 #include "rdz_native.h"
+#include "rdz_numeric.h"
 #include "rdz_pipeline.h"
 #include "rdz_vector.h"
 
@@ -80,6 +84,14 @@ static int read_all(const uint8_t *data, size_t n, rdz_error *e)
     zb_buf_release(&block);
     rdz_reader_close(&r);
     return failed;
+}
+
+/* The same bytes but the header's writer field and so its checksum
+   (bytes 20 to 31): the Rust reference recorded no writer. */
+static int same_but_writer(const uint8_t *a, size_t n, const uint8_t *b, size_t m)
+{
+    return a && b && n == m && n >= RDZ_HEADER_LEN && memcmp(a, b, 20) == 0 &&
+           memcmp(a + RDZ_HEADER_LEN, b + RDZ_HEADER_LEN, n - RDZ_HEADER_LEN) == 0;
 }
 
 static void test_records(void)
@@ -145,7 +157,7 @@ static void test_fixture(const char *name, const char *codec, unsigned long bloc
         } else {
             original = slurp(path, &n);
             rewritten = slurp(copy, &m);
-            CHECK(original && rewritten && n == m && memcmp(original, rewritten, n) == 0,
+            CHECK(same_but_writer(original, n, rewritten, m),
                   "%s: the C writer's bytes differ from the Rust writer's", name);
             free(original);
             free(rewritten);
@@ -471,7 +483,7 @@ static void test_native_fixture(const char *name, const char *policy, const char
     } else {
         original = slurp(path, &a);
         rewritten = slurp(copy, &b2);
-        CHECK(original && rewritten && a == b2 && memcmp(original, rewritten, a) == 0,
+        CHECK(same_but_writer(original, a, rewritten, b2),
               "%s: the C writer's native bytes differ from the Rust writer's", name);
         free(original);
         free(rewritten);
@@ -666,6 +678,180 @@ static void test_pipeline(const char *tmpdir)
     free(data);
 }
 
+/* ---- what a later writer may add, which 0.1.0 readers accept ---------------------- */
+
+static void *ext_values(void *ctx, uint32_t object) { (void)object; return ctx; }
+
+/* Opens and reads an integer root of up to 8 values into out. */
+static int ext_read(const uint8_t *data, size_t n, int32_t *out, rdz_error *e)
+{
+    rdz_reader r;
+    rdz_graph_sinks sinks;
+    rdz_vec v;
+    int failed;
+    if (rdz_reader_open_memory(&r, data, n, e)) return 1;
+    sinks.ctx = out;
+    sinks.values = ext_values;
+    sinks.strings = NULL;
+    rdz_vec_init(&v);
+    failed = r.nobjects != 1 || r.objects[0].logical_len > 8 ||
+             rdz_graph_read(&v, &r, &sinks, 1, NULL, NULL, e);
+    rdz_vec_free(&v);
+    rdz_reader_close(&r);
+    return failed;
+}
+
+/* c(1:6) as raw integer blocks of the given sizes. */
+static uint8_t *ext_file(const char *path, const uint32_t *sizes, uint32_t nsizes, size_t *n)
+{
+    rdz_writer w;
+    rdz_object o;
+    rdz_error e;
+    uint8_t raw[24];
+    uint32_t i, at = 0;
+    for (i = 0; i < 6; i++) zb_wr_u32le(raw + 4 * i, i + 1);
+    memset(&o, 0, sizeof o);
+    o.parent_id = RDZ_ROOT_PARENT_ID;
+    o.type_tag = RDZ_TYPE_INTEGER;
+    o.logical_len = 6;
+    o.block_count = nsizes;
+    if (rdz_writer_open(&w, path, RDZ_CODEC_NATIVE_V1, RDZ_NATIVE_CODEC_VERSION, RDZ_BLOCK_SIZE,
+                        &e)) {
+        return NULL;
+    }
+    for (i = 0; i < nsizes; i++) {
+        if (rdz_writer_block(&w, RDZ_ENCODING_INT_RAW, sizes[i], raw + 4 * at, 4 * sizes[i], &e)) {
+            rdz_writer_discard(&w);
+            return NULL;
+        }
+        at += sizes[i];
+    }
+    if (rdz_writer_finish(&w, &o, 1, NULL, 0, NULL, 0, &e)) {
+        rdz_writer_discard(&w);
+        return NULL;
+    }
+    return slurp(path, n);
+}
+
+static void ext_reseal(uint8_t *data, size_t n)
+{
+    size_t dir = (size_t)zb_rd_u64le(data + n - RDZ_TRAILER_LEN + 8);
+    zb_wr_u64le(data + 24, rdz_hash(data, 24));
+    zb_wr_u64le(data + dir + 32, rdz_hash(data + dir, 32));
+    zb_wr_u64le(data + n - RDZ_TRAILER_LEN + 24, rdz_hash(data + dir, n - RDZ_TRAILER_LEN - dir));
+}
+
+/* The file with `pad` zero bytes after the directory header and after every
+   entry, as a later writer's wider records would be. */
+static uint8_t *ext_widen(const uint8_t *data, size_t n, size_t pad, size_t *out_n)
+{
+    size_t dir = (size_t)zb_rd_u64le(data + n - RDZ_TRAILER_LEN + 8), at, from, i;
+    uint32_t nobj = zb_rd_u32le(data + dir + 16), natt = zb_rd_u32le(data + dir + 20),
+             nblk = zb_rd_u32le(data + dir + 24);
+    size_t widths[3] = {RDZ_OBJECT_ENTRY_LEN, RDZ_ATTRIBUTE_ENTRY_LEN, RDZ_BLOCK_ENTRY_LEN};
+    uint32_t counts[3];
+    size_t len = n + pad * (1 + (size_t)nobj + natt + nblk);
+    uint8_t *w = (uint8_t *)calloc(len, 1);
+    int k;
+    counts[0] = nobj;
+    counts[1] = natt;
+    counts[2] = nblk;
+    if (!w) return NULL;
+    memcpy(w, data, dir + RDZ_DIRECTORY_HEADER_LEN);
+    zb_wr_u16le(w + dir + 6, (uint16_t)(RDZ_DIRECTORY_HEADER_LEN + pad));
+    zb_wr_u16le(w + dir + 8, (uint16_t)(RDZ_OBJECT_ENTRY_LEN + pad));
+    zb_wr_u16le(w + dir + 10, (uint16_t)(RDZ_ATTRIBUTE_ENTRY_LEN + pad));
+    zb_wr_u16le(w + dir + 12, (uint16_t)(RDZ_BLOCK_ENTRY_LEN + pad));
+    at = dir + RDZ_DIRECTORY_HEADER_LEN + pad;
+    from = dir + RDZ_DIRECTORY_HEADER_LEN;
+    for (k = 0; k < 3; k++) {
+        for (i = 0; i < counts[k]; i++) {
+            memcpy(w + at, data + from, widths[k]);
+            memset(w + at + widths[k], 0xa5, pad);
+            at += widths[k] + pad;
+            from += widths[k];
+        }
+    }
+    memcpy(w + at, data + from, n - from); /* the synopsis (none) and trailer */
+    zb_wr_u64le(w + len - RDZ_TRAILER_LEN + 16, (uint64_t)(len - RDZ_TRAILER_LEN - dir));
+    ext_reseal(w, len);
+    *out_n = len;
+    return w;
+}
+
+static void test_extensions(const char *tmpdir)
+{
+    static const uint32_t even[1] = {6}, uneven[3] = {2, 3, 1}, empty_block[2] = {6, 0};
+    char path[512];
+    size_t n, m, k;
+    uint8_t *data, *wide;
+    int32_t out[8];
+    rdz_error e;
+    snprintf(path, sizeof path, "%s/ext.rdz", tmpdir);
+
+    /* any block size up to the maximum: sizes are the writer's policy */
+    data = ext_file(path, uneven, 3, &n);
+    CHECK(data && ext_read(data, n, out, &e) == 0 && out[0] == 1 && out[5] == 6,
+          "blocks of 2, 3 and 1 values: %s", e.message);
+    free(data);
+    data = ext_file(path, empty_block, 2, &n);
+    CHECK(data && ext_read(data, n, out, &e) != 0, "an empty block in a nonempty object was read");
+    free(data);
+
+    data = ext_file(path, even, 1, &n);
+    CHECK(data && ext_read(data, n, out, &e) == 0, "the base file: %s", e.message);
+    if (!data) return;
+
+    /* the ignorable halves of the flags words; the required halves are
+       still refused */
+    {
+        size_t dir = (size_t)zb_rd_u64le(data + n - RDZ_TRAILER_LEN + 8);
+        size_t object = dir + RDZ_DIRECTORY_HEADER_LEN, block = object + RDZ_OBJECT_ENTRY_LEN;
+        struct { size_t at; int width; uint32_t bits; int ok; } cases[] = {
+            {RDZ_FH_FLAGS, 4, 0x00010000u, 1}, {RDZ_FH_FLAGS, 4, 0x00000001u, 0},
+            {0, 2, 0x0100u, 1}, {0, 2, 0x0001u, 0},
+            {0, 4, 0x80000000u, 1}, {0, 4, 0x00000002u, 0}};
+        cases[2].at = cases[3].at = dir + 14;
+        cases[4].at = cases[5].at = object + 12;
+        for (k = 0; k < sizeof cases / sizeof cases[0]; k++) {
+            uint8_t *c = (uint8_t *)malloc(n);
+            memcpy(c, data, n);
+            if (cases[k].width == 4) {
+                zb_wr_u32le(c + cases[k].at, zb_rd_u32le(c + cases[k].at) | cases[k].bits);
+            } else {
+                zb_wr_u16le(c + cases[k].at, (uint16_t)(zb_rd_u16le(c + cases[k].at) | cases[k].bits));
+            }
+            ext_reseal(c, n);
+            CHECK((ext_read(c, n, out, &e) == 0) == cases[k].ok, "flags case %zu: %s", k,
+                  cases[k].ok ? e.message : "accepted");
+            free(c);
+        }
+        /* a block's ignorable flags, repeated in its header */
+        {
+            uint8_t *c = (uint8_t *)malloc(n);
+            memcpy(c, data, n);
+            zb_wr_u16le(c + RDZ_HEADER_LEN + RDZ_BH_FLAGS, 0x0100u);
+            CHECK(ext_read(c, n, out, &e) != 0, "a block header disagreeing with its entry was read");
+            zb_wr_u16le(c + RDZ_HEADER_LEN + RDZ_BH_FLAGS, 0);
+            zb_wr_u32le(c + block + 4, 0x40000000u); /* beyond the header's 16 bits: ignored */
+            ext_reseal(c, n);
+            CHECK(ext_read(c, n, out, &e) == 0, "ignorable block flags: %s", e.message);
+            free(c);
+        }
+    }
+
+    /* wider directory records, their extra bytes skipped */
+    wide = ext_widen(data, n, 16, &m);
+    CHECK(wide && ext_read(wide, m, out, &e) == 0 && out[5] == 6, "wider records: %s",
+          e.message);
+    free(wide);
+    wide = ext_widen(data, n, RDZ_MAX_ENTRY_WIDTH, &m);
+    CHECK(wide && ext_read(wide, m, out, &e) != 0, "entries wider than the maximum were read");
+    free(wide);
+    free(data);
+    remove(path);
+}
+
 int main(int argc, char **argv)
 {
     const char *tmpdir = argc > 1 ? argv[1] : ".";
@@ -677,6 +863,7 @@ int main(int argc, char **argv)
     test_pipeline(tmpdir);
     test_native_manifest(tmpdir);
     test_numeric(tmpdir);
+    test_extensions(tmpdir);
     printf("logical kernel: %s\n", rdz_logical_kernel());
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
