@@ -16,5 +16,10 @@ Authors:
   \item Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]
 }
 
+Other contributors:
+\itemize{
+  \item Meta Platforms, Inc. and affiliates (Zstandard, bundled in src/vendor/zstd) [copyright holder]
+}
+
 }
 \keyword{internal}

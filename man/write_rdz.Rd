@@ -22,7 +22,17 @@ complete value is supported and otherwise uses whole-root R serialization;
 \code{write_rdz()} writes an object through the versioned \code{rdz} block container.
 Plain logical vectors and logical vectors with a supported \code{names} attribute
 use the native two-bit codec. Other objects use a whole-root, portable R XDR
-stream in automatic mode.
+stream in automatic mode, written in blocks of 1 MiB.
+}
+\details{
+Two options control how blocks are stored and how many threads do the
+work. \code{options(rdz.preset = )} is \code{"balanced"} (the default; each block is
+compressed with Zstandard at level 1), \code{"compact"} (level 6) or \code{"speed"}
+(no compression). A block is stored compressed only when that makes it
+smaller. \code{options(rdz.threads = )} sets the threads that compress and, in
+\code{\link[=read_rdz]{read_rdz()}}, decompress blocks; the default is 1. The file does not
+depend on either: any setting reads any file, and the same object written
+with any number of threads gives the same bytes.
 }
 \examples{
 path <- tempfile(fileext = ".rdz")

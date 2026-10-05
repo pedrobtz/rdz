@@ -1,6 +1,35 @@
-The rdz source package bundles the Rust crates listed below. The complete
-license texts and notices distributed by each crate are retained in
-src/rust/vendor.tar.xz.
+The rdz source package bundles third-party code: the Zstandard library,
+compiled into rdz, and the Rust crates of the Rust reference implementation,
+which is built only when cargo is available and is to be removed.
+
+-------------------------------------------------------------------------------
+Zstandard (src/vendor/zstd/)
+-------------------------------------------------------------------------------
+
+Upstream:  https://github.com/facebook/zstd
+Release:   v1.5.7 (commit f8745da6ff1ad1e7bab384bd1f9d742439278e99)
+License:   BSD-3-Clause (zstd is dual-licensed BSD and GPLv2; rdz uses it
+           under the BSD license). The notice is reproduced verbatim in
+           src/vendor/zstd/LICENSE.
+
+  Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
+
+src/vendor/zstd/zstd.c is the release's own amalgamation script
+(build/single_file_libs/combine.py) run over the release's lib/ sources with
+rdz's input file tools/vendor/zstd-in.c, which is upstream's zstd-in.c without
+ZSTD_MULTITHREAD and without the dictionary builder. zstd.h, zstd_errors.h and
+LICENSE are the release's files. No source is modified; the build sets
+ZSTDLIB_VISIBLE and ZSTDERRORLIB_VISIBLE empty so that no zstd symbol is
+exported. tools/vendor/manifest.tsv records the archive checksum, and
+tools/vendor/verify checks the vendored files against
+tools/vendor/checksums.sha256.
+
+-------------------------------------------------------------------------------
+Rust crates (src/rust/vendor.tar.xz)
+-------------------------------------------------------------------------------
+
+The complete license texts and notices distributed by each crate are retained
+in src/rust/vendor.tar.xz.
 
 cc 1.4.0 and find-msvc-tools 0.1.9
   Author and copyright holder: Alex Crichton and contributors

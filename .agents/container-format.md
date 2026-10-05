@@ -34,7 +34,7 @@ whole-root generic codec.
 | Block encoding | 8 | Character dictionary entries (experimental) |
 | Block encoding | 9 | Character dictionary indices (experimental) |
 | Compression | 0 | No compression |
-| Compression | 1 | zstd frame (reserved; not yet written or accepted) |
+| Compression | 1 | One Zstandard frame (since plan-c Stage D) |
 | Checksum | implicit v3 | XXH3-64, seed 0, stored little-endian |
 
 The writer uses 1 MiB blocks. Readers accept at most 64 MiB per block, 1,000,000
@@ -94,9 +94,20 @@ directory; metadata inspection never scans or allocates the data payload.
 | 36 | 4 | Reserved zero |
 | 40 | 8 | XXH3-64 of the exact stored bytes |
 
-Raw blocks require logical count, decoded length, and stored length to agree.
-For every uncompressed native block, decoded and stored byte lengths agree while
-logical count records the number of R elements represented by those codec bytes.
+Generic (raw-encoded) blocks require logical count and decoded length to agree.
+An uncompressed block's stored and decoded lengths agree; for a native block the
+logical count records the number of R elements those codec bytes represent.
+
+Compression 1 stores the block's decoded bytes as exactly one Zstandard frame:
+the frame fills the stored bytes and decompresses to exactly the decoded length,
+and the checksum covers the stored (compressed) bytes, so a reader verifies a
+block before it decompresses it. A block is compressed only when that makes it
+smaller, and readers reject a compressed block whose stored length is not less
+than its decoded length; an incompressible block is therefore always raw. The
+writer's presets choose the level (`rdz.preset`: level 1 by default, 6 for
+`"compact"`, no compression for `"speed"`); the level is not recorded and no
+reader needs it. Neither the preset nor the thread count changes a reader's
+work, and the same object written with any thread count gives the same bytes.
 Every decoded block length must be less than or equal to the maximum recorded in
 the file header; readers reject a contradictory header even when its checksum
 is valid.

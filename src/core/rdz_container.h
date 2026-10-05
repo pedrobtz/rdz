@@ -21,6 +21,7 @@
 
 #include <zubin/buf.h>
 
+#include "rdz_codec.h"
 #include "rdz_format.h"
 #include "rdz_io.h"
 #include "rdz_records.h"
@@ -37,6 +38,8 @@ typedef struct {
     uint32_t synopsis_len;
     zb_buf directory;        /* the directory as stored */
     zb_buf tables;           /* objects, attributes and blocks, decoded */
+    zb_buf scratch;          /* stored bytes, for rdz_reader_read_block() */
+    rdz_codec codec;         /* for rdz_reader_read_block() */
     rdz_infile file;
 } rdz_reader;
 
@@ -45,9 +48,16 @@ void rdz_reader_init(rdz_reader *r);
 int rdz_reader_open(rdz_reader *r, const char *path, rdz_error *e);
 /* The same over the caller's bytes, which must outlive the reader. */
 int rdz_reader_open_memory(rdz_reader *r, const uint8_t *data, size_t n, rdz_error *e);
-/* Validates block `index`'s header against its entry, reads its stored
-   bytes into out (replacing its contents; out's max should allow
-   RDZ_MAX_BLOCK_SIZE) and verifies their checksum. */
+/* Validates block `index`'s header against its entry and reads its stored
+   bytes into `stored`, replacing its contents (its max should allow
+   RDZ_MAX_BLOCK_SIZE). File IO: one thread at a time. */
+int rdz_reader_read_stored(rdz_reader *r, uint32_t index, zb_buf *stored, rdz_error *e);
+/* Verifies stored bytes against the block's checksum and, for a compressed
+   block, decompresses them into `out`. A raw block is used where it lies, in
+   `stored`, and `out` is untouched. No file IO: a pipeline worker calls it. */
+int rdz_block_decode(const rdz_block *b, const zb_buf *stored, zb_buf *out, rdz_codec *codec,
+                     rdz_error *e);
+/* Both, with the decoded bytes in `out` either way. */
 int rdz_reader_read_block(rdz_reader *r, uint32_t index, zb_buf *out, rdz_error *e);
 void rdz_reader_close(rdz_reader *r);
 
@@ -55,13 +65,20 @@ typedef struct {
     rdz_outfile out;
     zb_buf entries; /* encoded block entries */
     uint32_t nblocks;
+    uint32_t block_size; /* the largest decoded block, recorded in the header */
     int open;
 } rdz_writer;
 
 void rdz_writer_init(rdz_writer *w);
-/* Creates the temporary file and writes the file header. */
+/* Creates the temporary file and writes the file header, which records
+   block_size as the largest decoded block (RDZ_BLOCK_SIZE normally). */
 int rdz_writer_open(rdz_writer *w, const char *path, uint16_t codec_id,
-                    uint16_t codec_version, rdz_error *e);
+                    uint16_t codec_version, uint32_t block_size, rdz_error *e);
+/* Appends one block from its stored bytes, of the given compression, which
+   decode to decoded_len bytes; checksum is the stored bytes' XXH3-64. */
+int rdz_writer_stored(rdz_writer *w, uint16_t encoding, uint16_t compression,
+                      uint64_t logical_count, uint64_t decoded_len, const uint8_t *stored,
+                      size_t n, uint64_t checksum, rdz_error *e);
 /* Appends one uncompressed block. */
 int rdz_writer_block(rdz_writer *w, uint16_t encoding, uint64_t logical_count,
                      const uint8_t *payload, size_t n, rdz_error *e);

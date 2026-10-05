@@ -1,5 +1,53 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-05: plan-c Stage D
+
+The block pipeline and compression are in place:
+
+- `src/core/rdz_pipeline.c`: a ring of 2 x threads slots and an rdz-owned
+  pthread pool (winpthreads on Windows). The R thread fills and submits slots
+  and consumes finished ones strictly in sequence order, so memory is bounded
+  by the slots and the bytes do not depend on the thread count. Workers start
+  on the second block, so a one-block object never pays for them (the
+  small-input bypass); with one thread every job runs inline. Teardown joins
+  the workers and is safe from an unwind cleanup.
+- `src/core/rdz_codec.c`: zstd 1.5.7, vendored as one translation unit without
+  its own threads or dictionary builder (`tools/vendor/{manifest.tsv,fetch,
+  record,verify}`, `inst/COPYRIGHTS`, a `cph` entry), every symbol hidden. A
+  block is compressed only when that makes it smaller; decoding requires one
+  frame of exactly the stored bytes that decodes to exactly the decoded length.
+- `options(rdz.preset = )` (speed raw, balanced zstd 1, compact zstd 6) and
+  `options(rdz.threads = )`, default 1.
+- Evidence: the C harness writes and reads 3 MiB in 4 KiB blocks through 1, 2
+  and 8 threads under ASan and UBSan with identical files, raw and zstd blocks
+  both present; the R suite does the same through `write_rdz()`; fuzzing with
+  compressed seeds found nothing; `tools/vendor/verify` passes and fails on an
+  edited file or a missing define.
+- Equal-budget scaling (`tools/bench-pipeline.R`, Apple arm64, 8 cores, median
+  of 5 after a `gc()`; write/read ms, balanced preset; qs2 0.2.2 at its default
+  level with checksum validation):
+
+  | data | threads | rdz | qs2 |
+  |---|---:|---:|---:|
+  | 2e7 doubles (48.8 / 52.2 MB) | 1 | 866 / 422 | 1125 / 303 |
+  |  | 2 | 359 / 202 | 585 / 300 |
+  |  | 4 | 239 / 202 | 450 / 130 |
+  |  | 8 | 266 / 202 | 298 / 79 |
+  | 4e7 integers (66.4 / 64.7 MB) | 1 | 991 / 490 | 1295 / 328 |
+  |  | 4 | 320 / 288 | 526 / 139 |
+  |  | 8 | 357 / 287 | 351 / 95 |
+  | 5e6 strings (15.3 / 14.7 MB) | 1 | 592 / 1021 | 701 / 788 |
+  |  | 8 | 349 / 954 | 331 / 730 |
+
+  Writes scale and match or beat qs2. Reads stop at about 200 ms for 160 MB:
+  `R_Unserialize()`'s single-threaded XDR conversion is the floor (the speed
+  preset reads in 213 ms), which the native codecs of Stages E to H remove.
+  Small objects show no regression: 1e3 and 1e5 doubles and a 100-element list
+  write and read within a millisecond or two under every preset and thread
+  count.
+
+Stage E (the logical codec, ported) is next.
+
 ## Checkpoint 2026-10-05: plan-c Stage C
 
 The generic codec is C and streamed (`src/adapter/rdz_generic.c`):

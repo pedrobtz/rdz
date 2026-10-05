@@ -10,13 +10,15 @@
 #include <R.h>
 #include <Rinternals.h>
 #include <R_ext/Rdynload.h>
+#include <R_ext/Visibility.h>
 
 SEXP rdz_c_info(SEXP path);
 SEXP rdz_c_has_rust(void);
-SEXP rdz_c_read(SEXP path);
+SEXP rdz_c_read(SEXP path, SEXP settings);
+SEXP rdz_c_zstd_version(void);
 SEXP rdz_c_root_length(SEXP x);
-SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path);
-SEXP rdz_test_write_generic_unwind(SEXP x, SEXP path, SEXP blocks);
+SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path, SEXP settings);
+SEXP rdz_test_write_generic_unwind(SEXP x, SEXP path, SEXP blocks, SEXP settings);
 SEXP rdz_test_records(void);
 SEXP rdz_test_read_generic(SEXP path);
 SEXP rdz_test_write_generic(SEXP payload, SEXP synopsis, SEXP path);
@@ -55,10 +57,11 @@ static SEXP savvy_rdz_write_generic__impl(SEXP payload, SEXP synopsis, SEXP path
 static const R_CallMethodDef call_entries[] = {
     {"rdz_c_info", (DL_FUNC)&rdz_c_info, 1},
     {"rdz_c_has_rust", (DL_FUNC)&rdz_c_has_rust, 0},
-    {"rdz_c_read", (DL_FUNC)&rdz_c_read, 1},
+    {"rdz_c_read", (DL_FUNC)&rdz_c_read, 2},
+    {"rdz_c_zstd_version", (DL_FUNC)&rdz_c_zstd_version, 0},
     {"rdz_c_root_length", (DL_FUNC)&rdz_c_root_length, 1},
-    {"rdz_c_write_generic", (DL_FUNC)&rdz_c_write_generic, 3},
-    {"rdz_test_write_generic_unwind", (DL_FUNC)&rdz_test_write_generic_unwind, 3},
+    {"rdz_c_write_generic", (DL_FUNC)&rdz_c_write_generic, 4},
+    {"rdz_test_write_generic_unwind", (DL_FUNC)&rdz_test_write_generic_unwind, 4},
     {"rdz_test_records", (DL_FUNC)&rdz_test_records, 0},
     {"rdz_test_read_generic", (DL_FUNC)&rdz_test_read_generic, 1},
     {"rdz_test_write_generic", (DL_FUNC)&rdz_test_write_generic, 3},
@@ -70,7 +73,8 @@ static const R_CallMethodDef call_entries[] = {
     {"savvy_rdz_write_generic__impl", (DL_FUNC)&savvy_rdz_write_generic__impl, 3},
     {NULL, NULL, 0}};
 
-void R_init_rdz(DllInfo *dll)
+/* Everything else is hidden ($(C_VISIBILITY) in Makevars), zstd included. */
+void attribute_visible R_init_rdz(DllInfo *dll)
 {
     R_registerRoutines(dll, NULL, call_entries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);

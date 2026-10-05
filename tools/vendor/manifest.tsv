@@ -1,0 +1,2 @@
+source	repo	tag	commit	version_string	archive	archive_sha256	license	defines	patches
+zstd	https://github.com/facebook/zstd	v1.5.7	f8745da6ff1ad1e7bab384bd1f9d742439278e99	1.5.7	https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz	eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3	BSD-3-Clause	ZSTDLIB_VISIBLE,ZSTDERRORLIB_VISIBLE	-

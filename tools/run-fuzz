@@ -8,7 +8,8 @@
 #
 # The canary (fuzz/fuzz_canary.c) must crash first, through the same code and
 # flags, or the gate is not trusted. Seeds are the reference fixtures under
-# 64 KiB. Both targets compare no checksum (-DRDZ_FUZZ_SKIP_CHECKSUMS), or
+# 64 KiB and fuzz/seeds/, small files of 4 KiB zstd blocks. Both targets
+# compare no checksum (-DRDZ_FUZZ_SKIP_CHECKSUMS), or
 # the fuzzer would never get past one to the structure it guards; the grown
 # corpus is kept in $FUZZ_CORPUS (default fuzz/corpus),
 # which CI caches so that fuzzing time accumulates. zubin's and zufast's
@@ -24,12 +25,13 @@ ZUBIN=${ZUBIN_INCLUDE:-$(Rscript -e 'cat(system.file("include", package = "zubin
 ZUFAST=${ZUFAST_INCLUDE:-$(Rscript -e 'cat(system.file("include", package = "zufast"))')}
 [ -n "$ZUBIN" ] && [ -n "$ZUFAST" ] || { echo "run-fuzz: install zubin and zufast first" >&2; exit 2; }
 
-SRCS="src/core/rdz_container.c src/core/rdz_records.c src/core/rdz_io.c src/core/rdz_error.c"
+SRCS="src/core/rdz_container.c src/core/rdz_records.c src/core/rdz_io.c src/core/rdz_error.c
+      src/core/rdz_codec.c src/vendor/zstd/zstd.c"
 FLAGS="-std=c99 -g -O1 -fno-omit-frame-pointer -fno-sanitize-recover=undefined -UNDEBUG
-       -DRDZ_STANDALONE -DRDZ_FUZZ_SKIP_CHECKSUMS -Isrc/core -I$ZUBIN -I$ZUFAST"
+       -DRDZ_STANDALONE -DRDZ_FUZZ_SKIP_CHECKSUMS -DZSTDLIB_VISIBLE= -DZSTDERRORLIB_VISIBLE= -Isrc/core -I$ZUBIN -I$ZUFAST"
 
 mkdir -p "$WORK/seeds" "$CORPUS" "$WORK/artifacts"
-for f in tests/testthat/fixtures/rust/*.rdz; do
+for f in tests/testthat/fixtures/rust/*.rdz fuzz/seeds/*.rdz; do
   [ "$(wc -c < "$f")" -le 65536 ] && cp "$f" "$WORK/seeds/"
 done
 

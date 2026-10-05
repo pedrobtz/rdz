@@ -1,16 +1,19 @@
 Package: rdz
 Title: Versioned Serialization for R Objects
 Version: 0.0.0.9000
-Authors@R:
+Authors@R: c(
     person("Pedro", "Baltazar", email = "pedrobtz@gmail.com",
-           role = c("aut", "cre", "cph"))
+           role = c("aut", "cre", "cph")),
+    person("Meta Platforms, Inc. and affiliates", role = "cph",
+           comment = "Zstandard, bundled in src/vendor/zstd")
+  )
 Description: Writes and reads R objects using a versioned, block-structured
     container format. The format preserves R serialization semantics while
     adding explicit format identification, length validation, and integrity
     checking.
 License: MIT + file LICENSE
-Copyright: The authors and copyright holders of the bundled Rust crates are
-    listed in file inst/COPYRIGHTS.
+Copyright: The authors and copyright holders of the bundled Zstandard
+    library and Rust crates are listed in file inst/COPYRIGHTS.
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 Depends:

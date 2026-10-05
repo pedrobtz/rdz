@@ -102,7 +102,7 @@ static int rdz_check_logical_blocks(const rdz_object *o, const rdz_block *blocks
     if (total != o->logical_len) return rdz_invalid(e, "logical object length mismatch");
     for (i = o->first_block; i < end; i++) {
         if (!rdz_logical_length_ok(blocks[i].encoding, blocks[i].logical_count,
-                                   blocks[i].stored_len)) {
+                                   blocks[i].decoded_len)) {
             return rdz_invalid(e, "logical block encoding length mismatch");
         }
     }
@@ -157,7 +157,7 @@ static int rdz_check_string_blocks(const rdz_object *o, const rdz_block *blocks,
             for (k = 0; k < 3; k++) {
                 uint64_t w = widths[k];
                 if (count <= (UINT64_MAX - RDZ_DICT_INDEX_HEADER_LEN) / w &&
-                    count * w + RDZ_DICT_INDEX_HEADER_LEN == b->stored_len) {
+                    count * w + RDZ_DICT_INDEX_HEADER_LEN == b->decoded_len) {
                     ok = 1;
                 }
             }
@@ -185,8 +185,7 @@ static int rdz_check_generic_schema(const rdz_reader *r, rdz_error *e)
     }
     for (i = 0; i < r->nblocks; i++) {
         const rdz_block *b = &r->blocks[i];
-        if (b->encoding != RDZ_ENCODING_RAW || b->logical_count != b->decoded_len ||
-            (uint64_t)b->stored_len != b->logical_count) {
+        if (b->encoding != RDZ_ENCODING_RAW || b->logical_count != b->decoded_len) {
             return rdz_invalid(e, "invalid generic raw block");
         }
     }
@@ -252,6 +251,9 @@ void rdz_reader_init(rdz_reader *r)
     memset(r, 0, sizeof *r);
     zb_buf_init(&r->directory);
     zb_buf_init(&r->tables);
+    /* growable, empty: allocating nothing, this cannot fail */
+    zb_buf_alloc(&r->scratch, 0, (size_t)RDZ_MAX_BLOCK_SIZE);
+    rdz_codec_init(&r->codec);
     r->file.fp = NULL;
     r->file.mem = NULL;
 }
@@ -261,6 +263,8 @@ void rdz_reader_close(rdz_reader *r)
     rdz_infile_close(&r->file);
     zb_buf_release(&r->directory);
     zb_buf_release(&r->tables);
+    zb_buf_release(&r->scratch);
+    rdz_codec_free(&r->codec);
     r->objects = NULL;
     r->attributes = NULL;
     r->blocks = NULL;
@@ -343,9 +347,19 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
         if (b->sequence != i || b->flags != 0) {
             return rdz_invalid(e, "invalid block sequence or flags");
         }
-        if (b->compression != RDZ_COMPRESSION_NONE || (uint64_t)b->stored_len != b->decoded_len ||
-            b->decoded_len > RDZ_MAX_BLOCK_SIZE) {
-            return rdz_limit(e, "block size");
+        if (b->decoded_len > RDZ_MAX_BLOCK_SIZE) return rdz_limit(e, "block size");
+        switch (b->compression) {
+        case RDZ_COMPRESSION_NONE:
+            if ((uint64_t)b->stored_len != b->decoded_len) return rdz_limit(e, "block size");
+            break;
+        case RDZ_COMPRESSION_ZSTD:
+            /* canonical: a block is compressed only when that makes it smaller */
+            if (b->stored_len == 0 || (uint64_t)b->stored_len >= b->decoded_len) {
+                return rdz_invalid(e, "a compressed block is not smaller than its decoded bytes");
+            }
+            break;
+        default:
+            return rdz_invalid(e, "unsupported block compression");
         }
         if (b->decoded_len > r->block_size) {
             return rdz_invalid(e, "decoded block length exceeds the declared block size");
@@ -480,7 +494,7 @@ int rdz_reader_open_memory(rdz_reader *r, const uint8_t *data, size_t n, rdz_err
     return 0;
 }
 
-int rdz_reader_read_block(rdz_reader *r, uint32_t index, zb_buf *out, rdz_error *e)
+int rdz_reader_read_stored(rdz_reader *r, uint32_t index, zb_buf *stored, rdz_error *e)
 {
     const rdz_block *b;
     uint8_t h[RDZ_BLOCK_HEADER_LEN];
@@ -501,14 +515,44 @@ int rdz_reader_read_block(rdz_reader *r, uint32_t index, zb_buf *out, rdz_error 
         zb_rd_u32le(h + RDZ_BH_RESERVED) != 0 || zb_rd_u64le(h + RDZ_BH_CHECKSUM) != b->checksum) {
         return rdz_invalid_block(e, "block %lu header does not match the directory", b->sequence);
     }
+    zb_buf_reset(stored);
+    if (!zb_put_raw(stored, b->stored_len)) {
+        return (stored->flags & ZB_BUF_HIT_LIMIT) ? rdz_limit(e, "block allocation")
+                                                  : rdz_memory(e, "a block");
+    }
+    return rdz_infile_read_at(&r->file, b->payload_offset, stored->data, b->stored_len, e);
+}
+
+int rdz_block_decode(const rdz_block *b, const zb_buf *stored, zb_buf *out, rdz_codec *codec,
+                     rdz_error *e)
+{
+    if (stored->len != b->stored_len) return rdz_invalid(e, "block length mismatch");
+    if (RDZ_CHECKSUM_DIFFERS(b->checksum, rdz_hash(stored->data, stored->len))) {
+        return rdz_invalid_block(e, "checksum mismatch in block %lu", b->sequence);
+    }
+    if (b->compression == RDZ_COMPRESSION_NONE) return 0;
     zb_buf_reset(out);
-    if (!zb_put_raw(out, b->stored_len)) {
+    if (!zb_put_raw(out, (size_t)b->decoded_len)) {
         return (out->flags & ZB_BUF_HIT_LIMIT) ? rdz_limit(e, "block allocation")
                                                : rdz_memory(e, "a block");
     }
-    if (rdz_infile_read_at(&r->file, b->payload_offset, out->data, b->stored_len, e)) return 1;
-    if (RDZ_CHECKSUM_DIFFERS(b->checksum, rdz_hash(out->data, b->stored_len))) {
-        return rdz_invalid_block(e, "checksum mismatch in block %lu", b->sequence);
+    return rdz_codec_decompress(codec, b->compression, stored->data, stored->len, out->data,
+                                (size_t)b->decoded_len, b->sequence, e);
+}
+
+int rdz_reader_read_block(rdz_reader *r, uint32_t index, zb_buf *out, rdz_error *e)
+{
+    const rdz_block *b;
+    if (rdz_reader_read_stored(r, index, &r->scratch, e)) return 1;
+    b = &r->blocks[index];
+    if (rdz_block_decode(b, &r->scratch, out, &r->codec, e)) return 1;
+    if (b->compression == RDZ_COMPRESSION_NONE) {
+        zb_buf_reset(out);
+        if (!zb_put_raw(out, r->scratch.len)) {
+            return (out->flags & ZB_BUF_HIT_LIMIT) ? rdz_limit(e, "block allocation")
+                                                   : rdz_memory(e, "a block");
+        }
+        if (r->scratch.len) memcpy(out->data, r->scratch.data, r->scratch.len);
     }
     return 0;
 }
@@ -520,6 +564,7 @@ void rdz_writer_init(rdz_writer *w)
     rdz_outfile_init(&w->out);
     zb_buf_init(&w->entries);
     w->nblocks = 0;
+    w->block_size = RDZ_BLOCK_SIZE;
     w->open = 0;
 }
 
@@ -532,10 +577,12 @@ void rdz_writer_discard(rdz_writer *w)
 }
 
 int rdz_writer_open(rdz_writer *w, const char *path, uint16_t codec_id,
-                    uint16_t codec_version, rdz_error *e)
+                    uint16_t codec_version, uint32_t block_size, rdz_error *e)
 {
     uint8_t h[RDZ_HEADER_LEN];
     rdz_writer_init(w);
+    if (block_size == 0 || block_size > RDZ_MAX_BLOCK_SIZE) return rdz_limit(e, "block size");
+    w->block_size = block_size;
     if (zb_buf_alloc(&w->entries, RDZ_BLOCK_ENTRY_LEN * 4, 0)) {
         return rdz_memory(e, "the block directory");
     }
@@ -550,38 +597,48 @@ int rdz_writer_open(rdz_writer *w, const char *path, uint16_t codec_id,
     zb_wr_u16le(h + RDZ_FH_HEADER_LEN, (uint16_t)RDZ_HEADER_LEN);
     zb_wr_u16le(h + RDZ_FH_CODEC, codec_id);
     zb_wr_u16le(h + RDZ_FH_CODEC_VERSION, codec_version);
-    zb_wr_u32le(h + RDZ_FH_MAX_BLOCK, RDZ_BLOCK_SIZE);
+    zb_wr_u32le(h + RDZ_FH_MAX_BLOCK, block_size);
     zb_wr_u64le(h + RDZ_FH_CHECKSUM, rdz_hash(h, RDZ_FH_CHECKSUM));
     return rdz_outfile_write(&w->out, h, sizeof h, e);
 }
 
-int rdz_writer_block(rdz_writer *w, uint16_t encoding, uint64_t logical_count,
-                     const uint8_t *payload, size_t n, rdz_error *e)
+int rdz_writer_stored(rdz_writer *w, uint16_t encoding, uint16_t compression,
+                      uint64_t logical_count, uint64_t decoded_len, const uint8_t *stored,
+                      size_t n, uint64_t checksum, rdz_error *e)
 {
     uint8_t h[RDZ_BLOCK_HEADER_LEN];
     uint8_t *slot;
     rdz_block b;
     if (w->nblocks >= RDZ_MAX_BLOCKS) return rdz_limit(e, "block count");
-    if ((uint64_t)n > RDZ_MAX_BLOCK_SIZE) return rdz_limit(e, "block size");
+    if ((uint64_t)n > RDZ_MAX_BLOCK_SIZE || decoded_len > w->block_size) {
+        return rdz_limit(e, "block size");
+    }
     b.sequence = w->nblocks;
     b.flags = 0;
     b.header_offset = w->out.position;
     if (rdz_add_u64(b.header_offset, RDZ_BLOCK_HEADER_LEN, &b.payload_offset, e)) return 1;
     b.stored_len = (uint32_t)n;
     b.logical_count = logical_count;
-    b.decoded_len = (uint64_t)n;
+    b.decoded_len = decoded_len;
     b.encoding = encoding;
-    b.compression = RDZ_COMPRESSION_NONE;
-    b.checksum = rdz_hash(payload, n);
+    b.compression = compression;
+    b.checksum = checksum;
     slot = zb_put_raw(&w->entries, RDZ_BLOCK_ENTRY_LEN);
     if (!slot) return rdz_memory(e, "the block directory");
     rdz_block_entry_encode(slot, &b);
     rdz_block_header_encode(h, &b);
-    if (rdz_outfile_write(&w->out, h, sizeof h, e) || rdz_outfile_write(&w->out, payload, n, e)) {
+    if (rdz_outfile_write(&w->out, h, sizeof h, e) || rdz_outfile_write(&w->out, stored, n, e)) {
         return 1;
     }
     w->nblocks++;
     return 0;
+}
+
+int rdz_writer_block(rdz_writer *w, uint16_t encoding, uint64_t logical_count,
+                     const uint8_t *payload, size_t n, rdz_error *e)
+{
+    return rdz_writer_stored(w, encoding, RDZ_COMPRESSION_NONE, logical_count, (uint64_t)n,
+                             payload, n, rdz_hash(payload, n), e);
 }
 
 int rdz_writer_finish(rdz_writer *w, const rdz_object *objects, uint32_t nobjects,
@@ -650,7 +707,8 @@ int rdz_write_generic(const char *path, const uint8_t *payload, size_t n,
     size_t at = 0;
     if (synopsis_len > RDZ_MAX_SYNOPSIS_LEN) return rdz_limit(e, "generic synopsis");
     if (n / RDZ_BLOCK_SIZE >= RDZ_MAX_BLOCKS) return rdz_limit(e, "block count");
-    if (rdz_writer_open(&w, path, RDZ_CODEC_R_SERIAL_V3, RDZ_R_SERIAL_CODEC_VERSION, e)) {
+    if (rdz_writer_open(&w, path, RDZ_CODEC_R_SERIAL_V3, RDZ_R_SERIAL_CODEC_VERSION,
+                        RDZ_BLOCK_SIZE, e)) {
         rdz_writer_discard(&w);
         return 1;
     }

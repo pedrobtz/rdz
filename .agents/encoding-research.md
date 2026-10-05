@@ -606,10 +606,15 @@ verification tooling, as `fst` and `zstdlite` do. The speed presets of
 performance.md need zstd's negative and low levels; zukomp registers only the
 DEFLATE family and has no zstd satellite scheduled. Block bytes are zstd frames
 either way, so a later switch to a shared registration is not a format change.
-The ID is reserved in container version 3; no writer emits it and readers reject
-it until the pipeline stage (plan-c Stage D) implements and measures it. Result:
-**adopt** the slot and the dependency; per-type use remains gated on the
-benchmark matrix.
+Implemented at plan-c Stage D (zstd 1.5.7, vendored as one translation unit
+without its own threads; tools/vendor/). Levels measured on 160 MB of doubles,
+160 MB of integers and 5e6 short strings, one thread (Apple arm64): level 1
+writes in 850/970/570 ms to 48.8/66.4/15.3 MB; level 3 takes 1.1 to 1.5 times
+as long for sizes within 4% either way; level 6 takes 2.3 to 3.3 times as long
+for files 5 to 7% smaller; level -1 saves about 5% of the time for files 1 to
+35% larger. Result: **adopt**
+level 1 as the `balanced` default and level 6 as `compact`; `speed` stores raw.
+Per-type use beyond the generic codec remains gated on the benchmark matrix.
 
 **The generic payload is streamed — adopt.** The C writer serializes through an
 `R_outpstream` straight into blocks and reads through an `R_inpstream` from them,
@@ -633,7 +638,7 @@ so the whole-payload raw vector never exists. The bytes on disk are those of
 | Whole-string dictionary | character, factor levels | experiment | Phases 4, 5 |
 | Prefix/delta strings | character | experiment | Phase 4 |
 | FSST | character | defer until dictionary baseline | Phase 4/tuning |
-| Zstandard per block (compression ID 1) | all leaf blocks | adopt slot (2026-10-05); per-type use measured | plan-c Stage D |
+| Zstandard per block (compression ID 1) | all leaf blocks | adopt (2026-10-05): generic codec, levels 1 and 6 | plan-c Stage D; per type thereafter |
 | LZ4 per block | all leaf blocks | evidence only | tuning |
 | Filter pipeline metadata | fixed-width blocks | adopt minimal form | Phase 0 |
 | Footer block/column index | container, data frame | adopt minimal form | Phases 0, 7 |
