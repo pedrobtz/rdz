@@ -113,9 +113,10 @@ SEXP rdz_c_info(SEXP path)
     rdz_set(out, names, 7, "attribute_count", Rf_ScalarInteger((int)r->nattributes));
     rdz_set(out, names, 8, "payload_bytes", Rf_ScalarReal((double)r->payload_bytes));
     rdz_set(out, names, 9, "file_bytes", Rf_ScalarReal((double)r->file_bytes));
-    synopsis = Rf_allocVector(RAWSXP, r->synopsis_len);
-    rdz_set(out, names, 10, "synopsis", synopsis);
+    synopsis = PROTECT(Rf_allocVector(RAWSXP, r->synopsis_len));
     if (r->synopsis_len) memcpy(RAW(synopsis), r->synopsis, r->synopsis_len);
+    rdz_set(out, names, 10, "synopsis", synopsis);
+    UNPROTECT(1);
     rdz_set(out, names, 11, "root_type", Rf_mkString(r->nobjects ? "logical" : ""));
     rdz_set(out, names, 12, "root_length",
             Rf_ScalarReal(r->nobjects ? (double)r->objects[0].logical_len : -1.0));
