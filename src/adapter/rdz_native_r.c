@@ -18,7 +18,7 @@
 #include <Rinternals.h>
 #include <Rversion.h>
 
-#include "../core/rdz_native.h"
+#include "../core/rdz_vector.h"
 #include "../rdz_r.h"
 
 /* R 4.6 removed ATTRIB() from the API; R_getAttribCount() replaces it. */
@@ -88,46 +88,119 @@ static const char *rdz_native_ineligible(SEXP x, SEXP *names)
 {
     R_xlen_t count;
     *names = R_NilValue;
-    if (TYPEOF(x) != LGLSXP) return Rf_type2char(TYPEOF(x));
-    if (ALTREP(x)) return "an ALTREP logical vector";
+    if (TYPEOF(x) != LGLSXP && TYPEOF(x) != INTSXP && TYPEOF(x) != REALSXP) {
+        return Rf_type2char(TYPEOF(x));
+    }
+    if (ALTREP(x)) {
+        return TYPEOF(x) == LGLSXP ? "an ALTREP logical vector"
+               : TYPEOF(x) == INTSXP ? "an ALTREP integer vector" : "an ALTREP double vector";
+    }
     count = rdz_attribute_count(x);
     if (count == 0) return NULL;
     /* for an atomic vector getAttrib() returns the stored names unallocated */
     *names = Rf_getAttrib(x, R_NamesSymbol);
-    if (count != 1 || *names == R_NilValue) return "a logical vector with attributes other than names";
-    if (TYPEOF(*names) != STRSXP || XLENGTH(*names) != XLENGTH(x)) {
-        return "a malformed logical vector";
+    if (count != 1 || *names == R_NilValue) {
+        return TYPEOF(x) == LGLSXP ? "a logical vector with attributes other than names"
+                                   : "a vector with attributes other than names";
     }
-    if (ALTREP(*names)) return "a logical vector with ALTREP names";
+    if (TYPEOF(*names) != STRSXP || XLENGTH(*names) != XLENGTH(x)) {
+        return TYPEOF(x) == LGLSXP ? "a malformed logical vector" : "a malformed vector";
+    }
+    if (ALTREP(*names)) return "a vector with ALTREP names";
     return NULL;
 }
 
+static void rdz_tick(void *ctx)
+{
+    (void)ctx;
+    R_CheckUserInterrupt();
+}
+
+static void rdz_vec_finalize(SEXP ptr)
+{
+    rdz_vec *v = (rdz_vec *)R_ExternalPtrAddr(ptr);
+    if (v) {
+        rdz_vec_free(v);
+        free(v);
+        R_ClearExternalPtr(ptr);
+    }
+}
+
+typedef struct {
+    rdz_vec *v;
+    const char *path;
+    uint16_t type;
+    const void *values;
+    size_t n;
+    rdz_str_source *names;
+    int policy, level, threads;
+    rdz_error e;
+    int failed;
+} rdz_write_call;
+
+static SEXP rdz_write_body(void *data)
+{
+    rdz_write_call *c = (rdz_write_call *)data;
+    c->failed = rdz_vec_write(c->v, c->path, c->type, c->values, c->n, c->names, c->policy,
+                              c->level, c->threads, rdz_tick, NULL, &c->e);
+    return R_NilValue;
+}
+
+static void rdz_vec_cleanup(void *data, Rboolean jump)
+{
+    if (jump) rdz_vec_finalize((SEXP)data);
+}
+
 /* TRUE when written; FALSE when x is not for the native codec and strict is
-   FALSE (automatic mode then writes it generically); a failure otherwise. */
-SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy)
+   FALSE (automatic mode then writes it generically); a failure otherwise.
+   settings: c(level, threads, block size), as rdz_settings() gives them. */
+SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy, SEXP settings)
 {
     const char *p = rdz_path(path);
-    SEXP names;
+    SEXP names, ptr, cont;
     const char *why = rdz_native_ineligible(x, &names);
-    rdz_error e;
     rdz_r_strings ctx;
     rdz_str_source src;
-    int failed;
+    rdz_write_call call;
+    if (TYPEOF(settings) != INTSXP || XLENGTH(settings) != 3) {
+        Rf_error("`settings` must be an integer vector of length 3.");
+    }
     if (why) {
         if (!Rf_asLogical(strict)) return Rf_ScalarLogical(0);
-        rdz_unsupported(&e, why);
-        return rdz_failure(&e);
+        rdz_unsupported(&call.e, why);
+        return rdz_failure(&call.e);
     }
+    ptr = PROTECT(R_MakeExternalPtr(NULL, R_NilValue, x));
+    R_RegisterCFinalizerEx(ptr, rdz_vec_finalize, TRUE);
+    cont = PROTECT(R_MakeUnwindCont());
+    call.v = (rdz_vec *)malloc(sizeof(rdz_vec));
+    if (!call.v) Rf_error("rdz could not allocate memory for a writer");
+    rdz_vec_init(call.v);
+    R_SetExternalPtrAddr(ptr, call.v);
+
     ctx.names = names;
     src.n = names == R_NilValue ? 0 : (size_t)XLENGTH(names);
     src.ctx = &ctx;
     src.key = rdz_r_key;
     src.value = rdz_r_value;
-    failed = rdz_write_native_logical(p, LOGICAL_RO(x), (size_t)XLENGTH(x),
-                                      names == R_NilValue ? NULL : &src, Rf_asInteger(policy), &e);
-    if (!failed) return Rf_ScalarLogical(1);
-    if (e.code == RDZ_E_UNSUPPORTED && !Rf_asLogical(strict)) return Rf_ScalarLogical(0);
-    return rdz_failure(&e);
+    call.path = p;
+    call.type = TYPEOF(x) == LGLSXP ? RDZ_TYPE_LOGICAL
+                : TYPEOF(x) == INTSXP ? RDZ_TYPE_INTEGER : RDZ_TYPE_DOUBLE;
+    call.values = TYPEOF(x) == REALSXP ? (const void *)REAL_RO(x)
+                  : TYPEOF(x) == INTSXP ? (const void *)INTEGER_RO(x)
+                                        : (const void *)LOGICAL_RO(x);
+    call.n = (size_t)XLENGTH(x);
+    call.names = names == R_NilValue ? NULL : &src;
+    call.policy = Rf_asInteger(policy);
+    call.level = INTEGER(settings)[0];
+    call.threads = INTEGER(settings)[1] < 1 ? 1 : INTEGER(settings)[1];
+    call.failed = 0;
+    R_UnwindProtect(rdz_write_body, &call, rdz_vec_cleanup, ptr, cont);
+    rdz_vec_finalize(ptr);
+    UNPROTECT(2);
+    if (!call.failed) return Rf_ScalarLogical(1);
+    if (call.e.code == RDZ_E_UNSUPPORTED && !Rf_asLogical(strict)) return Rf_ScalarLogical(0);
+    return rdz_failure(&call.e);
 }
 
 /* ---- reading ---------------------------------------------------------------------- */
@@ -225,19 +298,36 @@ SEXP rdz_native_names_r(rdz_reader *r, rdz_error *e, int *failed)
     return s.target;
 }
 
-/* The value of an open native file. */
-SEXP rdz_native_value_r(rdz_reader *r, rdz_error *e, int *failed)
+/* The value of an open native file, its values read through v's pipeline
+   with `threads` workers. Called under an unwind protection that frees v
+   and the reader: rdz_tick() may jump. */
+SEXP rdz_native_value_r(rdz_reader *r, rdz_vec *v, int threads, rdz_error *e, int *failed)
 {
+    uint16_t type;
     size_t n;
     SEXP x, names;
+    void *out;
     *failed = 1;
-    if (rdz_native_length(r, &n, e)) return R_NilValue;
+    if (rdz_vec_shape(r, &type, &n, e)) return R_NilValue;
     if (n > (size_t)R_XLEN_T_MAX) {
         rdz_limit(e, "allocation size");
         return R_NilValue;
     }
-    x = PROTECT(Rf_allocVector(LGLSXP, (R_xlen_t)n));
-    if (rdz_native_read_logical(r, LOGICAL(x), e)) {
+    switch (type) {
+    case RDZ_TYPE_LOGICAL:
+        x = PROTECT(Rf_allocVector(LGLSXP, (R_xlen_t)n));
+        out = LOGICAL(x);
+        break;
+    case RDZ_TYPE_INTEGER:
+        x = PROTECT(Rf_allocVector(INTSXP, (R_xlen_t)n));
+        out = INTEGER(x);
+        break;
+    default:
+        x = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)n));
+        out = REAL(x);
+        break;
+    }
+    if (rdz_vec_read(v, r, out, threads, rdz_tick, NULL, e)) {
         UNPROTECT(1);
         return R_NilValue;
     }

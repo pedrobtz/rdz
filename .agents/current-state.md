@@ -1,5 +1,53 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-05: plan-c Stage F
+
+Integer and double vectors (with optional `names`) are native
+(`src/core/rdz_numeric.c`, `rdz_vector.c`; container-format.md, "Native
+integer and double representation"), and every native write and read now goes
+through the block pipeline: the R thread copies a block's values into a slot,
+workers encode, compress and checksum it, and finished blocks are written in
+order; reading decompresses in workers and decodes on the R thread into the
+result. Interrupts are checked between blocks under `R_UnwindProtect()`.
+Logical blocks stay uncompressed (the Rust bytes); integer and double blocks
+are compressed by the preset. ALTREP vectors (`1:n`) and classed vectors stay
+generic.
+
+Evidence: the R suite and the C harness (ASan and UBSan) round-trip every
+record kind at every block boundary, at 1, 4 and 8 threads, bit for bit
+(NaN payloads, `NA`, `-0`), with identical bytes across thread counts; every
+single-byte change of a small file is detected; fuzzing with integer and
+double seeds found nothing.
+
+`tools/bench-numeric.R` (1e7 values, ms and MB; one thread / eight; R 4.6.1,
+Apple arm64, 8 cores; qs2 0.2.2 at its default level, checksums validated):
+
+| data | native w/r, 1 thread | native w/r, 8 | native MB | generic w/r, 1 | generic MB | qs2 w/r, 1 | qs2 w/r, 8 | qs2 MB |
+|---|---|---|---:|---|---:|---|---|---:|
+| int random | 47/20 | 22/20 | 23.9 | 86/72 | 29.9 | 83/23 | 32/15 | 24.0 |
+| int full range | 52/6 | 22/7 | 38.2 | 56/46 | 38.2 | 47/24 | 36/23 | 38.2 |
+| int sequential | 25/9 | 6/9 | 0.0 | 96/71 | 25.2 | 14/6 | 4/3 | 0.2 |
+| int low cardinality | 31/18 | 8/18 | 2.4 | 121/81 | 6.3 | 115/49 | 24/13 | 5.9 |
+| int 5% missing | 65/20 | 24/20 | 23.9 | 114/75 | 28.8 | 197/49 | 48/23 | 29.0 |
+| int all missing | 27/1 | 6/1 | 0.0 | 36/53 | 0.0 | 13/4 | 4/3 | 0.0 |
+| dbl random | 80/37 | 37/22 | 67.3 | 142/132 | 73.1 | 116/61 | 64/42 | 67.2 |
+| dbl rounded | 230/71 | 51/15 | 22.1 | 229/128 | 18.9 | 263/87 | 54/23 | 18.4 |
+| dbl currency | 112/52 | 34/20 | 50.6 | 195/131 | 63.2 | 422/100 | 92/38 | 42.4 |
+| dbl monotonic | 64/28 | 27/18 | 41.6 | 140/129 | 65.6 | 192/87 | 49/40 | 49.7 |
+| dbl repeated | 180/79 | 38/16 | 10.7 | 210/138 | 10.4 | 203/83 | 41/20 | 9.0 |
+| dbl all missing | 8/2 | 4/2 | 0.0 | 49/81 | 0.0 | 26/9 | 7/6 | 0.0 |
+
+Roadmap Phases 2 and 3's exits: every retained integer record beats raw on a
+documented part of the suite (runs on runs and all-missing, delta on
+sequences, frame of reference on random, low-cardinality and missing); the
+eight-thread pipeline scales writes 2 to 5 times with small vectors
+unaffected (one block, no workers started). Open: zstd at level 1 is the
+write cost on rounded and repeated doubles (one thread), and qs2 still makes
+the smaller files on those and on currency, where ALP (deferred) is the
+lever.
+
+Stage G (character and factor) is next.
+
 ## Checkpoint 2026-10-05: plan-c Stage E
 
 The native logical codec is C (`src/core/rdz_logical.c`, `rdz_string.c`,

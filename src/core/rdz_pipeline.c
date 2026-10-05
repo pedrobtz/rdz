@@ -2,6 +2,8 @@
 #include <string.h>
 
 #include "rdz_container.h"
+#include "rdz_logical.h"
+#include "rdz_numeric.h"
 #include "rdz_pipeline.h"
 
 enum { RDZ_SLOT_FREE = 0, RDZ_SLOT_FILLING, RDZ_SLOT_QUEUED, RDZ_SLOT_BUSY, RDZ_SLOT_DONE };
@@ -234,8 +236,8 @@ void rdz_job_compress(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
         s->failed = 1;
         return;
     }
-    s->checksum = s->compression == RDZ_COMPRESSION_NONE ? rdz_hash(s->in.data, s->in.len)
-                                                         : rdz_hash(s->out.data, s->out.len);
+    s->result = s->compression == RDZ_COMPRESSION_NONE ? &s->in : &s->out;
+    s->checksum = rdz_hash(s->result->data, s->result->len);
 }
 
 void rdz_job_decode(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
@@ -243,5 +245,91 @@ void rdz_job_decode(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
     const rdz_block *b = (const rdz_block *)s->block;
     (void)p;
     s->compression = b->compression;
+    s->result = b->compression == RDZ_COMPRESSION_NONE ? &s->in : &s->out;
     if (rdz_block_decode(b, &s->in, &s->out, codec, &s->e)) s->failed = 1;
+}
+
+#define RDZ_SAMPLE_VALUES ((size_t)4096)
+
+/* Whether plain bytes should be stored rather than shuffled planes: when
+   values recur exactly, zstd finds their 8- (or 4-) byte repeats in the
+   plain bytes, which shuffling scatters; otherwise the planes compress
+   better. Judged by the distinct share of up to 4,096 values spread over
+   the block (from the shuffled record in s->out), counted in a small table
+   in the codec's scratch buffer. A failure says no. */
+static int rdz_plain_wins(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
+{
+    size_t width = p->vtype == RDZ_TYPE_DOUBLE ? 8 : 4;
+    size_t n = (size_t)s->logical_count, m = n < RDZ_SAMPLE_VALUES ? n : RDZ_SAMPLE_VALUES;
+    size_t cap = 8192, distinct = 0, i, k;
+    uint64_t *table;
+    if (m == 0) return 0;
+    zb_buf_reset(&codec->scratch);
+    if (zb_put_zeros(&codec->scratch, cap * sizeof(uint64_t) + cap)) return 0;
+    table = (uint64_t *)(void *)codec->scratch.data;
+    for (i = 0; i < m; i++) {
+        size_t at = m == n ? i : i * (n / m), slot;
+        uint64_t v = 0, h;
+        uint8_t *used = codec->scratch.data + cap * sizeof(uint64_t);
+        for (k = 0; k < width; k++) v |= (uint64_t)s->out.data[k * n + at] << (8 * k);
+        h = v * 0x9e3779b97f4a7c15ull;
+        slot = (size_t)(h >> 51); /* 13 bits: cap is 8192 */
+        while (used[slot] && table[slot] != v) slot = (slot + 1) & (cap - 1);
+        if (!used[slot]) {
+            used[slot] = 1;
+            table[slot] = v;
+            distinct++;
+        }
+    }
+    return distinct * 2 < m;
+}
+
+void rdz_job_vector(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
+{
+    size_t n = (size_t)s->logical_count;
+    uint16_t encoding = 0;
+    int failed;
+    switch (p->vtype) {
+    case RDZ_TYPE_LOGICAL:
+        failed = rdz_logical_encode((const int32_t *)(const void *)s->in.data, n, &s->out,
+                                    &encoding, &codec->scratch, &s->e);
+        break;
+    case RDZ_TYPE_INTEGER:
+        failed = rdz_int_encode((const int32_t *)(const void *)s->in.data, n, p->level != 0,
+                                &s->out, &encoding, &s->e);
+        break;
+    default:
+        failed = rdz_dbl_encode((const double *)(const void *)s->in.data, n, p->level != 0,
+                                &s->out, &encoding, &s->e);
+        break;
+    }
+    if (failed) {
+        s->failed = 1;
+        return;
+    }
+    /* Shuffled byte planes usually compress better, but plain bytes keep the
+       eight-byte repeats zstd finds in repeated or rounded values: compress
+       a sample both ways and keep the plain form when it wins. */
+    if ((encoding == RDZ_ENCODING_INT_SHUFFLE || encoding == RDZ_ENCODING_DBL_SHUFFLE) &&
+        rdz_plain_wins(p, s, codec)) {
+        failed = p->vtype == RDZ_TYPE_INTEGER
+                     ? rdz_int_encode((const int32_t *)(const void *)s->in.data, n, 0, &s->out,
+                                      &encoding, &s->e)
+                     : rdz_dbl_encode((const double *)(const void *)s->in.data, n, 0, &s->out,
+                                      &encoding, &s->e);
+        if (failed) {
+            s->failed = 1;
+            return;
+        }
+    }
+    s->encoding = encoding;
+    s->decoded_len = s->out.len;
+    /* the values in `in` are spent: compress the record into it */
+    if (rdz_codec_compress(codec, p->level, s->out.data, s->out.len, &s->in, &s->compression,
+                           &s->e)) {
+        s->failed = 1;
+        return;
+    }
+    s->result = s->compression == RDZ_COMPRESSION_NONE ? &s->out : &s->in;
+    s->checksum = rdz_hash(s->result->data, s->result->len);
 }

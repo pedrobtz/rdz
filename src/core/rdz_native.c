@@ -115,7 +115,8 @@ done:
 
 int rdz_native_length(const rdz_reader *r, size_t *n, rdz_error *e)
 {
-    if (r->codec_id != RDZ_CODEC_NATIVE_V1 || r->nobjects == 0) {
+    if (r->codec_id != RDZ_CODEC_NATIVE_V1 || r->nobjects == 0 ||
+        r->objects[0].type_tag != RDZ_TYPE_LOGICAL) {
         return rdz_codec_error(e, r->codec_id, r->codec_version);
     }
     if (r->objects[0].logical_len > (uint64_t)SIZE_MAX / sizeof(int32_t)) {

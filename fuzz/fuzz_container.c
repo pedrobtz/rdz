@@ -9,6 +9,7 @@
 
 #include "rdz_container.h"
 #include "rdz_native.h"
+#include "rdz_vector.h"
 
 static int count_plain(void *ctx, const rdz_str *v, size_t n, rdz_error *e)
 {
@@ -37,17 +38,21 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     }
     /* a native file's values and names, when small enough to decode */
     {
+        uint16_t type;
         size_t n;
-        if (rdz_native_length(&r, &n, &e) == 0 && n <= ((size_t)1 << 20)) {
-            int32_t *values = (int32_t *)malloc((n ? n : 1) * sizeof *values);
+        if (rdz_vec_shape(&r, &type, &n, &e) == 0 && n <= ((size_t)1 << 20)) {
+            void *values = malloc((n ? n : 1) * sizeof(double));
             rdz_names_sink sink;
+            rdz_vec v;
             sink.ctx = NULL;
             sink.plain = count_plain;
             sink.entries = count_plain;
             sink.indices = count_ids;
-            if (values && rdz_native_read_logical(&r, values, &e) == 0) {
+            rdz_vec_init(&v);
+            if (values && rdz_vec_read(&v, &r, values, 2, NULL, NULL, &e) == 0) {
                 rdz_native_read_names(&r, &sink, &e);
             }
+            rdz_vec_free(&v);
             free(values);
         }
     }

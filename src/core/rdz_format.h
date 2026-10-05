@@ -49,6 +49,8 @@
 #define RDZ_COMPRESSION_ZSTD 1u /* reserved: not written or accepted yet */
 
 #define RDZ_TYPE_LOGICAL   1u
+#define RDZ_TYPE_INTEGER   2u
+#define RDZ_TYPE_DOUBLE    3u
 #define RDZ_TYPE_CHARACTER 4u
 #define RDZ_ROLE_ROOT            0u
 #define RDZ_ROLE_ATTRIBUTE_NAME  1u

@@ -39,7 +39,8 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
 
   if (!identical(mode, "r")) {
     native_written <- rdz_check(.Call(
-      rdz_c_try_write_native, x, path, identical(mode, "native"), rdz_dictionary_policy()
+      rdz_c_try_write_native, x, path, identical(mode, "native"), rdz_dictionary_policy(),
+      rdz_settings()
     ))
     if (isTRUE(native_written)) {
       return(invisible(path))

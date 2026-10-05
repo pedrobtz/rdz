@@ -144,14 +144,14 @@ test_that("codec modes distinguish fallback from strict native encoding", {
   native <- tempfile(fileext = ".rdz")
   on.exit(unlink(c(auto, forced_r, native)), add = TRUE)
 
-  write_rdz(1L, auto, mode = "auto")
+  write_rdz(list(1L), auto, mode = "auto")
   write_rdz(1L, forced_r, mode = "r")
 
   expect_identical(rdz_info(auto)$codec, "r_serial_v3")
   expect_identical(rdz_info(forced_r)$codec, "r_serial_v3")
   expect_error(
-    write_rdz(1L, native, mode = "native"),
-    "native serialization is not implemented for integer"
+    write_rdz(list(1L), native, mode = "native"),
+    "native serialization is not implemented for list"
   )
   expect_false(file.exists(native))
   expect_error(write_rdz(1L, native, mode = "invalid"), "arg")
