@@ -72,14 +72,20 @@ test_that("reference objects keep base R serialization's semantics", {
 
 test_that("payloads straddling the block size round-trip", {
   mib <- 1048576L
-  # 31 bytes of serialization surround a raw vector's bytes.
-  for (n in c(mib - 32L, mib - 31L, mib - 30L, 3L * mib + 7L)) {
+  # The serialization around a raw vector's bytes: 31 bytes in a UTF-8
+  # locale, more where the native encoding has a longer name.
+  overhead <- length(serialize(raw(), NULL, xdr = TRUE, version = 3L))
+  for (n in c(mib - overhead - 1L, mib - overhead, mib - overhead + 1L, 3L * mib + 7L)) {
     x <- rep_len(as.raw(0:250), n)
     path <- tempfile(fileext = ".rdz")
     write_rdz(x, path, mode = "r")
     expect_identical(read_rdz(path), x, label = n)
-    expect_identical(rdz_info(path)$payload_bytes, n + 31, label = n)
-    expect_identical(rdz_info(path)$block_count, as.integer(ceiling((n + 31) / mib)), label = n)
+    expect_identical(rdz_info(path)$payload_bytes, as.numeric(n + overhead), label = n)
+    expect_identical(
+      rdz_info(path)$block_count,
+      as.integer(ceiling((n + overhead) / mib)),
+      label = n
+    )
     unlink(path)
   }
 })
