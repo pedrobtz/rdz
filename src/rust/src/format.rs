@@ -29,6 +29,8 @@ pub(crate) const ENCODING_LOGICAL_DENSE_PLANES: u16 = 4;
 pub(crate) const ENCODING_LOGICAL_SPARSE_PATCHES: u16 = 5;
 pub(crate) const ENCODING_LOGICAL_RUN_ENDS: u16 = 6;
 pub(crate) const ENCODING_LOGICAL_PERIODIC: u16 = 7;
+pub(crate) const ENCODING_STRING_DICT_ENTRIES: u16 = 8;
+pub(crate) const ENCODING_STRING_DICT_INDICES: u16 = 9;
 pub(crate) const COMPRESSION_NONE: u16 = 0;
 pub(crate) const TYPE_LOGICAL: u16 = 1;
 pub(crate) const TYPE_CHARACTER: u16 = 4;
@@ -50,8 +52,15 @@ pub(crate) enum FormatError {
     Invalid(&'static str),
     InvalidDetail(String),
     UnsupportedContainerVersion(u16),
-    UnsupportedCodec { id: u16, version: u16 },
+    UnsupportedCodec {
+        id: u16,
+        version: u16,
+    },
     Limit(&'static str),
+    /// A value the native codec cannot represent, discovered while writing.
+    /// Automatic mode discards the partial file and falls back to R
+    /// serialization for the whole root; it is never a corruption error.
+    UnsupportedValue(&'static str),
 }
 
 impl fmt::Display for FormatError {
@@ -68,6 +77,9 @@ impl fmt::Display for FormatError {
             }
             Self::Limit(message) => {
                 write!(f, "invalid rdz file: {message} exceeds its format limit")
+            }
+            Self::UnsupportedValue(kind) => {
+                write!(f, "native serialization does not support {kind}")
             }
         }
     }

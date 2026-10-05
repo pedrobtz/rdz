@@ -76,12 +76,16 @@ pub(crate) fn write_generic(
     write_container(path, Codec::RSerialV3, payload, synopsis)
 }
 
-pub(crate) fn write_native_logical(
+pub(crate) fn write_native_logical<S>(
     path: &Path,
     values: &[i32],
     na_value: i32,
-    names: Option<&[string::StringValue]>,
-) -> Result<(), FormatError> {
+    names: Option<&S>,
+    policy: string::DictionaryPolicy,
+) -> Result<(), FormatError>
+where
+    S: string::StringSource + ?Sized,
+{
     if let Some(names) = names
         && names.len() != values.len()
     {
@@ -157,18 +161,14 @@ pub(crate) fn write_native_logical(
                 )?;
             }
 
-            let value_blocks = string::encode_blocks(names)?;
             let value_first_block =
                 u32::try_from(blocks.len()).map_err(|_| FormatError::Limit("block count"))?;
-            for block in &value_blocks {
-                write_encoded_block(
-                    &mut file,
-                    block.logical_count,
-                    ENCODING_STRING_PLAIN,
-                    &block.bytes,
-                    &mut blocks,
-                )?;
-            }
+            string::encode_values(names, policy, |encoding, count, payload| {
+                write_encoded_block(&mut file, count, encoding, payload, &mut blocks)
+            })?;
+            let value_block_count = u32::try_from(blocks.len())
+                .map_err(|_| FormatError::Limit("block count"))?
+                - value_first_block;
 
             objects.push(ObjectEntry {
                 object_id: 1,
@@ -196,7 +196,7 @@ pub(crate) fn write_native_logical(
                 first_attribute: 0,
                 attribute_count: 0,
                 first_block: value_first_block,
-                block_count: value_blocks.len() as u32,
+                block_count: value_block_count,
             });
             attributes.push(AttributeEntry {
                 owner_id: 0,

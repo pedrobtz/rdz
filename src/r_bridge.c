@@ -43,10 +43,12 @@ int rdz_is_altrep(SEXP value) {
   return ALTREP(value);
 }
 
-int rdz_charsxp_length(SEXP value) {
-  return LENGTH(value);
-}
-
-int rdz_charsxp_encoding(SEXP value) {
-  return Rf_getCharCE(value);
+// One call per string for the writer: bytes, byte length, encoding tag, and
+// R's cached ASCII flag (so non-ASCII native strings are found without
+// scanning bytes).
+const char *rdz_charsxp_view(SEXP value, int *length, int *encoding, int *ascii) {
+  *length = LENGTH(value);
+  *encoding = Rf_getCharCE(value);
+  *ascii = Rf_charIsASCII(value);
+  return CHAR(value);
 }
