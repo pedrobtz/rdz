@@ -238,7 +238,7 @@ static int classify(const int32_t *values, size_t n, rdz_planes *p, zb_buf *scra
     zb_buf_reset(scratch);
     if (zb_put_zeros(scratch, 2 * p->plane_len)) return rdz_memory(e, "logical bitplanes");
     p->true_plane = scratch->data;
-    p->na_plane = scratch->data + p->plane_len;
+    p->na_plane = p->plane_len ? scratch->data + p->plane_len : scratch->data; /* NULL + 0 is UB */
     if (!rdz_scalar_only) {
 #ifdef RDZ_HAVE_AVX2_KERNEL
         if (cpu_has_avx2() &&

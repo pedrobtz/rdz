@@ -38,6 +38,17 @@ typedef struct {
     SEXP names;
 } rdz_r_strings;
 
+/* Rf_charIsASCII() entered R's API after the 4.1 floor: scan instead. */
+static int rdz_ascii(SEXP c)
+{
+    const unsigned char *p = (const unsigned char *)CHAR(c);
+    int i, n = LENGTH(c);
+    for (i = 0; i < n; i++) {
+        if (p[i] & 0x80u) return 0;
+    }
+    return 1;
+}
+
 static uintptr_t rdz_r_key(void *ctx, size_t i)
 {
     return (uintptr_t)STRING_ELT(((rdz_r_strings *)ctx)->names, (R_xlen_t)i);
@@ -54,7 +65,7 @@ static int rdz_r_value(void *ctx, size_t i, rdz_str *out, rdz_error *e)
     }
     switch (Rf_getCharCE(c)) {
     case CE_NATIVE:
-        if (!Rf_charIsASCII(c)) {
+        if (!rdz_ascii(c)) {
             return rdz_unsupported(e, "a logical vector with non-ASCII native-encoded names");
         }
         out->tag = RDZ_STR_NATIVE;
