@@ -63,7 +63,8 @@ test_that("attributes that are not native send the whole root to the generic cod
     environment = structure(1:2, env = globalenv()),
     s4 = asS4(c(1, 2)),
     selfref = structure(list(1), .internal.selfref = 1L),
-    non_ascii_name = structure(1L, "café" = 1L),
+    # a name with a byte past ASCII, made from bytes so no locale rewrites it
+    non_ascii_name = `attr<-`(1L, rawToChar(as.raw(c(0x63, 0x61, 0x66, 0xe9))), 1L),
     row_names = structure(1:2, row.names = c("a", "b")),
     # a column longer than the rows
     matrix_column = data.frame(x = 1:3, m = I(matrix(1:6, 3)))
