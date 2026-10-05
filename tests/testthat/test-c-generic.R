@@ -106,6 +106,9 @@ test_that("the streamed writer reproduces the Rust writer's files", {
   )
   copy <- tempfile(fileext = ".rdz")
   on.exit(unlink(copy), add = TRUE)
+  # The Rust writer did not compress.
+  old <- options(rdz.preset = "speed")
+  on.exit(options(old), add = TRUE)
   for (spec in rust_fixture_specs()) {
     if (manifest$codec[manifest$name == spec$name] != "r_serial_v3") next
     fixture <- file.path(rust_fixture_dir(), paste0(spec$name, ".rdz"))
@@ -126,7 +129,7 @@ test_that("an error during serialization removes the temporary file at once", {
   write_rdz("old", path)
   x <- rep_len(as.raw(1:200), 3e6)
   expect_error(
-    rdz:::rdz_check(.Call(rdz:::rdz_test_write_generic_unwind, x, path, 2L)),
+    rdz:::rdz_check(.Call(rdz:::rdz_test_write_generic_unwind, x, path, 2L, rdz:::rdz_settings())),
     "failing after 2 blocks"
   )
   # No gc(): the unwind cleanup, not the finalizer, removed it.
@@ -160,6 +163,8 @@ test_that("a block that fails its checksum stops the read with a classed error",
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
   x <- rep_len(as.raw(0:250), 3e6)
+  old <- options(rdz.preset = "speed") # raw blocks, so offsets are known
+  on.exit(options(old), add = TRUE)
   write_rdz(x, path, mode = "r")
   bytes <- readBin(path, "raw", file.size(path))
   # A byte of the second block's payload: past the file header, the first

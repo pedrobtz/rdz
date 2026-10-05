@@ -3,7 +3,16 @@
 #' `write_rdz()` writes an object through the versioned `rdz` block container.
 #' Plain logical vectors and logical vectors with a supported `names` attribute
 #' use the native two-bit codec. Other objects use a whole-root, portable R XDR
-#' stream in automatic mode.
+#' stream in automatic mode, written in blocks of 1 MiB.
+#'
+#' Two options control how blocks are stored and how many threads do the
+#' work. `options(rdz.preset = )` is `"balanced"` (the default; each block is
+#' compressed with Zstandard at level 1), `"compact"` (level 6) or `"speed"`
+#' (no compression). A block is stored compressed only when that makes it
+#' smaller. `options(rdz.threads = )` sets the threads that compress and, in
+#' [read_rdz()], decompress blocks; the default is 1. The file does not
+#' depend on either: any setting reads any file, and the same object written
+#' with any number of threads gives the same bytes.
 #'
 #' @param x An R object to serialize.
 #' @param path A single, non-missing path to write.
@@ -50,7 +59,7 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
     xdr = TRUE,
     version = 3L
   )
-  rdz_check(.Call(rdz_c_write_generic, x, synopsis, path))
+  rdz_check(.Call(rdz_c_write_generic, x, synopsis, path, rdz_settings()))
   invisible(path)
 }
 
@@ -69,7 +78,7 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
 #' @export
 read_rdz <- function(path) {
   path <- validate_existing_rdz_path(path)
-  result <- rdz_check(.Call(rdz_c_read, path))
+  result <- rdz_check(.Call(rdz_c_read, path, rdz_settings()))
   if (inherits(result, "rdz_native_codec")) {
     # Native codecs are read by the Rust implementation until plan-c Stage E.
     result <- rdz_read(path)

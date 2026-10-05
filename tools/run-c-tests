@@ -13,14 +13,18 @@ ZUBIN=${ZUBIN_INCLUDE:-$(Rscript -e 'cat(system.file("include", package = "zubin
 ZUFAST=${ZUFAST_INCLUDE:-$(Rscript -e 'cat(system.file("include", package = "zufast"))')}
 [ -n "$ZUBIN" ] && [ -n "$ZUFAST" ] || { echo "run-c-tests: install zubin and zufast first" >&2; exit 2; }
 
-FLAGS="-std=c99 -g -O1 -Wall -Wextra -Wpedantic -Wshadow -Werror -DRDZ_STANDALONE"
+FLAGS="-std=c99 -g -O1 -Wall -Wextra -Wpedantic -Wshadow -Werror -DRDZ_STANDALONE -pthread"
+ZSTD="-DZSTDLIB_VISIBLE= -DZSTDERRORLIB_VISIBLE="
 SAN="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
 if [ "${RDZ_SANITIZE:-1}" = 1 ] && printf 'int main(void){return 0;}\n' > "$WORK/p.c" &&
    $CC $SAN "$WORK/p.c" -o "$WORK/p" 2>/dev/null; then
   FLAGS="$FLAGS $SAN"
 fi
 
-$CC $FLAGS -I"$ZUBIN" -I"$ZUFAST" -Isrc/core src/core/*.c tools/c-tests/core_test.c \
-  -o "$WORK/core_test"
+# zstd is compiled apart, without -Werror or -Wpedantic: it is vendored as is.
+$CC -std=gnu99 -g -O1 $ZSTD $(echo "$FLAGS" | grep -o -- '-fsanitize[^ ]*\|-fno-[^ ]*') \
+  -c src/vendor/zstd/zstd.c -o "$WORK/zstd.o"
+$CC $FLAGS $ZSTD -I"$ZUBIN" -I"$ZUFAST" -Isrc/core src/core/*.c tools/c-tests/core_test.c \
+  "$WORK/zstd.o" -o "$WORK/core_test"
 mkdir -p "$WORK/tmp"
 "$WORK/core_test" "$WORK/tmp"

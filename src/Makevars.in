@@ -3,11 +3,19 @@
 # @RUST_*@ fields: the Rust reference implementation's static library when
 # cargo and rustc are available (and RDZ_RUST is not 0), nothing otherwise
 # (plan-c.md, Stage B). The C implementation is always built.
-PKG_CPPFLAGS = -I. @RUST_CPPFLAGS@
-PKG_LIBS = @RUST_LIBS@
+#
+# zstd (src/vendor/zstd/, see tools/vendor/) is compiled with its API's
+# visibility attribute emptied, so that with $(C_VISIBILITY) none of its
+# symbols leaves rdz.so; only R_init_rdz is exported. tools/vendor/verify
+# checks these defines against tools/vendor/manifest.tsv.
+PKG_CPPFLAGS = -I. -DZSTDLIB_VISIBLE= -DZSTDERRORLIB_VISIBLE= @RUST_CPPFLAGS@
+PKG_CFLAGS = $(C_VISIBILITY)
+PKG_LIBS = @RUST_LIBS@ -pthread
 
-CORE_OBJECTS = core/rdz_container.o core/rdz_error.o core/rdz_io.o core/rdz_records.o
-OBJECTS = rdz_init.o rdz_r.o adapter/rdz_generic.o $(CORE_OBJECTS) @RUST_OBJECTS@
+CORE_OBJECTS = core/rdz_codec.o core/rdz_container.o core/rdz_error.o core/rdz_io.o \
+	core/rdz_pipeline.o core/rdz_records.o
+OBJECTS = rdz_init.o rdz_r.o adapter/rdz_generic.o $(CORE_OBJECTS) vendor/zstd/zstd.o \
+	@RUST_OBJECTS@
 RUST_STATLIB = @RUST_STATLIB@
 
 TARGET = @TARGET@

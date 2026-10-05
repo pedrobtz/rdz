@@ -182,9 +182,13 @@ select policies, not implicit format meanings. An initial policy family is:
 
 | Preset | Physical transforms | Compression |
 |---|---|---|
-| `speed` | mandatory packing and cheap transforms | raw or LZ4 |
-| `balanced` | sampled shuffle/dictionary/packing | low-level Zstandard |
-| `compact` | broader transform selection | higher-level Zstandard |
+| `speed` | mandatory packing and cheap transforms | raw (LZ4 only on evidence) |
+| `balanced` | sampled shuffle/dictionary/packing | Zstandard level 1 |
+| `compact` | broader transform selection | Zstandard level 6 |
+
+Implemented at plan-c Stage D as `options(rdz.preset = )`, with
+`options(rdz.threads = )` for the pool (default 1); the levels are those of
+encoding-research.md's 2026-10-05 measurements.
 
 Exact codecs and levels are benchmark decisions. Keep the block format open to
 mixed codecs so incompressible blocks can remain raw and highly compressible

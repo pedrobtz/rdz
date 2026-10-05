@@ -1,0 +1,94 @@
+#!/bin/sh
+# Offline check that the vendored tree is exactly what the manifest describes.
+#
+# Fails if a vendored file was edited, added or removed without going through
+# `tools/vendor/fetch`, if the Makevars templates and the manifest disagree
+# about the define set, or if a source reports another version than the
+# manifest declares. Safe to run in CI and from a source checkout.
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$ROOT"
+MANIFEST=tools/vendor/manifest.tsv
+. tools/vendor/common.sh
+
+status=0
+sums=tools/vendor/checksums.sha256
+if [ ! -f "$sums" ]; then
+    echo "FAIL missing $sums; run tools/vendor/record" >&2
+    exit 1
+fi
+
+# 1. every recorded file still hashes to the recorded value
+while read -r want path; do
+    [ -n "$want" ] || continue
+    if [ ! -f "$path" ]; then
+        printf 'FAIL missing vendored file: %s\n' "$path" >&2
+        status=1
+        continue
+    fi
+    got=$(sha256_of "$path")
+    if [ "$got" != "$want" ]; then
+        printf 'FAIL modified vendored file: %s\n      expected %s\n      got      %s\n' \
+            "$path" "$want" "$got" >&2
+        status=1
+    fi
+done < "$sums"
+
+# 2. no vendored file the manifest does not know about
+for src in $(awk 'NR > 1 { print $1 }' FS='\t' "$MANIFEST"); do
+    for f in $(vendored_files "$src"); do
+        if ! grep -q "  $f\$" "$sums"; then
+            printf 'FAIL unrecorded vendored file: %s\n' "$f" >&2
+            status=1
+        fi
+    done
+done
+
+# 3. both Makevars templates and the manifest agree on the define set, read
+#    with comments stripped (what reaches the compiler, not the prose)
+declared=$(
+    for src in $(awk 'NR > 1 { print $1 }' FS='\t' "$MANIFEST"); do
+        manifest_field "$src" defines | tr ',' '\n'
+    done | LC_ALL=C sort -u
+)
+for mv in src/Makevars.in src/Makevars.win.in; do
+    flags=$(sed 's/#.*//' "$mv")
+    for d in $declared; do
+        if ! printf '%s\n' "$flags" | grep -q -- "-D$d\b"; then
+            printf 'FAIL %s is missing -D%s\n' "$mv" "$d" >&2
+            status=1
+        fi
+    done
+    for d in $(printf '%s\n' "$flags" | grep -oE '\-D[A-Z0-9_]+' | sed 's/^-D//' | LC_ALL=C sort -u); do
+        if ! printf '%s\n' "$declared" | grep -qx "$d"; then
+            printf 'FAIL %s defines -D%s, which the manifest does not declare\n' "$mv" "$d" >&2
+            status=1
+        fi
+    done
+done
+
+# 4. the version zstd reports about itself matches the manifest, and the
+#    test suite asserts that same string (tests cannot read tools/)
+declared_version=$(manifest_field zstd version_string)
+v() { sed -n "s/^#define ZSTD_VERSION_$1 *\([0-9]*\).*/\1/p" src/vendor/zstd/zstd.h; }
+header_version="$(v MAJOR).$(v MINOR).$(v RELEASE)"
+if [ "$declared_version" != "$header_version" ]; then
+    printf 'FAIL zstd.h reports %s, the manifest declares %s\n' "$header_version" "$declared_version" >&2
+    status=1
+fi
+if ! grep -q "\"$declared_version\"" tests/testthat/test-compression.R; then
+    printf 'FAIL tests/testthat/test-compression.R does not assert zstd %s\n' "$declared_version" >&2
+    status=1
+fi
+
+# 5. the attribution names the release
+if ! grep -q "$(manifest_field zstd commit)" inst/COPYRIGHTS; then
+    printf 'FAIL inst/COPYRIGHTS does not name the pinned zstd commit\n' >&2
+    status=1
+fi
+
+if [ "$status" -eq 0 ]; then
+    printf 'ok  vendored tree matches %s\n' "$MANIFEST"
+fi
+exit "$status"

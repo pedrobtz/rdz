@@ -127,6 +127,8 @@ test_that("ordinary RDS files are not treated as rdz containers", {
 })
 
 test_that("the transitional generic payload uses R's XDR stream", {
+  old <- options(rdz.preset = "speed") # stored raw, so the stream is visible
+  on.exit(options(old), add = TRUE)
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
 

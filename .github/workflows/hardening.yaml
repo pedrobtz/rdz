@@ -2,6 +2,7 @@
 #
 #   c-tests   tools/run-c-tests under gcc and clang: warnings are errors, ASan
 #             and UBSan on, against the Rust reference corpus
+#   vendor    tools/vendor/verify: the vendored zstd is what the manifest pins
 #   fuzz      libFuzzer over the container reader, the canary first; the
 #             grown corpus is cached, so fuzzing time accumulates: 10 minutes
 #             per push, an hour nightly
@@ -28,6 +29,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: tools/vendor/verify
+
   c-tests:
     runs-on: ubuntu-latest
     name: c-tests (${{ matrix.cc }})

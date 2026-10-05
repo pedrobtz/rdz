@@ -1,0 +1,67 @@
+#!/bin/sh
+# Fetch, verify, amalgamate, trim and record a vendored source.
+#
+#   tools/vendor/fetch [source ...]      (default: every source in the manifest)
+#
+# Network and python3 are required. This is a maintainer script; it is never
+# run during R CMD check. Afterwards `tools/vendor/verify` re-checks the
+# result offline.
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$ROOT"
+MANIFEST=tools/vendor/manifest.tsv
+. tools/vendor/common.sh
+
+sources=${*:-$(awk 'NR > 1 { print $1 }' FS='\t' "$MANIFEST")}
+
+for src in $sources; do
+    tag=$(manifest_field "$src" tag)
+    url=$(manifest_field "$src" archive)
+    want=$(manifest_field "$src" archive_sha256)
+    patches=$(manifest_field "$src" patches)
+
+    printf '==> %s %s\n' "$src" "$tag"
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    archive="$tmp/archive"
+    printf '    fetching %s\n' "$url"
+    curl -sSL --fail --max-time 120 -o "$archive" "$url"
+    got=$(sha256_of "$archive")
+    if [ "$got" != "$want" ]; then
+        printf '    sha256 MISMATCH\n      expected %s\n      got      %s\n' "$want" "$got" >&2
+        exit 1
+    fi
+    printf '    sha256 ok %s\n' "$got"
+    mkdir -p "$tmp/x"
+    tar -xzf "$archive" -C "$tmp/x" --strip-components=1
+
+    dest="src/vendor/$src"
+    rm -rf "$dest"
+    mkdir -p "$dest"
+    case "$src" in
+        zstd)
+            # One translation unit, from the release's own amalgamation
+            # script over rdz's input file (tools/vendor/zstd-in.c).
+            ( cd "$tmp/x/build/single_file_libs" &&
+              python3 ./combine.py -r ../../lib -x legacy/zstd_legacy.h \
+                  -o "$ROOT/$dest/zstd.c" "$ROOT/tools/vendor/zstd-in.c" > /dev/null )
+            cp "$tmp/x/lib/zstd.h" "$tmp/x/lib/zstd_errors.h" "$tmp/x/LICENSE" "$dest/"
+            printf '    kept zstd.c (amalgamated), zstd.h, zstd_errors.h, LICENSE\n'
+            ;;
+        *) echo "unknown source: $src" >&2; exit 1 ;;
+    esac
+
+    if [ "$patches" != "-" ] && [ -n "$patches" ]; then
+        for p in $(echo "$patches" | tr ',' ' '); do
+            printf '    applying %s\n' "$p"
+            patch -s -p1 -d "$dest" < "tools/patches/$src/$p"
+        done
+    fi
+    rm -rf "$tmp"
+    trap - EXIT
+done
+
+printf '==> recording checksums\n'
+"$ROOT/tools/vendor/record"
+printf 'done. review the diff under src/vendor/ before committing.\n'

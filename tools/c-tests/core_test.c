@@ -26,6 +26,7 @@
 #endif
 
 #include "rdz_container.h"
+#include "rdz_pipeline.h"
 
 static int failures;
 static int checks;
@@ -245,6 +246,141 @@ static void test_writer_errors(const char *tmpdir)
 #endif
 }
 
+/* Compresses n bytes in `block`-byte blocks through a pipeline of `threads`,
+   writes them as a generic container, reads it back through a decode
+   pipeline, and returns 0 when the bytes and the file agree with *expect
+   (set on the first call). */
+static int pipeline_roundtrip(const uint8_t *data, size_t n, uint32_t block, int threads,
+                              const char *path, uint8_t **expect, size_t *expect_len)
+{
+    rdz_pipeline p;
+    rdz_writer w;
+    rdz_reader r;
+    rdz_error e;
+    rdz_slot *s;
+    size_t at = 0, got_len = 0;
+    uint8_t *got, *file;
+    uint32_t i;
+    int must, ok = 1;
+
+    if (rdz_pipeline_init(&p, threads, rdz_job_compress, (size_t)RDZ_MAX_BLOCK_SIZE, &e) ||
+        rdz_writer_open(&w, path, RDZ_CODEC_R_SERIAL_V3, RDZ_R_SERIAL_CODEC_VERSION, block, &e)) {
+        CHECK(0, "pipeline setup: %s", e.message);
+        return 1;
+    }
+    p.level = 1;
+    while (at < n) {
+        size_t take = n - at < block ? n - at : block;
+        while ((s = rdz_pipeline_next(&p, &must)) != NULL && must) {
+            const zb_buf *st = s->compression ? &s->out : &s->in;
+            ok &= rdz_writer_stored(&w, 0, s->compression, s->decoded_len, s->decoded_len,
+                                    st->data, st->len, s->checksum, &e) == 0;
+            rdz_pipeline_release(&p, s);
+        }
+        zb_put_bytes(&s->in, data + at, take);
+        rdz_pipeline_submit(&p, s, &e);
+        at += take;
+    }
+    while ((s = rdz_pipeline_oldest(&p, 1)) != NULL) {
+        const zb_buf *st = s->compression ? &s->out : &s->in;
+        ok &= !s->failed && rdz_writer_stored(&w, 0, s->compression, s->decoded_len,
+                                              s->decoded_len, st->data, st->len, s->checksum,
+                                              &e) == 0;
+        rdz_pipeline_release(&p, s);
+    }
+    rdz_pipeline_free(&p);
+    ok &= rdz_writer_finish(&w, NULL, 0, NULL, 0, NULL, 0, &e) == 0;
+    CHECK(ok, "pipeline write with %d threads: %s", threads, e.message);
+
+    /* read back through a decode pipeline */
+    got = (uint8_t *)malloc(n ? n : 1);
+    if (rdz_reader_open(&r, path, &e) ||
+        rdz_pipeline_init(&p, threads, rdz_job_decode, (size_t)RDZ_MAX_BLOCK_SIZE, &e)) {
+        CHECK(0, "pipeline read setup: %s", e.message);
+        free(got);
+        return 1;
+    }
+    for (i = 0; i < r.nblocks || rdz_pipeline_oldest(&p, 0);) {
+        while (i < r.nblocks && p.next_submit - p.next_consume < p.nslots) {
+            s = rdz_pipeline_next(&p, &must);
+            if (rdz_reader_read_stored(&r, i, &s->in, &e)) break;
+            s->block = &r.blocks[i++];
+            rdz_pipeline_submit(&p, s, &e);
+        }
+        s = rdz_pipeline_oldest(&p, 1);
+        if (!s) break;
+        if (s->failed) {
+            CHECK(0, "pipeline read: %s", s->e.message);
+        } else {
+            const zb_buf *d = s->compression ? &s->out : &s->in;
+            if (got_len + d->len <= n) memcpy(got + got_len, d->data, d->len);
+            got_len += d->len;
+        }
+        rdz_pipeline_release(&p, s);
+    }
+    rdz_pipeline_free(&p);
+    rdz_reader_close(&r);
+    CHECK(got_len == n && memcmp(got, data, n) == 0, "pipeline read with %d threads differs",
+          threads);
+    free(got);
+
+    {
+        size_t m = 0;
+        file = slurp(path, &m);
+        if (!*expect) {
+            *expect = file;
+            *expect_len = m;
+        } else {
+            CHECK(file && m == *expect_len && memcmp(file, *expect, m) == 0,
+                  "the file written with %d threads differs from one thread's", threads);
+            free(file);
+        }
+    }
+    remove(path);
+    return 0;
+}
+
+static void test_pipeline(const char *tmpdir)
+{
+    size_t n = 3 * 1024 * 1024, i;
+    uint8_t *data = (uint8_t *)malloc(n), *expect = NULL;
+    size_t expect_len = 0;
+    uint32_t x = 12345;
+    char path[512];
+    int threads[] = {1, 2, 8};
+    int k;
+    /* compressible stretches and noise, so blocks of both kinds occur */
+    for (i = 0; i < n; i++) {
+        x = x * 1103515245u + 12345u;
+        data[i] = (i / 65536) % 2 ? (uint8_t)(x >> 24) : (uint8_t)(i % 7);
+    }
+    snprintf(path, sizeof path, "%s/pipeline.rdz", tmpdir);
+    for (k = 0; k < 3; k++) {
+        pipeline_roundtrip(data, n, 4096, threads[k], path, &expect, &expect_len);
+    }
+    {
+        rdz_reader r;
+        rdz_error e;
+        uint32_t raw = 0, zstd = 0;
+        FILE *f = fopen(path, "wb");
+        if (f) {
+            fwrite(expect, 1, expect_len, f);
+            fclose(f);
+        }
+        if (rdz_reader_open(&r, path, &e) == 0) {
+            for (i = 0; i < r.nblocks; i++) {
+                if (r.blocks[i].compression) zstd++;
+                else raw++;
+            }
+            rdz_reader_close(&r);
+        }
+        CHECK(raw > 0 && zstd > 0, "expected raw and zstd blocks, got %u and %u", raw, zstd);
+        remove(path);
+    }
+    free(expect);
+    free(data);
+}
+
 int main(int argc, char **argv)
 {
     const char *tmpdir = argc > 1 ? argv[1] : ".";
@@ -253,6 +389,7 @@ int main(int argc, char **argv)
     test_mutations("gen_integer_auto");
     test_mutations("lgl_names_encodings_global");
     test_writer_errors(tmpdir);
+    test_pipeline(tmpdir);
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

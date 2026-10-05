@@ -36,3 +36,32 @@ rdz_c_file_info <- function(path) {
 rdz_has_rust <- function() {
   .Call(rdz_c_has_rust)
 }
+
+# The settings the C writer and reader take: c(zstd level, threads, block
+# size). Options, documented in ?write_rdz:
+#
+#   rdz.preset   "balanced" (default): zstd level 1 on each block;
+#                "compact": zstd level 6; "speed": blocks stored raw
+#   rdz.threads  worker threads for compression and decompression (default 1)
+#
+# rdz.block_size (bytes, default 1 MiB) exists for tests that need many small
+# blocks; it is not part of the interface.
+rdz_settings <- function() {
+  preset <- getOption("rdz.preset", "balanced")
+  levels <- c(speed = 0L, balanced = 1L, compact = 6L)
+  if (!is.character(preset) || length(preset) != 1L || !preset %in% names(levels)) {
+    stop('`options(rdz.preset)` must be "speed", "balanced" or "compact".', call. = FALSE)
+  }
+  threads <- getOption("rdz.threads", 1L)
+  if (!is.numeric(threads) || length(threads) != 1L || is.na(threads) ||
+        threads < 1 || threads > 256 || threads != floor(threads)) {
+    stop("`options(rdz.threads)` must be a whole number from 1 to 256.", call. = FALSE)
+  }
+  block_size <- getOption("rdz.block_size", 0L)
+  c(levels[[preset]], as.integer(threads), as.integer(block_size))
+}
+
+# zstd's version as compiled into rdz.
+rdz_zstd_version <- function() {
+  .Call(rdz_c_zstd_version)
+}

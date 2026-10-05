@@ -1,21 +1,21 @@
 /*
- * rdz_generic.c -- the generic codec, streamed (plan-c.md section 3.2).
+ * rdz_generic.c -- the generic codec, streamed through the block pipeline
+ * (plan-c.md sections 3.2 and 4; performance.md).
  *
  * Writing: R_Serialize() writes through an R_outpstream whose callback fills
- * a 1 MiB block buffer; each full block goes to the container writer, so the
- * payload never exists whole. Reading: R_Unserialize() reads through an
- * R_inpstream that pulls blocks in order, each verified against its
- * checksum before a byte of it is used. The blocks are those the Rust
- * writer made from serialize(x, NULL, version = 3, xdr = TRUE): full 1 MiB
- * blocks and a final partial one.
+ * the current pipeline slot; each full block is submitted to the workers,
+ * which compress it (raw when that is not smaller) and checksum it, and the
+ * R thread writes finished blocks to the file strictly in order. Reading:
+ * the R thread reads blocks' stored bytes ahead into the pipeline, the
+ * workers verify and decompress them, and R_Unserialize() reads them in
+ * order through an R_inpstream. The payload never exists whole, and memory
+ * is bounded by the pipeline's slots (rdz_pipeline.h).
  *
  * Both run under R_UnwindProtect(): when R unwinds out of serialization (an
- * error R raises, an interrupt between blocks, a failed block read raised
- * by rdz_raise()) the cleanup removes the temporary file or closes the
- * reader at once, without waiting for the external pointer's finalizer,
- * which remains the backstop. R_CheckUserInterrupt() runs between blocks.
- *
- * R thread only.
+ * error R raises, an interrupt between blocks, a failed block raised by
+ * rdz_raise()) the cleanup stops and joins the workers and removes the
+ * temporary file or closes the reader at once; the external pointer's
+ * finalizer is the backstop. Only this, the R thread, calls R.
  */
 #include <stdlib.h>
 #include <string.h>
@@ -23,52 +23,106 @@
 #include <R.h>
 #include <Rinternals.h>
 
+#include "../core/rdz_pipeline.h"
 #include "../rdz_r.h"
+
+/* settings: c(level, threads, block_size); level 0 stores raw, block_size 0
+   is the format's 1 MiB. */
+typedef struct {
+    int level;
+    int threads;
+    uint32_t block_size;
+} rdz_settings;
+
+static rdz_settings rdz_settings_of(SEXP settings)
+{
+    rdz_settings out;
+    out.level = 0;
+    out.threads = 1;
+    out.block_size = RDZ_BLOCK_SIZE;
+    if (TYPEOF(settings) != INTSXP || XLENGTH(settings) != 3) {
+        Rf_error("`settings` must be an integer vector of length 3.");
+    }
+    out.level = INTEGER(settings)[0];
+    out.threads = INTEGER(settings)[1] < 1 ? 1 : INTEGER(settings)[1];
+    if (out.threads > 256) out.threads = 256;
+    if (INTEGER(settings)[2] > 0) out.block_size = (uint32_t)INTEGER(settings)[2];
+    return out;
+}
 
 /* ---- writing ------------------------------------------------------------------------ */
 
 typedef struct {
     rdz_writer w;
-    zb_buf block;
+    rdz_pipeline pipe;
+    rdz_slot *cur; /* the slot being filled */
+    uint32_t block_size;
     SEXP x;
     rdz_error e;
     int failed;
     int fail_after; /* test hook: raise an R error after this many blocks; -1 never */
-    uint32_t written;
+    uint32_t submitted;
 } rdz_gen_out;
-
-static void rdz_gen_out_release(rdz_gen_out *g)
-{
-    rdz_writer_discard(&g->w);
-    zb_buf_release(&g->block);
-}
 
 static void rdz_gen_out_finalize(SEXP ptr)
 {
     rdz_gen_out *g = (rdz_gen_out *)R_ExternalPtrAddr(ptr);
     if (g) {
-        rdz_gen_out_release(g);
+        rdz_pipeline_free(&g->pipe); /* joins the workers first */
+        rdz_writer_discard(&g->w);
         free(g);
         R_ClearExternalPtr(ptr);
     }
 }
 
-/* Hands the buffered bytes to the writer as one block. A write failure is
-   kept and later bytes are dropped: serialization runs to its end and the
-   failure is returned, classed, by the entry point. */
-static void rdz_gen_flush(rdz_gen_out *g, int check_interrupt)
+/* Writes one finished slot to the file and frees it. */
+static void rdz_gen_consume(rdz_gen_out *g, rdz_slot *s)
 {
-    if (!g->failed &&
-        rdz_writer_block(&g->w, RDZ_ENCODING_RAW, g->block.len, g->block.data, g->block.len,
-                         &g->e)) {
-        g->failed = 1;
+    if (!g->failed) {
+        if (s->failed) {
+            g->e = s->e;
+            g->failed = 1;
+        } else {
+            const zb_buf *stored = s->compression == RDZ_COMPRESSION_NONE ? &s->in : &s->out;
+            if (rdz_writer_stored(&g->w, RDZ_ENCODING_RAW, s->compression, s->decoded_len,
+                                  s->decoded_len, stored->data, stored->len, s->checksum,
+                                  &g->e)) {
+                g->failed = 1;
+            }
+        }
     }
-    zb_buf_reset(&g->block);
-    g->written++;
-    if (g->fail_after >= 0 && g->written >= (uint32_t)g->fail_after) {
+    rdz_pipeline_release(&g->pipe, s);
+}
+
+/* The next empty slot, writing out whatever must leave first. */
+static rdz_slot *rdz_gen_next(rdz_gen_out *g)
+{
+    for (;;) {
+        int must = 0;
+        rdz_slot *s = rdz_pipeline_next(&g->pipe, &must);
+        if (!must) return s;
+        rdz_gen_consume(g, s);
+    }
+}
+
+/* Submits the current slot, writes out every block already finished, in
+   order, and checks for an interrupt between blocks. A failure is kept and
+   later bytes are dropped: serialization runs to its end and the failure is
+   returned, classed, by the entry point. */
+static void rdz_gen_flush(rdz_gen_out *g, int last)
+{
+    rdz_slot *s;
+    rdz_pipeline_submit(&g->pipe, g->cur, &g->e);
+    g->cur = NULL;
+    g->submitted++;
+    while ((s = rdz_pipeline_oldest(&g->pipe, 0)) != NULL) rdz_gen_consume(g, s);
+    if (g->fail_after >= 0 && g->submitted >= (uint32_t)g->fail_after) {
         Rf_error("rdz test hook: failing after %d blocks", g->fail_after);
     }
-    if (check_interrupt) R_CheckUserInterrupt();
+    if (!last) {
+        R_CheckUserInterrupt();
+        g->cur = rdz_gen_next(g);
+    }
 }
 
 static void rdz_out_bytes(R_outpstream_t stream, void *buf, int n)
@@ -77,14 +131,21 @@ static void rdz_out_bytes(R_outpstream_t stream, void *buf, int n)
     const uint8_t *p = (const uint8_t *)buf;
     size_t left = n > 0 ? (size_t)n : 0;
     while (left) {
-        size_t room = RDZ_BLOCK_SIZE - g->block.len;
+        zb_buf *in = &g->cur->in;
+        size_t room = g->block_size - in->len;
         size_t take = left < room ? left : room;
-        /* The buffer was allocated at the block size and is never grown. */
-        memcpy(g->block.data + g->block.len, p, take);
-        g->block.len += take;
+        uint8_t *slot = zb_put_raw(in, take);
+        if (!slot) {
+            if (!g->failed) {
+                rdz_memory(&g->e, "a block");
+                g->failed = 1;
+            }
+            return;
+        }
+        memcpy(slot, p, take);
         p += take;
         left -= take;
-        if (g->block.len == RDZ_BLOCK_SIZE) rdz_gen_flush(g, 1);
+        if (in->len == g->block_size) rdz_gen_flush(g, 0);
     }
 }
 
@@ -98,10 +159,18 @@ static SEXP rdz_gen_serialize(void *data)
 {
     rdz_gen_out *g = (rdz_gen_out *)data;
     struct R_outpstream_st out;
+    rdz_slot *s;
     R_InitOutPStream(&out, (R_pstream_data_t)g, R_pstream_xdr_format, 3, rdz_out_char,
                      rdz_out_bytes, NULL, R_NilValue);
     R_Serialize(g->x, &out);
-    if (g->block.len) rdz_gen_flush(g, 0);
+    if (g->cur->in.len) {
+        rdz_gen_flush(g, 1);
+    } else {
+        /* the payload ended on a block boundary: no empty trailing block */
+        rdz_pipeline_unget(&g->pipe, g->cur);
+        g->cur = NULL;
+    }
+    while ((s = rdz_pipeline_oldest(&g->pipe, 1)) != NULL) rdz_gen_consume(g, s);
     return R_NilValue;
 }
 
@@ -110,9 +179,10 @@ static void rdz_gen_out_cleanup(void *data, Rboolean jump)
     if (jump) rdz_gen_out_finalize((SEXP)data);
 }
 
-SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, int fail_after)
+SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, int fail_after)
 {
     const char *p = rdz_path(path);
+    rdz_settings set = rdz_settings_of(settings);
     rdz_error e;
     rdz_gen_out *g;
     SEXP ptr, cont;
@@ -124,16 +194,20 @@ SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, int fail_after)
     g = (rdz_gen_out *)calloc(1, sizeof *g);
     if (!g) Rf_error("rdz could not allocate memory for a writer");
     rdz_writer_init(&g->w);
-    zb_buf_init(&g->block);
     R_SetExternalPtrAddr(ptr, g);
     g->x = x;
     g->fail_after = fail_after;
+    g->block_size = set.block_size;
 
-    if (zb_buf_alloc(&g->block, RDZ_BLOCK_SIZE, RDZ_BLOCK_SIZE)) {
-        rdz_memory(&e, "a block");
-    } else if (rdz_writer_open(&g->w, p, RDZ_CODEC_R_SERIAL_V3, RDZ_R_SERIAL_CODEC_VERSION, &e)) {
+    if (rdz_pipeline_init(&g->pipe, set.threads, rdz_job_compress, (size_t)RDZ_MAX_BLOCK_SIZE,
+                          &e)) {
+        /* e is set */
+    } else if (rdz_writer_open(&g->w, p, RDZ_CODEC_R_SERIAL_V3, RDZ_R_SERIAL_CODEC_VERSION,
+                               set.block_size, &e)) {
         /* e is set */
     } else {
+        g->pipe.level = set.level;
+        g->cur = rdz_gen_next(g);
         R_UnwindProtect(rdz_gen_serialize, g, rdz_gen_out_cleanup, ptr, cont);
         if (g->failed) {
             e = g->e;
@@ -153,19 +227,42 @@ SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, int fail_after)
 
 typedef struct {
     rdz_reader r;
-    zb_buf block;
+    rdz_pipeline pipe;
+    rdz_slot *cur;       /* the slot being read from */
+    const zb_buf *bytes; /* its decoded bytes: the slot's in or out */
     size_t pos;
-    uint32_t next;
+    uint32_t next_read;  /* the next block whose stored bytes to read ahead */
 } rdz_gen_in;
 
 static void rdz_gen_in_finalize(SEXP ptr)
 {
     rdz_gen_in *g = (rdz_gen_in *)R_ExternalPtrAddr(ptr);
     if (g) {
+        rdz_pipeline_free(&g->pipe);
         rdz_reader_close(&g->r);
-        zb_buf_release(&g->block);
         free(g);
         R_ClearExternalPtr(ptr);
+    }
+}
+
+/* Reads stored bytes ahead into every free slot, handing each to a worker.
+   File IO stays on this thread. */
+static void rdz_gen_read_ahead(rdz_gen_in *g)
+{
+    rdz_error e;
+    while (g->next_read < g->r.nblocks &&
+           g->pipe.next_submit - g->pipe.next_consume < g->pipe.nslots) {
+        int must = 0;
+        rdz_slot *s = rdz_pipeline_next(&g->pipe, &must);
+        if (must) return;
+        if (rdz_reader_read_stored(&g->r, g->next_read, &s->in, &e)) {
+            rdz_pipeline_unget(&g->pipe, s);
+            rdz_raise(&e);
+        }
+        s->block = &g->r.blocks[g->next_read];
+        s->index = g->next_read;
+        g->next_read++;
+        rdz_pipeline_submit(&g->pipe, s, &e);
     }
 }
 
@@ -177,19 +274,25 @@ static void rdz_in_bytes(R_inpstream_t stream, void *buf, int n)
     rdz_error e;
     while (left) {
         size_t take;
-        if (g->pos == g->block.len) {
-            if (g->next == g->r.nblocks) {
+        if (!g->cur || g->pos == g->bytes->len) {
+            if (g->cur) {
+                rdz_pipeline_release(&g->pipe, g->cur);
+                g->cur = NULL;
+                R_CheckUserInterrupt();
+            }
+            rdz_gen_read_ahead(g);
+            g->cur = rdz_pipeline_oldest(&g->pipe, 1);
+            if (!g->cur) {
                 rdz_invalid(&e, "the generic payload ends before its object does");
                 rdz_raise(&e);
             }
-            if (g->next) R_CheckUserInterrupt();
-            if (rdz_reader_read_block(&g->r, g->next, &g->block, &e)) rdz_raise(&e);
-            g->next++;
+            if (g->cur->failed) rdz_raise(&g->cur->e);
+            g->bytes = g->cur->compression == RDZ_COMPRESSION_NONE ? &g->cur->in : &g->cur->out;
             g->pos = 0;
             continue;
         }
-        take = g->block.len - g->pos < left ? g->block.len - g->pos : left;
-        memcpy(p, g->block.data + g->pos, take);
+        take = g->bytes->len - g->pos < left ? g->bytes->len - g->pos : left;
+        memcpy(p, g->bytes->data + g->pos, take);
         g->pos += take;
         p += take;
         left -= take;
@@ -217,9 +320,10 @@ static void rdz_gen_in_cleanup(void *data, Rboolean jump)
     if (jump) rdz_gen_in_finalize((SEXP)data);
 }
 
-SEXP rdz_c_read(SEXP path)
+SEXP rdz_generic_read(SEXP path, SEXP settings)
 {
     const char *p = rdz_path(path);
+    rdz_settings set = rdz_settings_of(settings);
     rdz_error e;
     rdz_gen_in *g;
     SEXP ptr, cont, out;
@@ -230,7 +334,6 @@ SEXP rdz_c_read(SEXP path)
     g = (rdz_gen_in *)calloc(1, sizeof *g);
     if (!g) Rf_error("rdz could not allocate memory for a reader");
     rdz_reader_init(&g->r);
-    zb_buf_init(&g->block);
     R_SetExternalPtrAddr(ptr, g);
 
     if (rdz_reader_open(&g->r, p, &e)) {
@@ -246,8 +349,9 @@ SEXP rdz_c_read(SEXP path)
         UNPROTECT(4);
         return out;
     }
-    if (zb_buf_alloc(&g->block, 0, (size_t)RDZ_MAX_BLOCK_SIZE)) {
-        rdz_memory(&e, "a block");
+    /* A one-block file needs no workers. */
+    if (rdz_pipeline_init(&g->pipe, g->r.nblocks > 1 ? set.threads : 1, rdz_job_decode,
+                          (size_t)RDZ_MAX_BLOCK_SIZE, &e)) {
         rdz_gen_in_finalize(ptr);
         UNPROTECT(2);
         return rdz_failure(&e);

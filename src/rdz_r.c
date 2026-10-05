@@ -148,20 +148,31 @@ SEXP rdz_c_has_rust(void)
 #endif
 }
 
-SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, int fail_after);
+SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, int fail_after);
+SEXP rdz_generic_read(SEXP path, SEXP settings);
 
-SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path)
+SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path, SEXP settings)
 {
-    return rdz_generic_write(x, synopsis, path, -1);
+    return rdz_generic_write(x, synopsis, path, settings, -1);
+}
+
+SEXP rdz_c_read(SEXP path, SEXP settings)
+{
+    return rdz_generic_read(path, settings);
+}
+
+SEXP rdz_c_zstd_version(void)
+{
+    return Rf_mkString(rdz_codec_zstd_version());
 }
 
 /* ---- test-only entry points (rdz_test_) ---------------------------------------- */
 
 /* The streamed writer, raising an R error after `blocks` blocks. */
-SEXP rdz_test_write_generic_unwind(SEXP x, SEXP path, SEXP blocks)
+SEXP rdz_test_write_generic_unwind(SEXP x, SEXP path, SEXP blocks, SEXP settings)
 {
     SEXP synopsis = PROTECT(Rf_allocVector(RAWSXP, 0));
-    SEXP out = rdz_generic_write(x, synopsis, path, Rf_asInteger(blocks));
+    SEXP out = rdz_generic_write(x, synopsis, path, settings, Rf_asInteger(blocks));
     UNPROTECT(1);
     return out;
 }
@@ -172,7 +183,7 @@ SEXP rdz_test_records(void)
     return rdz_records_check(&record) ? Rf_mkString(record) : R_NilValue;
 }
 
-/* The concatenated stored bytes of a generic file, every block verified. */
+/* The concatenated decoded bytes of a generic file, every block verified. */
 SEXP rdz_test_read_generic(SEXP path)
 {
     const char *p = rdz_path(path);
@@ -203,13 +214,13 @@ SEXP rdz_test_read_generic(SEXP path)
     out = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)r->payload_bytes));
     for (i = 0; i < r->nblocks; i++) {
         /* each block is read straight into its place in the R vector */
-        zb_buf_borrow(&window, RAW(out) + at, r->blocks[i].stored_len);
+        zb_buf_borrow(&window, RAW(out) + at, (size_t)r->blocks[i].decoded_len);
         if (rdz_reader_read_block(r, i, &window, &e)) {
             rdz_reader_finalize(ptr);
             UNPROTECT(2);
             return rdz_failure(&e);
         }
-        at += r->blocks[i].stored_len;
+        at += (size_t)r->blocks[i].decoded_len;
     }
     rdz_reader_finalize(ptr);
     UNPROTECT(2);
