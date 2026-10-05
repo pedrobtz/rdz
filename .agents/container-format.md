@@ -4,7 +4,10 @@
 
 This document is the wire contract implemented by Phase 0B. It is intentionally
 pre-release: files may still be replaced until `rdz` 0.1.0. The current
-container version is 2. All multibyte integers are unsigned little-endian values;
+container version is 3 (2026-10-05, plan-c.md §3): every checksum is an
+eight-byte XXH3-64 with seed 0, bit-identical to the reference xxHash and to
+zufast's `zuf_hash64()`, in place of version 2's four-byte IEEE CRC32. Readers
+reject version 2 files; no version 2 file was ever released. All multibyte integers are unsigned little-endian values;
 there is no implicit padding and every reserved field must be zero.
 
 The container and directory layouts are shared by the generic `R_SERIAL_V3`
@@ -16,7 +19,7 @@ whole-root generic codec.
 
 | Kind | ID/version | Meaning |
 |---|---:|---|
-| Container | 2 | Phase 0B seekable block container |
+| Container | 3 | Seekable block container with XXH3-64 checksums |
 | Directory | 1 | Object, attribute, block, and synopsis directory |
 | Payload codec | 1/3 | One whole-root R serialization version-3 XDR stream |
 | Payload codec | 2/1 | RDZ native typed codec; logical vectors implemented |
@@ -31,7 +34,8 @@ whole-root generic codec.
 | Block encoding | 8 | Character dictionary entries (experimental) |
 | Block encoding | 9 | Character dictionary indices (experimental) |
 | Compression | 0 | No compression |
-| Checksum | implicit v1 | IEEE CRC32 through `crc32fast` |
+| Compression | 1 | zstd frame (reserved; not yet written or accepted) |
+| Checksum | implicit v3 | XXH3-64, seed 0, stored little-endian |
 
 The writer uses 1 MiB blocks. Readers accept at most 64 MiB per block, 1,000,000
 blocks, and a 64 KiB generic synopsis. Counts, lengths, offsets, additions, and
@@ -46,13 +50,13 @@ Unknown IDs, versions, mandatory flags, or nonzero reserved fields are errors.
 
 ```text
 [32-byte file header]
-[40-byte block header | stored block bytes] ...
-[36-byte directory header]
+[48-byte block header | stored block bytes] ...
+[40-byte directory header]
 [48-byte object entries] ...
 [32-byte attribute entries] ...
-[56-byte block entries] ...
+[64-byte block entries] ...
 [bounded generic synopsis]
-[32-byte closing trailer]
+[40-byte closing trailer]
 ```
 
 The writer collects checked block offsets during a forward pass, appends the
@@ -65,22 +69,21 @@ directory; metadata inspection never scans or allocates the data payload.
 | Offset | Width | Field |
 |---:|---:|---|
 | 0 | 4 | Magic bytes `52 44 5a 1a` |
-| 4 | 2 | Container version, currently 2 |
+| 4 | 2 | Container version, currently 3 |
 | 6 | 2 | Header length, 32 |
 | 8 | 4 | Flags, currently zero |
 | 12 | 2 | Payload codec ID |
 | 14 | 2 | Payload codec version |
 | 16 | 4 | Maximum decoded block size |
 | 20 | 4 | Reserved zero |
-| 24 | 4 | CRC32 of bytes 0 through 23 |
-| 28 | 4 | Reserved zero |
+| 24 | 8 | XXH3-64 of bytes 0 through 23 |
 
-## Block header: 40 bytes
+## Block header: 48 bytes
 
 | Offset | Width | Field |
 |---:|---:|---|
 | 0 | 4 | Magic `RBLK` |
-| 4 | 2 | Header length, 40 |
+| 4 | 2 | Header length, 48 |
 | 6 | 2 | Flags, currently zero |
 | 8 | 4 | Zero-based consecutive sequence number |
 | 12 | 2 | Encoding ID |
@@ -88,34 +91,35 @@ directory; metadata inspection never scans or allocates the data payload.
 | 16 | 8 | Logical unit count; bytes for the generic raw stream |
 | 24 | 8 | Decoded byte length |
 | 32 | 4 | Stored byte length |
-| 36 | 4 | CRC32 of the exact stored bytes |
+| 36 | 4 | Reserved zero |
+| 40 | 8 | XXH3-64 of the exact stored bytes |
 
 Raw blocks require logical count, decoded length, and stored length to agree.
 For every uncompressed native block, decoded and stored byte lengths agree while
 logical count records the number of R elements represented by those codec bytes.
 Every decoded block length must be less than or equal to the maximum recorded in
-the file header; readers reject a contradictory header even when its CRC is
-valid.
+the file header; readers reject a contradictory header even when its checksum
+is valid.
 An empty object stream is represented by one zero-length block. Packed logical
 elements are numbered from the least-significant unused bits of each byte;
 unused high bits in the final byte must be zero.
 
-## Directory header: 36 bytes
+## Directory header: 40 bytes
 
 | Offset | Width | Field |
 |---:|---:|---|
 | 0 | 4 | Magic `RDIR` |
 | 4 | 2 | Directory version, 1 |
-| 6 | 2 | Directory header length, 36 |
+| 6 | 2 | Directory header length, 40 |
 | 8 | 2 | Object entry width, 48 |
 | 10 | 2 | Attribute entry width, 32 |
-| 12 | 2 | Block entry width, 56 |
+| 12 | 2 | Block entry width, 64 |
 | 14 | 2 | Flags, currently zero |
 | 16 | 4 | Object entry count |
 | 20 | 4 | Attribute entry count |
 | 24 | 4 | Block entry count |
 | 28 | 4 | Synopsis byte length |
-| 32 | 4 | CRC32 of bytes 0 through 31 |
+| 32 | 8 | XXH3-64 of bytes 0 through 31 |
 
 Generic files set object and attribute counts to zero. Native logical files have
 one root object and either no attributes or one `names` attribute represented by
@@ -131,7 +135,7 @@ byte-round-trip tests enforce these layouts. Roles are `0=root`,
 `1=attribute-name`, and `2=attribute-value`; the only Phase 1 attribute flag is
 bit 0 for `names`. All other role, object, and attribute flags are rejected.
 
-## Block directory entry: 56 bytes
+## Block directory entry: 64 bytes
 
 | Offset | Width | Field |
 |---:|---:|---|
@@ -145,7 +149,8 @@ bit 0 for `names`. All other role, object, and attribute flags are rejected.
 | 40 | 8 | Decoded byte length |
 | 48 | 2 | Encoding ID |
 | 50 | 2 | Compression ID |
-| 52 | 4 | Stored-byte CRC32 |
+| 52 | 4 | Reserved zero |
+| 56 | 8 | XXH3-64 of the stored bytes |
 
 The container requires canonical, consecutive, non-overlapping block spans from the
 end of the file header to the start of the directory. This deliberately rejects
@@ -241,22 +246,23 @@ synopsis with `synopsis_error = TRUE`; this never prevents the already-supported
 whole-root generic codec from preserving the object.
 Successful collection emits the same schema with `synopsis_error = FALSE`.
 
-## Closing trailer: 32 bytes
+## Closing trailer: 40 bytes
 
 | Offset | Width | Field |
 |---:|---:|---|
 | 0 | 4 | Magic `RDZT` |
-| 4 | 2 | Container version, 2 |
-| 6 | 2 | Trailer length, 32 |
+| 4 | 2 | Container version, 3 |
+| 6 | 2 | Trailer length, 40 |
 | 8 | 8 | Directory file offset |
 | 16 | 8 | Directory byte length |
-| 24 | 4 | CRC32 of the complete directory bytes |
-| 28 | 4 | Closing magic `ZEND` |
+| 24 | 8 | XXH3-64 of the complete directory bytes |
+| 32 | 4 | Reserved zero |
+| 36 | 4 | Closing magic `ZEND`, the last four bytes of the file |
 
 The directory must end exactly where the trailer begins. A metadata read verifies
-the header CRC, trailer, directory CRC, directory-header CRC, and all structural
-bounds. A full read additionally verifies every indexed block header and block
-CRC before passing generic bytes to `unserialize()`.
+the header checksum, trailer, directory checksum, directory-header checksum, and
+all structural bounds. A full read additionally verifies every indexed block
+header and block checksum before passing generic bytes to `unserialize()`.
 
 ## Write and fallback rules
 
@@ -278,3 +284,10 @@ rollback fallback has a brief missing-destination window and can strand the
 backup after a process or machine crash. Dropping an uncommitted writer removes
 its temporary file. A future opt-in durable mode may sync the file and parent
 directory; the callback-based streaming R bridge remains a pre-0.1 requirement.
+
+Decided 2026-10-05 for the C implementation: the generic payload is streamed.
+`R_Serialize()` writes through an `R_outpstream` whose callback fills the current
+block, and `R_Unserialize()` reads through an `R_inpstream` that pulls verified
+blocks in order, so neither the whole raw vector nor a separate whole-payload
+integrity pass exists. The stored bytes are unchanged: the concatenated generic
+blocks are exactly `serialize(x, NULL, version = 3, xdr = TRUE)`.

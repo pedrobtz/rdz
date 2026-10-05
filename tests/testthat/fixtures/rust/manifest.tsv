@@ -1,0 +1,34 @@
+name	mode	policy	codec	blocks	encodings	bytes	sha256	commit	spec
+lgl_len0	native	plain	native_v1	1	4	276	f8ea3a20bb5dcb12fbc791ae55ddc0504e5f2f69a17eb2f5e78e5e8ec887ebb0	c1e582647e1bfdb9947738c66e6498cc00b49483	logical(0)
+lgl_len1	native	plain	native_v1	1	3	276	d81544376ee755cc24c444f37c796eda0fc36c25cc24fec1c08b974d0db691bb	c1e582647e1bfdb9947738c66e6498cc00b49483	TRUE
+lgl_block_minus1	native	plain	native_v1	1	4	16660	4c53f8820eabe87892b1fb2d82c327e8bad2599162db90dfdfcc739e548c3f68	c1e582647e1bfdb9947738c66e6498cc00b49483	mixed TRUE/FALSE/NA, 65535 values
+lgl_block	native	plain	native_v1	1	4	16660	35e6ecac4a524bfa0a3d2044eaf29db026174ae5b7570587132eb36bcade092b	c1e582647e1bfdb9947738c66e6498cc00b49483	mixed TRUE/FALSE/NA, 65536 values
+lgl_block_plus1	native	plain	native_v1	2	3 4	16776	0fa0091cf5a2fa3ac4ac7276b3287393c635137bd7878459fad7851a35b96244	c1e582647e1bfdb9947738c66e6498cc00b49483	mixed TRUE/FALSE/NA, 65537 values
+lgl_multiblock	native	plain	native_v1	4	4	50624	8e104fbc1810b73ae07e3292b04cebd31b2b2e13901c070e346d3501e47f2f11	c1e582647e1bfdb9947738c66e6498cc00b49483	mixed TRUE/FALSE/NA, 200000 values
+lgl_constant_true	native	plain	native_v1	1	3	276	11ce727985684a03ec846f974a1062fe81c5b793800330b36c423f534d455c7a	c1e582647e1bfdb9947738c66e6498cc00b49483	rep(TRUE, 65536)
+lgl_constant_na	native	plain	native_v1	1	3	276	27eff745c5f76412e166e075616ca6b4342951b16642e2ff5f0898f72a954c08	c1e582647e1bfdb9947738c66e6498cc00b49483	rep(NA, 65536)
+lgl_sparse	native	plain	native_v1	1	5	434	a47fb146b71da48bedd18b0acff2d4d55e0b14436cd4bb6cedd37147287cd1d0	c1e582647e1bfdb9947738c66e6498cc00b49483	FALSE with TRUE every 1000th and NA every 7919th
+lgl_runs	native	plain	native_v1	1	6	408	b52d49d43dc7451e22727cfffd6773866bcde69cb04d6b04342f4794e51173bd	c1e582647e1bfdb9947738c66e6498cc00b49483	runs of 4096 TRUE, NA, FALSE
+lgl_periodic	native	plain	native_v1	1	7	282	417485c6d1e06718677ee9a4f8b554c952f00a8c3b9dfc213e228512aebb8724	c1e582647e1bfdb9947738c66e6498cc00b49483	period 5: TRUE FALSE NA FALSE TRUE
+lgl_kinds_multiblock	native	plain	native_v1	5	3 4 5 6 7	17420	42504259385aa0cef5751da6ca2ce42c99266d0d9086cbf19af60b7fa2caf8a2	c1e582647e1bfdb9947738c66e6498cc00b49483	one block each: constant, sparse, runs, periodic, mixed
+lgl_names_plain	native	plain	native_v1	4	2 4	559335	e31368e16faec40b50cc0df4df7842855152279eb99a6f9d328401055bdd0811	c1e582647e1bfdb9947738c66e6498cc00b49483	70000 values, names k0..k36 repeating
+lgl_names_block	native	block	native_v1	7	2 4 8 9	89178	b22aa35cfe51d76914e417874ba8f6affd7a6744879edb11a5e2637bfc4f352d	c1e582647e1bfdb9947738c66e6498cc00b49483	70000 values, names k0..k36 repeating
+lgl_names_global	native	global	native_v1	6	2 4 8 9	88780	28b7ebcd75741ee8433308125cc0820cd1fc4dbfd7d1ec8a884598c182ba2e8b	c1e582647e1bfdb9947738c66e6498cc00b49483	70000 values, names k0..k36 repeating
+lgl_names_auto_repeated	native	auto	native_v1	6	2 4 8 9	88780	28b7ebcd75741ee8433308125cc0820cd1fc4dbfd7d1ec8a884598c182ba2e8b	c1e582647e1bfdb9947738c66e6498cc00b49483	70000 values, names k0..k36 repeating
+lgl_names_auto_unique	native	auto	native_v1	3	2 4	61888	b9532296ced390cb147d324c32fdaf52c94a4ea59994085ce904a8e11aaeb326	c1e582647e1bfdb9947738c66e6498cc00b49483	5000 values, unique names
+lgl_names_encodings_plain	native	plain	native_v1	3	2 4	5788	816ee72983ce14d437e457e2fac34d26881f6ef16266c58e770ae2c0a56efbd6	c1e582647e1bfdb9947738c66e6498cc00b49483	600 values, names in every encoding and NA, repeating
+lgl_names_encodings_global	native	global	native_v1	4	2 4 8 9	1558	5a2e452dfd26a78dc7a4161bfc4b6ddcd6f81db0263eca4b3e94c701569f9b92	c1e582647e1bfdb9947738c66e6498cc00b49483	600 values, names in every encoding and NA, repeating
+lgl_names_multiblock	native	plain	native_v1	4	2 4	1463250	72fc499bae79d10845a609cf5795bab1527c22658cbb298d09d31e11735c3dcf	c1e582647e1bfdb9947738c66e6498cc00b49483	50000 values, unique 24-byte names over two string blocks
+lgl_names_empty	native	plain	native_v1	3	2 4	638	d80678f6e257158eacaeb36bde1692c59dfb821f00c84affad768d19c6c382a7	c1e582647e1bfdb9947738c66e6498cc00b49483	zero-length logical with zero-length names
+gen_null	r	plain	r_serial_v3	1	0	642	9452f17bde80e5af871999c3b19111c4aa1122b24c750dfc3012b675eca91c95	c1e582647e1bfdb9947738c66e6498cc00b49483	NULL
+gen_raw_block_minus1	r	plain	r_serial_v3	1	0	1049189	ab249cb51ab5da9cf7c6c32f8a02d2c1b00ab0f1cda5c5170ed1906e642446d5	c1e582647e1bfdb9947738c66e6498cc00b49483	raw vector whose serialization is 1 MiB - 1 bytes
+gen_raw_block	r	plain	r_serial_v3	1	0	1049190	66eead8ca4df276fa28b549bf1db5e281ab0819558ab16c51187b9b59d1090f9	c1e582647e1bfdb9947738c66e6498cc00b49483	raw vector whose serialization is 1 MiB
+gen_raw_block_plus1	r	plain	r_serial_v3	2	0	1049303	da241d78c0c21c3b981e02457dd9948d200cd592a99d55e14c7dbd7a867ad92f	c1e582647e1bfdb9947738c66e6498cc00b49483	raw vector whose serialization is 1 MiB + 1 bytes
+gen_raw_multiblock	r	plain	r_serial_v3	4	0	3159054	0a6658a2d18b701a09e1cb0b056814272af8fc27b268849c735746d6a1b87eda	c1e582647e1bfdb9947738c66e6498cc00b49483	raw vector of 3 MiB + 12345 bytes
+gen_rare	r	plain	r_serial_v3	1	0	1727	9bb4c2cf17e3e3dab476e779d460230bf7ddfb769df1f0e30c98a8cee4a9ea4d	c1e582647e1bfdb9947738c66e6498cc00b49483	list of complex, symbol, call, expression, formula, raw, ALTREP compact sequence, Date, POSIXct, matrix, nested list
+gen_logical_forced	r	plain	r_serial_v3	1	0	2187	2181bdad5643f13f967aa2ad8a4cb1eaedba17ad70ad79586c29fd9608319511	c1e582647e1bfdb9947738c66e6498cc00b49483	mixed logical with names, mode r
+gen_integer_auto	auto	plain	r_serial_v3	1	0	673	4ffc2450ca45c962cbc351fc99ceabb9981dd0e1bb0ab3bba3f24e04bf10c16d	c1e582647e1bfdb9947738c66e6498cc00b49483	integer with NA and extremes, mode auto
+gen_double_auto	auto	plain	r_serial_v3	1	0	728	055e999f877fd8c3547effd795e569fbc2119cde415429acc11ffcb59593e95e	c1e582647e1bfdb9947738c66e6498cc00b49483	doubles: signed zeros, subnormal, extremes, infinities, NA, NaN
+gen_character_auto	auto	plain	r_serial_v3	1	0	719	16fe46241a0d02c373f4441060079b7636c2c0a3205e63c52b53e1da84bb7f58	c1e582647e1bfdb9947738c66e6498cc00b49483	character in every encoding and NA, mode auto
+gen_factor_auto	auto	plain	r_serial_v3	1	0	810	81f784c1219019aacb908cd12b4e1fb77abecf52ef2d3dc7bf213d63fb0b686c	c1e582647e1bfdb9947738c66e6498cc00b49483	factor with NA and an unused level, mode auto
+gen_data_frame_auto	auto	plain	r_serial_v3	1	0	1082	687b7e848751a66baf0a69ec52c19b504cd00bbe6e951f6ea0af7cdc93d66fe0	c1e582647e1bfdb9947738c66e6498cc00b49483	data frame of logical, integer, double, character, factor, mode auto

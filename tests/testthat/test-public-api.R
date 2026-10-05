@@ -13,7 +13,7 @@ test_that("write_rdz writes a file and returns its path invisibly", {
   expect_identical(bytes[1:4], as.raw(c(0x52, 0x44, 0x5a, 0x1a)))
   expect_identical(
     readBin(bytes[5:6], integer(), n = 1L, size = 2L, endian = "little"),
-    2L
+    3L
   )
   expect_identical(
     readBin(bytes[7:8], integer(), n = 1L, size = 2L, endian = "little"),
@@ -28,7 +28,7 @@ test_that("write_rdz writes a file and returns its path invisibly", {
     3L
   )
   expect_identical(bytes[33:36], charToRaw("RBLK"))
-  expect_identical(bytes[(length(bytes) - 31L):(length(bytes) - 28L)], charToRaw("RDZT"))
+  expect_identical(bytes[(length(bytes) - 39L):(length(bytes) - 36L)], charToRaw("RDZT"))
   expect_identical(tail(bytes, 4L), charToRaw("ZEND"))
 })
 
@@ -73,9 +73,9 @@ test_that("payload corruption is detected before deserialization", {
   write_rdz(list(value = rep(pi, 100L)), path)
   bytes <- readBin(path, what = "raw", n = file.info(path)$size)
   # The first block payload starts after the 32-byte file header and the
-  # 40-byte block header.
-  bytes[[73L]] <- as.raw(
-    bitwXor(as.integer(bytes[[73L]]), 0xffL)
+  # 48-byte block header.
+  bytes[[81L]] <- as.raw(
+    bitwXor(as.integer(bytes[[81L]]), 0xffL)
   )
   writeBin(bytes, path)
 
@@ -107,9 +107,9 @@ test_that("unknown format versions and flags are rejected", {
   bytes <- readBin(path, what = "raw", n = file.info(path)$size)
 
   unknown_version <- bytes
-  unknown_version[5:6] <- writeBin(3L, raw(), size = 2L, endian = "little")
+  unknown_version[5:6] <- writeBin(4L, raw(), size = 2L, endian = "little")
   writeBin(unknown_version, path)
-  expect_error(read_rdz(path), "unsupported rdz format version 3")
+  expect_error(read_rdz(path), "unsupported rdz format version 4")
 
   unknown_flags <- bytes
   unknown_flags[9:12] <- writeBin(1L, raw(), size = 4L, endian = "little")
@@ -131,9 +131,9 @@ test_that("the transitional generic payload uses R's XDR stream", {
   on.exit(unlink(path), add = TRUE)
 
   write_rdz(list(value = 1L), path)
-  bytes <- readBin(path, what = "raw", n = 74L)
+  bytes <- readBin(path, what = "raw", n = 82L)
 
-  expect_identical(bytes[73:74], charToRaw("X\n"))
+  expect_identical(bytes[81:82], charToRaw("X\n"))
 })
 
 test_that("codec modes distinguish fallback from strict native encoding", {
@@ -168,7 +168,7 @@ test_that("rdz_info reads bounded container metadata and a generic synopsis", {
   info <- rdz_info(path)
 
   expect_s3_class(info, "rdz_info")
-  expect_identical(info$container_version, 2L)
+  expect_identical(info$container_version, 3L)
   expect_identical(info$codec, "r_serial_v3")
   expect_identical(info$codec_id, 1L)
   expect_identical(info$codec_version, 3L)
@@ -183,7 +183,7 @@ test_that("rdz_info reads bounded container metadata and a generic synopsis", {
   expect_true(info$synopsis$exact_attributes_require_full_read)
   expect_setequal(
     info$integrity_checks,
-    c("header_crc32", "directory_crc32", "directory_and_block_bounds")
+    c("header_xxh3", "directory_xxh3", "directory_and_block_bounds")
   )
   output <- capture.output(visible <- withVisible(print(info)))
   expect_match(output[[1L]], "<rdz_info>", fixed = TRUE)
@@ -196,7 +196,7 @@ test_that("rdz_info rejects a corrupt directory without reading the payload", {
   on.exit(unlink(path), add = TRUE)
   write_rdz(list(value = 1L), path)
   bytes <- readBin(path, what = "raw", n = file.info(path)$size)
-  directory_byte <- length(bytes) - 32L
+  directory_byte <- length(bytes) - 40L
   bytes[[directory_byte]] <- as.raw(
     bitwXor(as.integer(bytes[[directory_byte]]), 0xffL)
   )

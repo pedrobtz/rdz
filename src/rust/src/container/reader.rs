@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-use crate::checksum::crc32;
+use crate::checksum::xxh3;
 use crate::codec::{logical, string};
 use crate::format::{
     ATTRIBUTE_ENTRY_LEN, ATTRIBUTE_FLAG_NAMES, BLOCK_HEADER_LEN, BLOCK_MAGIC, CLOSING_MAGIC,
@@ -125,7 +125,7 @@ impl ContainerReader {
                 .get_mut(output_offset..output_end)
                 .ok_or(FormatError::Invalid("decoded payload length mismatch"))?;
             self.file.read_exact(block)?;
-            if crc32(block) != entry.checksum {
+            if xxh3(block) != entry.checksum {
                 return Err(checksum_error(entry.sequence));
             }
             output_offset = output_end;
@@ -411,12 +411,12 @@ fn validate_structure(file: &mut File) -> Result<ValidatedContainer, FormatError
     if read_u16(&header, 6)? as usize != HEADER_LEN {
         return Err(FormatError::Invalid("unsupported header length"));
     }
-    if read_u32(&header, 8)? != 0 || read_u32(&header, 20)? != 0 || read_u32(&header, 28)? != 0 {
+    if read_u32(&header, 8)? != 0 || read_u32(&header, 20)? != 0 {
         return Err(FormatError::Invalid(
             "unsupported header flags or reserved fields",
         ));
     }
-    if read_u32(&header, 24)? != crc32(&header[..24]) {
+    if read_u64(&header, 24)? != xxh3(&header[..24]) {
         return Err(FormatError::Invalid("header checksum mismatch"));
     }
     let codec_id = read_u16(&header, 12)?;
@@ -430,16 +430,18 @@ fn validate_structure(file: &mut File) -> Result<ValidatedContainer, FormatError
     file.seek(SeekFrom::End(-(TRAILER_LEN as i64)))?;
     let mut trailer = [0_u8; TRAILER_LEN];
     file.read_exact(&mut trailer)?;
-    if &trailer[0..4] != TRAILER_MAGIC || &trailer[28..32] != CLOSING_MAGIC {
+    if &trailer[0..4] != TRAILER_MAGIC || &trailer[36..40] != CLOSING_MAGIC {
         return Err(FormatError::Invalid("closing trailer magic mismatch"));
     }
-    if read_u16(&trailer, 4)? != CONTAINER_VERSION || read_u16(&trailer, 6)? as usize != TRAILER_LEN
+    if read_u16(&trailer, 4)? != CONTAINER_VERSION
+        || read_u16(&trailer, 6)? as usize != TRAILER_LEN
+        || read_u32(&trailer, 32)? != 0
     {
         return Err(FormatError::Invalid("unsupported closing trailer"));
     }
     let directory_offset = read_u64(&trailer, 8)?;
     let directory_len = read_u64(&trailer, 16)?;
-    let directory_checksum = read_u32(&trailer, 24)?;
+    let directory_checksum = read_u64(&trailer, 24)?;
     if directory_offset < HEADER_LEN as u64 {
         return Err(FormatError::Invalid("directory overlaps the file header"));
     }
@@ -461,7 +463,7 @@ fn validate_structure(file: &mut File) -> Result<ValidatedContainer, FormatError
     file.seek(SeekFrom::Start(directory_offset))?;
     let mut directory = try_zeroed_vec(directory_len_usize, "directory allocation")?;
     file.read_exact(&mut directory)?;
-    if crc32(&directory) != directory_checksum {
+    if xxh3(&directory) != directory_checksum {
         return Err(FormatError::Invalid("directory checksum mismatch"));
     }
     let parsed = parse_directory(&directory, directory_offset, block_size, codec_id)?;
@@ -546,7 +548,7 @@ fn parse_directory(
     if synopsis_len > MAX_SYNOPSIS_LEN {
         return Err(FormatError::Limit("synopsis length"));
     }
-    if read_u32(directory, 32)? != crc32(&directory[..32]) {
+    if read_u64(directory, 32)? != xxh3(&directory[..32]) {
         return Err(FormatError::Invalid("directory header checksum mismatch"));
     }
     let object_bytes = (object_count as usize)
@@ -596,9 +598,9 @@ fn parse_directory(
             decoded_len: read_u64(directory, offset + 40)?,
             encoding: read_u16(directory, offset + 48)?,
             compression: read_u16(directory, offset + 50)?,
-            checksum: read_u32(directory, offset + 52)?,
+            checksum: read_u64(directory, offset + 56)?,
         };
-        if read_u32(directory, offset + 28)? != 0 {
+        if read_u32(directory, offset + 28)? != 0 || read_u32(directory, offset + 52)? != 0 {
             return Err(FormatError::Invalid(
                 "nonzero block directory reserved field",
             ));
@@ -934,7 +936,8 @@ fn validate_block_header_at_current(
         || read_u64(&header, 16)? != entry.logical_count
         || read_u64(&header, 24)? != entry.decoded_len
         || read_u32(&header, 32)? != entry.stored_len
-        || read_u32(&header, 36)? != entry.checksum
+        || read_u32(&header, 36)? != 0
+        || read_u64(&header, 40)? != entry.checksum
     {
         return Err(FormatError::InvalidDetail(format!(
             "block {} header does not match the directory",
@@ -959,7 +962,7 @@ fn read_block_at_current(
     }
     output.resize(stored_len, 0);
     file.read_exact(output)?;
-    if crc32(output) != entry.checksum {
+    if xxh3(output) != entry.checksum {
         return Err(checksum_error(entry.sequence));
     }
     Ok(())
@@ -1207,12 +1210,12 @@ mod tests {
             let payload_offset = HEADER_LEN + BLOCK_HEADER_LEN;
             let stored_len = read_u32(&bytes[HEADER_LEN..], 32)? as usize;
             bytes[payload_offset + payload_index] = invalid_byte;
-            let checksum = crc32(&bytes[payload_offset..payload_offset + stored_len]);
-            bytes[HEADER_LEN + 36..HEADER_LEN + 40].copy_from_slice(&checksum.to_le_bytes());
+            let checksum = xxh3(&bytes[payload_offset..payload_offset + stored_len]);
+            bytes[HEADER_LEN + 40..HEADER_LEN + 48].copy_from_slice(&checksum.to_le_bytes());
             let block_entry = directory_offset + DIRECTORY_HEADER_LEN + OBJECT_ENTRY_LEN;
-            bytes[block_entry + 52..block_entry + 56].copy_from_slice(&checksum.to_le_bytes());
-            let directory_checksum = crc32(&bytes[directory_offset..trailer_start]);
-            bytes[trailer_start + 24..trailer_start + 28]
+            bytes[block_entry + 56..block_entry + 64].copy_from_slice(&checksum.to_le_bytes());
+            let directory_checksum = xxh3(&bytes[directory_offset..trailer_start]);
+            bytes[trailer_start + 24..trailer_start + 32]
                 .copy_from_slice(&directory_checksum.to_le_bytes());
             fs::write(&path, bytes)?;
 
@@ -1243,8 +1246,8 @@ mod tests {
         let directory_offset = read_u64(&bytes[trailer_start..], 8)? as usize;
         let root_type_offset = directory_offset + DIRECTORY_HEADER_LEN + 10;
         bytes[root_type_offset..root_type_offset + 2].copy_from_slice(&2_u16.to_le_bytes());
-        let directory_checksum = crc32(&bytes[directory_offset..trailer_start]);
-        bytes[trailer_start + 24..trailer_start + 28]
+        let directory_checksum = xxh3(&bytes[directory_offset..trailer_start]);
+        bytes[trailer_start + 24..trailer_start + 32]
             .copy_from_slice(&directory_checksum.to_le_bytes());
         fs::write(&path, bytes)?;
 
@@ -1306,8 +1309,8 @@ mod tests {
         write_container(&path, Codec::RSerialV3, &payload, &[])?;
         let mut bytes = fs::read(&path)?;
         bytes[16..20].copy_from_slice(&4096_u32.to_le_bytes());
-        let repaired = crc32(&bytes[..24]);
-        bytes[24..28].copy_from_slice(&repaired.to_le_bytes());
+        let repaired = xxh3(&bytes[..24]);
+        bytes[24..32].copy_from_slice(&repaired.to_le_bytes());
         fs::write(&path, &bytes)?;
         assert!(read_info(&path).is_err());
         fs::remove_file(path)?;

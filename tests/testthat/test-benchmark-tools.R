@@ -28,7 +28,7 @@ test_that("read benchmark matrix reports median milliseconds", {
   expect_identical(attr(result, "parameters")$threads, 1L)
   expect_identical(
     unname(attr(result, "parameters")$checksum_policy[["rdz"]]),
-    "always validate CRC32"
+    "always validate XXH3-64"
   )
 
   details <- attr(result, "details")

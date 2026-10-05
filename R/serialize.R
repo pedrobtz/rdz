@@ -125,8 +125,8 @@ rdz_info <- function(path) {
     )
   }
   info$integrity_checks <- c(
-    "header_crc32",
-    "directory_crc32",
+    "header_xxh3",
+    "directory_xxh3",
     "directory_and_block_bounds"
   )
   class(info) <- "rdz_info"

@@ -114,7 +114,7 @@ pub(crate) struct BlockEntry {
     pub(crate) decoded_len: u64,
     pub(crate) encoding: u16,
     pub(crate) compression: u16,
-    pub(crate) checksum: u32,
+    pub(crate) checksum: u64,
 }
 
 impl BlockEntry {
@@ -123,7 +123,7 @@ impl BlockEntry {
         block_header_offset: u64,
         payload_offset: u64,
         length: u64,
-        checksum: u32,
+        checksum: u64,
     ) -> Result<Self, FormatError> {
         if length > MAX_BLOCK_SIZE {
             return Err(FormatError::Limit("block size"));
@@ -150,7 +150,7 @@ impl BlockEntry {
         logical_count: u64,
         encoding: u16,
         payload: &[u8],
-        checksum: u32,
+        checksum: u64,
     ) -> Result<Self, FormatError> {
         let length = u64::try_from(payload.len()).map_err(|_| FormatError::Limit("block size"))?;
         if length > MAX_BLOCK_SIZE {

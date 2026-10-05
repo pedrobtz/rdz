@@ -1,5 +1,38 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-05: plan-c Stage A
+
+rdz is being re-implemented in C on zubin and zufast (plan-c.md, adopted
+2026-10-05). Stage A is done:
+
+- The three format decisions of plan-c.md section 3 are taken and written
+  where the format is specified: container version 3 with XXH3-64 checksums in
+  eight-byte fields (container-format.md), zstd vendored as compression ID 1
+  (reserved; not written or accepted yet), and the generic payload streamed
+  through `R_Serialize()`/`R_Unserialize()` with unchanged bytes
+  (encoding-research.md, "Format decisions of 2026-10-05").
+- The Rust implementation writes and reads version 3. Its XXH3 fields agree
+  bit for bit with `zufast::fast_hash()`.
+- The character dictionary (encodings 8 and 9) is landed in Rust (#3), so the
+  character record is fixed by the oracle.
+- The reference corpus is in `tests/testthat/fixtures/rust/`: 33 files, from
+  the commit recorded in `manifest.tsv`, covering native logical lengths 0, 1,
+  65,535, 65,536, 65,537 and multiblock; every logical record kind (3 to 7);
+  names under every dictionary policy, in every string encoding, and over two
+  string blocks; generic payloads at 1 MiB minus one, exactly, plus one and
+  multiblock; a rare object; and automatic fallback for each common type.
+  `tools/make-rust-fixtures.R` regenerates it from the specs in
+  `helper-rust-fixtures.R`; `test-rust-fixtures.R` checks its SHA-256 sums,
+  that every fixture reads back `identical()` to its spec, and that
+  `rdz_info()` matches what the Rust build reported. Encoding 1, the legacy
+  two-bit logical record, has no writer and so no fixture; whether the C reader
+  keeps it is decided at Stage E.
+- The Rust tree is tagged `rust-reference-pre-c`.
+
+Stage B (the C skeleton and the R-free container) is next. The assessment
+below describes the Rust implementation as of 2026-08-09 and is kept for its
+evidence.
+
 Assessment date: 2026-08-09
 
 ## Outcome
