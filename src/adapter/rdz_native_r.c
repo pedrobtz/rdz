@@ -204,6 +204,7 @@ static rdz_node *rdz_plan_add(rdz_plan *p, SEXP x, const char *name, uint16_t ro
                               uint32_t parent, const char **why)
 {
     rdz_node *n;
+    SEXP *slot;
     uint32_t d;
     if (rdz_plan_count(p) >= RDZ_MAX_OBJECTS) {
         *why = "an object of more than a million native parts";
@@ -214,12 +215,14 @@ static rdz_node *rdz_plan_add(rdz_plan *p, SEXP x, const char *name, uint16_t ro
         *why = "an object nested more deeply than rdz's native codecs allow";
         return NULL;
     }
-    if (zb_put_bytes(&p->objects, &x, sizeof x) || zb_put_bytes(&p->names, &name, sizeof name) ||
-        zb_put_bytes(&p->depth, &d, sizeof d) ||
+    /* x by assignment, not by its address, which rchk would lose track of */
+    if (!(slot = (SEXP *)(void *)zb_put_raw(&p->objects, sizeof x)) ||
+        zb_put_bytes(&p->names, &name, sizeof name) || zb_put_bytes(&p->depth, &d, sizeof d) ||
         !(n = (rdz_node *)(void *)zb_put_raw(&p->nodes, sizeof *n))) {
         *why = "an object too large to plan";
         return NULL;
     }
+    *slot = x;
     memset(n, 0, sizeof *n);
     n->role = role;
     n->parent = parent;
@@ -681,7 +684,10 @@ static SEXP rdz_graph_body(void *data)
         SET_VECTOR_ELT(g->holder, i, x);
         if (o->type_tag == RDZ_TYPE_CHARACTER) {
             rdz_r_names *s = &((rdz_r_names *)(void *)g->sinks.data)[i];
-            SEXP dict = Rf_allocVector(STRSXP, (R_xlen_t)rdz_dictionary_length(r, i));
+            SEXP dict;
+            PROTECT(x); /* held by g->holder too, which rchk cannot see */
+            dict = Rf_allocVector(STRSXP, (R_xlen_t)rdz_dictionary_length(r, i));
+            UNPROTECT(1);
             SET_VECTOR_ELT(g->holder, (R_xlen_t)n + i, dict);
             s->target = x;
             s->dictionary = dict;
