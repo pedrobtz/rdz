@@ -1,5 +1,3 @@
-skip_without_rust()
-
 test_that("write_rdz writes a file and returns its path invisibly", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
@@ -139,6 +137,7 @@ test_that("the transitional generic payload uses R's XDR stream", {
 })
 
 test_that("codec modes distinguish fallback from strict native encoding", {
+  skip_without_rust()
   auto <- tempfile(fileext = ".rdz")
   forced_r <- tempfile(fileext = ".rdz")
   native <- tempfile(fileext = ".rdz")

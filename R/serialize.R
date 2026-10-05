@@ -11,7 +11,7 @@
 #'   complete value is supported and otherwise uses whole-root R serialization;
 #'   `"native"` rejects unsupported values; `"r"` forces R serialization.
 #' @returns `path`, invisibly.
-#' @examplesIf rdz:::rdz_has_rust()
+#' @examples
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(list(answer = 42L), path)
 #' read_rdz(path)
@@ -29,19 +29,20 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
   }
 
   if (!identical(mode, "r")) {
-    native_written <- rdz_try_write_native(x, path, identical(mode, "native"))
-    if (isTRUE(native_written)) {
-      return(invisible(path))
+    if (rdz_has_rust()) {
+      native_written <- rdz_try_write_native(x, path, identical(mode, "native"))
+      if (isTRUE(native_written)) {
+        return(invisible(path))
+      }
+    } else if (identical(mode, "native")) {
+      stop(
+        "Native serialization is not available in this build of rdz; ",
+        "use `mode = \"auto\"` or `mode = \"r\"`.",
+        call. = FALSE
+      )
     }
   }
 
-  payload <- serialize(
-    x,
-    connection = NULL,
-    ascii = FALSE,
-    xdr = TRUE,
-    version = 3L
-  )
   synopsis <- serialize(
     build_rdz_synopsis(x),
     connection = NULL,
@@ -49,7 +50,7 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
     xdr = TRUE,
     version = 3L
   )
-  rdz_write_generic(payload, synopsis, path)
+  rdz_check(.Call(rdz_c_write_generic, x, synopsis, path))
   invisible(path)
 }
 
@@ -60,7 +61,7 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
 #'
 #' @param path A single, non-missing path to read.
 #' @returns The R object stored in `path`.
-#' @examplesIf rdz:::rdz_has_rust()
+#' @examples
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(c(TRUE, FALSE, NA), path)
 #' read_rdz(path)
@@ -68,12 +69,13 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
 #' @export
 read_rdz <- function(path) {
   path <- validate_existing_rdz_path(path)
-  result <- rdz_read(path)
-  if (isTRUE(result$serialized)) {
-    unserialize(result$value)
-  } else {
-    result$value
+  result <- rdz_check(.Call(rdz_c_read, path))
+  if (inherits(result, "rdz_native_codec")) {
+    # Native codecs are read by the Rust implementation until plan-c Stage E.
+    result <- rdz_read(path)
+    return(result$value)
   }
+  result
 }
 
 #' Inspect an rdz Container Without Reading Its Payload
@@ -85,7 +87,7 @@ read_rdz <- function(path) {
 #'
 #' @param path A single, non-missing path to inspect.
 #' @returns A named list of container information and a bounded root synopsis.
-#' @examplesIf rdz:::rdz_has_rust()
+#' @examples
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(data.frame(value = 1:3), path)
 #' rdz_info(path)
@@ -161,7 +163,7 @@ print.rdz_info <- function(x, ...) {
 #'
 #' @param path A single, non-missing path to inspect.
 #' @returns A named schema list.
-#' @examplesIf rdz:::rdz_has_rust()
+#' @examples
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(c(first = TRUE, second = NA), path)
 #' rdz_schema(path)
@@ -289,7 +291,7 @@ build_rdz_synopsis <- function(x) {
 }
 
 build_rdz_synopsis_impl <- function(x) {
-  root_length <- rdz_root_length(x)
+  root_length <- .Call(rdz_c_root_length, x)
   if (root_length < 0) {
     root_length <- NULL
   }

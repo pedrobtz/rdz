@@ -25,10 +25,8 @@ use the native two-bit codec. Other objects use a whole-root, portable R XDR
 stream in automatic mode.
 }
 \examples{
-\dontshow{if (rdz:::rdz_has_rust()) withAutoprint(\{ # examplesIf}
 path <- tempfile(fileext = ".rdz")
 write_rdz(list(answer = 42L), path)
 read_rdz(path)
 unlink(path)
-\dontshow{\}) # examplesIf}
 }

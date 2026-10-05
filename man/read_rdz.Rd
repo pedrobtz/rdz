@@ -17,10 +17,8 @@ The R object stored in \code{path}.
 and block checksums before deserializing a generic payload.
 }
 \examples{
-\dontshow{if (rdz:::rdz_has_rust()) withAutoprint(\{ # examplesIf}
 path <- tempfile(fileext = ".rdz")
 write_rdz(c(TRUE, FALSE, NA), path)
 read_rdz(path)
 unlink(path)
-\dontshow{\}) # examplesIf}
 }

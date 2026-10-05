@@ -1,5 +1,3 @@
-skip_without_rust()
-
 test_that("atomic R object types round-trip exactly", {
   objects <- list(
     null = NULL,

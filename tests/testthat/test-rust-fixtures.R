@@ -69,11 +69,12 @@ test_that("the C writer reproduces every generic fixture byte for byte", {
 })
 
 test_that("every Rust fixture reads back to its spec's value", {
-  skip_without_rust()
   manifest <- rust_fixture_manifest()
   for (spec in rust_fixture_specs()) {
     path <- file.path(rust_fixture_dir(), paste0(spec$name, ".rdz"))
     row <- manifest[manifest$name == spec$name, ]
+    # Native files are read by the Rust implementation until plan-c Stage E.
+    if (row$codec == "native_v1" && !rdz:::rdz_has_rust()) next
 
     expect_identical(read_rdz(path), spec$value(), label = spec$name)
 
