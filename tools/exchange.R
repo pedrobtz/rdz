@@ -6,10 +6,11 @@
 #   Rscript tools/exchange.R check DIR [DIR...]  # every platform's files
 #
 # `check` requires every file to read to its spec's value, and every
-# uncompressed (speed) file to be the same bytes on every platform and the
-# same as the frozen corpus's but the writer field: the format has no
-# platform in it. Compressed files may differ only if the platforms' zstd
-# builds do, which they do not today; that is reported, not failed.
+# uncompressed (speed) native file to be the same bytes on every platform
+# and the same as the frozen corpus's but the writer field: the format has
+# no platform in it. Compressed files may differ only if the platforms' zstd
+# builds do, and generic files if their R versions do (R's serialization
+# header records it); that is reported, not failed.
 
 source(file.path("tests", "testthat", "helper-frozen-fixtures.R"))
 args <- commandArgs(trailingOnly = TRUE)
@@ -55,13 +56,13 @@ for (spec in specs) {
     bytes[[d]] <- but_writer(path)
   }
   same <- all(vapply(bytes, identical, logical(1L), bytes[[1L]]))
-  if (identical(spec$preset, "speed")) {
+  if (identical(spec$preset, "speed") && identical(spec$codec, "native_v1")) {
     if (!same) fail(file, "differs between platforms")
     if (!identical(bytes[[1L]], but_writer(file.path(corpus, file)))) {
       fail(file, "differs from the frozen corpus")
     }
   } else if (!same) {
-    cat("note:", file, "is compressed differently between platforms\n")
+    cat("note:", file, "differs between platforms (zstd or R versions)\n")
   }
 }
 cat(length(specs), "specs,", length(dirs), "platforms,", failures, "failures\n")

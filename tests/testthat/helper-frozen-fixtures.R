@@ -1,9 +1,9 @@
 # The frozen 0.1.0 corpus (plan-c Stage I): files the C writer wrote when
 # the format froze, in tests/testthat/fixtures/v0.1.0/. Every later rdz must
 # read each to the value its spec constructs (container-format.md,
-# "Compatibility and extension"); a `speed` file, whose blocks are stored
-# raw, must also be what this rdz writes, byte for byte but the writer
-# field. tools/make-frozen-fixtures.R wrote the files and the manifest once;
+# "Compatibility and extension"); a native `speed` file, whose blocks are
+# stored raw, must also be what this rdz writes, byte for byte but the writer
+# field (a generic file holds the writing R's version). tools/make-frozen-fixtures.R wrote the files and the manifest once;
 # no test rewrites them. tools/exchange.R uses these specs between operating
 # systems. The constructors are deterministic and use no random numbers.
 

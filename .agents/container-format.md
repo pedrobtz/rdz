@@ -85,8 +85,9 @@ add to the format without locking 0.1.0 readers out of every new file:
   work around a writer's bugs in files already written.
 - **Fixtures.** The frozen 0.1.0 fixtures are read-compatibility tests: every
   later reader reads them to the same values. Byte equality is required only
-  of uncompressed (`speed` preset) files, since zstd's output may change between
-  its versions.
+  of uncompressed (`speed` preset) native files: zstd's output may change
+  between its versions, and a generic payload's R serialization header records
+  the R version that wrote it.
 
 ## File sequence
 
