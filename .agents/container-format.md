@@ -28,6 +28,8 @@ whole-root generic codec.
 | Block encoding | 5 | Sparse logical patches |
 | Block encoding | 6 | Logical run ends |
 | Block encoding | 7 | Short periodic logical pattern |
+| Block encoding | 8 | Character dictionary entries (experimental) |
+| Block encoding | 9 | Character dictionary indices (experimental) |
 | Compression | 0 | No compression |
 | Checksum | implicit v1 | IEEE CRC32 through `crc32fast` |
 
@@ -195,6 +197,36 @@ strings select whole-root fallback because their interpretation is locale
 dependent. Each character record must fit in one 1 MiB block. Attribute-name and
 value blocks are independently addressable, so reading `names` does not touch
 the logical data blocks.
+
+### Character dictionary blocks (experimental)
+
+The `names` value object may mix encoding 2 with dictionary blocks. Encoding 8
+holds dictionary entries in exactly the encoding-2 record layout; its logical
+count is the number of entries, which do not count toward the object's length.
+Entries are numbered from zero in file order across all encoding-8 blocks of
+the object. Encoding 9 holds elements as dictionary ids: `width:u8` (1, 2, or
+4), three zero bytes, `base:u32`, then `logical_count` little-endian unsigned
+values of `width` bytes. Element `i` is entry `base + stored[i]`, which must
+refer to an entry in an earlier block; the stored length must be exactly
+`8 + logical_count * width`.
+
+The object's length is the sum of the logical counts of its encoding-2 and
+encoding-9 blocks. The total of its encoding-8 counts may not exceed that
+length, which bounds the dictionary a reader allocates before decoding.
+
+Writers emit index blocks of at most 65,536 elements, each preceded by the
+entry blocks for values first seen in it, so reads are one forward pass. The
+writer policy is not recorded: a `global` writer keeps one dictionary for the
+whole vector, a `block` writer restarts it every index block, and `plain`
+emits encoding 2 only. `auto` estimates the share of distinct values from
+16,384 positions drawn with a fixed-seed generator (bias-corrected Chao1) and
+writes `global` below a threshold, otherwise `plain`. Any dictionary policy
+writes the remainder of a vector as encoding 2 once its dictionary would
+exceed 2^22 entries, so one object may contain dictionary blocks followed by
+plain blocks. Deduplication uses CHARSXP addresses, which R's global string
+cache makes unique per bytes and encoding; addresses are never written. The
+experimental `RDZ_STRING_DICT` environment variable selects the policy; the
+default is `plain`.
 
 ## Generic synopsis
 

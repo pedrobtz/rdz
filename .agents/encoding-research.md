@@ -464,6 +464,72 @@ Decision questions:
 - Should dictionaries be block-local, vector-local, or hybrid?
 - How are oversized individual strings represented without breaking block limits?
 
+#### 2026-09-27 CHARSXP-identity dictionary experiment
+
+**Idea.** R's global CHARSXP cache already deduplicates strings in memory: a
+STRSXP is pointers to one CHARSXP per distinct (bytes, encoding). The writer
+keys a dictionary on the CHARSXP address (one hash probe on 8 bytes per
+element; values validated and copied only on first sight). The reader creates
+each distinct CHARSXP once and reuses its pointer for repeats, skipping the
+per-element hash-and-compare in `mkCharLenCE`. `qs2`, `qdata`, `fst`, and base
+R all call `mkCharLenCE` once per element.
+
+**Layout.** Encodings 8 (entries) and 9 (indices, `u32` base plus 1/2/4-byte
+offsets per 65,536-element block), specified in
+[container-format.md](container-format.md). One forward pass on read.
+
+**Setup.** `tools/bench-strings.R`, 1,000,000 strings, 1% `NA`, exact
+distinct counts, short (~13 B) and long (~110 B, random hex) values, random
+and sorted order; one thread; Apple M1, R 4.6.1, `qs2` 0.2.2 (level 3,
+checksum validated), `fst` 0.9.8 (compress 50); seven interleaved rounds
+with shuffled format order; release build. RDZ is uncompressed. Cold reads
+drop the source and run `gc()` first, so every distinct CHARSXP is created.
+
+**Results** (median ms; `auto` = dictionary below 75% estimated distinct):
+
+| Case | rdz plain cold | rdz auto cold | best other cold | rdz auto write | fst write | rdz auto MiB | qdata MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 0.01% short | 34.4 | **8.8** | 41.1 fst | **10.1** | 43.0 | **0.96** | 1.61 |
+| 1% short | 41.9 | **10.4** | 45.6 fst | **9.5** | 40.6 | **2.08** | 2.86 |
+| 10% short | 91.4 | **25.6** | 93.3 fst | **20.6** | 43.6 | 5.41 | **4.73** |
+| 50% short | 152 | **102** | 148 fst | 74.9 | **55.4** | 12.2 | **5.11** |
+| 75% short | 174 | **137** | 172 fst | 102 | **59.7** | 16.5 | **5.15** |
+| 100% short | 170 | 174 | **168** fst | 83.0 | **60.4** | 17.0 | **5.17** |
+| 0.01% long | 169 | **8.9** | 158 qdata | **7.4** | 102 | **0.97** | 2.91 |
+| 1% long | 184 | **12.3** | 191 fst | **10.3** | 148 | **2.93** | 34.2 |
+| 10% long | 378 | **53.4** | 378 fst | **29.8** | 165 | **13.9** | 48.7 |
+| 50% long | 424 | **209** | 416 fst | **111** | 183 | 54.5 | **50.2** |
+| 10% short sorted | 53.5 | **19.8** | 53.1 qdata | **20.3** | 44.0 | 4.29 | **0.56** |
+
+Warm reads (strings already cached) follow the same pattern. Cold reads of
+long strings at 75–100% distinct allocate ~130 MB of CHARSXPs per read and
+are GC-bound for every format: medians varied up to 2x between identical
+encodings, so those rows were judged on warm reads, where `auto` matched
+plain within 1% at 100% and the dictionary won 22% at 75%.
+
+**Findings.**
+
+- The dictionary reads 3.6–4.7x faster than the best competitor for short
+  strings up to 10% distinct and 7–18x for long strings; writes are 2–14x
+  faster than `fst`, the fastest competing writer.
+- A vector-wide dictionary dominates a block-local one, which loses its
+  benefit once the distinct values exceed one block (10% short: 80 vs 25 ms
+  cold). **Reject block-local.**
+- The read crossover is about 75–80% distinct; above about 50% the identity
+  map costs more to build than it saves on writes. `auto` samples 16,384
+  fixed-seed random positions and applies bias-corrected Chao1, which stays
+  within tolerance for sorted and shuffled order; a first-chunk rule was
+  rejected because early chunks look unique in large vectors regardless of
+  global repetition.
+- At high cardinality RDZ is 2–3x larger than zstd-compressed `qdata`: there
+  is nothing to deduplicate, and only the compression layer can close it.
+- Remaining write gap versus `fst` at 50–100% distinct short strings (55–60 vs
+  75–102 ms): candidates are pre-sizing the identity map from the Chao1
+  estimate and fewer R API calls per new value.
+
+**Decision.** Adopt encodings 8/9 and the `auto` policy for native character
+data, subject to the default-policy change; reject block-local dictionaries.
+
 ### Factors
 
 Baseline: levels once plus exact codes.

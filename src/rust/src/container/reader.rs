@@ -7,12 +7,13 @@ use crate::codec::{logical, string};
 use crate::format::{
     ATTRIBUTE_ENTRY_LEN, ATTRIBUTE_FLAG_NAMES, BLOCK_HEADER_LEN, BLOCK_MAGIC, CLOSING_MAGIC,
     CODEC_NATIVE_V1, CODEC_R_SERIAL_V3, COMPRESSION_NONE, CONTAINER_VERSION, DIRECTORY_ENTRY_LEN,
-    DIRECTORY_HEADER_LEN, DIRECTORY_MAGIC, DIRECTORY_VERSION, ENCODING_RAW, ENCODING_STRING_PLAIN,
-    FILE_MAGIC, FormatError, HEADER_LEN, LOGICAL_BLOCK_VALUES, MAX_ATTRIBUTES, MAX_BLOCK_SIZE,
-    MAX_BLOCKS, MAX_OBJECTS, MAX_SYNOPSIS_LEN, NATIVE_CODEC_VERSION, OBJECT_ENTRY_LEN,
-    R_SERIAL_CODEC_VERSION, ROLE_ATTRIBUTE_NAME, ROLE_ATTRIBUTE_VALUE, ROLE_ROOT, TRAILER_LEN,
-    TRAILER_MAGIC, TYPE_CHARACTER, TYPE_LOGICAL, checked_add, read_u16, read_u32, read_u64,
-    to_usize, try_vec_with_capacity, try_zeroed_vec,
+    DIRECTORY_HEADER_LEN, DIRECTORY_MAGIC, DIRECTORY_VERSION, ENCODING_RAW,
+    ENCODING_STRING_DICT_ENTRIES, ENCODING_STRING_DICT_INDICES, ENCODING_STRING_PLAIN, FILE_MAGIC,
+    FormatError, HEADER_LEN, LOGICAL_BLOCK_VALUES, MAX_ATTRIBUTES, MAX_BLOCK_SIZE, MAX_BLOCKS,
+    MAX_OBJECTS, MAX_SYNOPSIS_LEN, NATIVE_CODEC_VERSION, OBJECT_ENTRY_LEN, R_SERIAL_CODEC_VERSION,
+    ROLE_ATTRIBUTE_NAME, ROLE_ATTRIBUTE_VALUE, ROLE_ROOT, TRAILER_LEN, TRAILER_MAGIC,
+    TYPE_CHARACTER, TYPE_LOGICAL, checked_add, read_u16, read_u32, read_u64, to_usize,
+    try_vec_with_capacity, try_zeroed_vec,
 };
 
 use super::directory::{AttributeEntry, BlockEntry, ObjectEntry, ROOT_PARENT_ID};
@@ -135,11 +136,24 @@ impl ContainerReader {
         Ok(self.validated.info)
     }
 
+    /// Decodes the native logical values into `output` and returns any
+    /// `names` attribute as owned values. Used by pure-Rust tests; the R
+    /// boundary streams names with [`Self::read_native_names_with`].
+    #[cfg(test)]
     pub(crate) fn read_native_logical_into(
         mut self,
         output: &mut [i32],
         na_value: i32,
     ) -> Result<Option<Vec<string::StringValue>>, FormatError> {
+        self.read_native_logical_values(output, na_value)?;
+        self.read_names_attribute()
+    }
+
+    pub(crate) fn read_native_logical_values(
+        &mut self,
+        output: &mut [i32],
+        na_value: i32,
+    ) -> Result<(), FormatError> {
         let expected_len = self.native_logical_len()?;
         if output.len() != expected_len {
             return Err(FormatError::Invalid("logical payload length mismatch"));
@@ -175,9 +189,10 @@ impl ContainerReader {
         if output_offset != expected_len {
             return Err(FormatError::Invalid("logical payload length mismatch"));
         }
-        self.read_names_attribute()
+        Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn read_native_names(
         mut self,
     ) -> Result<Option<Vec<string::StringValue>>, FormatError> {
@@ -185,9 +200,57 @@ impl ContainerReader {
         self.read_names_attribute()
     }
 
-    fn read_names_attribute(&mut self) -> Result<Option<Vec<string::StringValue>>, FormatError> {
+    fn names_value_object(&self) -> Result<Option<&ObjectEntry>, FormatError> {
+        self.require_codec(CODEC_NATIVE_V1, NATIVE_CODEC_VERSION)?;
+        match self.validated.attributes.first() {
+            None => Ok(None),
+            Some(attribute) => self
+                .validated
+                .objects
+                .get(attribute.value_object_id as usize)
+                .map(Some)
+                .ok_or(FormatError::Invalid("attribute value object is missing")),
+        }
+    }
+
+    /// Length of the native `names` attribute, or `None` when absent, without
+    /// reading any data block.
+    pub(crate) fn native_names_len(&self) -> Result<Option<usize>, FormatError> {
+        self.names_value_object()?
+            .map(|object| to_usize(object.logical_len))
+            .transpose()
+    }
+
+    /// Number of dictionary entries in the native `names` attribute, taken
+    /// from the validated directory, so a reader can size its dictionary
+    /// before decoding. Validation bounds it by the attribute's length.
+    pub(crate) fn native_names_dictionary_len(&self) -> Result<usize, FormatError> {
+        let Some(object) = self.names_value_object()? else {
+            return Ok(0);
+        };
+        let mut entries = 0_u64;
+        for index in object_block_range(object)? {
+            let block = &self.validated.blocks[index];
+            if block.encoding == ENCODING_STRING_DICT_ENTRIES {
+                entries = entries
+                    .checked_add(block.logical_count)
+                    .ok_or(FormatError::Invalid("dictionary length overflow"))?;
+            }
+        }
+        to_usize(entries)
+    }
+
+    /// Streams the native `names` attribute one block at a time. `sink`
+    /// receives borrowed chunks whose bytes live only for that call. Every
+    /// dictionary id it receives refers to an entry already delivered.
+    pub(crate) fn read_native_names_with<E, F>(&mut self, mut sink: F) -> Result<bool, E>
+    where
+        E: From<FormatError>,
+        F: FnMut(string::StringChunk<'_>) -> Result<(), E>,
+    {
+        self.require_codec(CODEC_NATIVE_V1, NATIVE_CODEC_VERSION)?;
         if self.validated.attributes.is_empty() {
-            return Ok(None);
+            return Ok(false);
         }
         let name_object_id = self.validated.attributes[0].name_object_id;
         let value_object_id = self.validated.attributes[0].value_object_id;
@@ -199,10 +262,101 @@ impl ContainerReader {
                 bytes: b"names".to_vec(),
             }]
         {
-            return Err(FormatError::Invalid("native attribute name is not names"));
+            return Err(FormatError::Invalid("native attribute name is not names").into());
         }
         let value_object = self.validated.objects[value_object_id as usize].clone();
-        self.read_string_object(&value_object).map(Some)
+        self.for_each_string_chunk(&value_object, &mut sink)?;
+        Ok(true)
+    }
+
+    fn for_each_string_chunk<E, F>(&mut self, object: &ObjectEntry, sink: &mut F) -> Result<(), E>
+    where
+        E: From<FormatError>,
+        F: FnMut(string::StringChunk<'_>) -> Result<(), E>,
+    {
+        let length = to_usize(object.logical_len)?;
+        let range = object_block_range(object)?;
+        let first = self
+            .validated
+            .blocks
+            .get(range.start)
+            .ok_or(FormatError::Invalid("character block range is empty"))?;
+        self.file
+            .seek(SeekFrom::Start(first.block_header_offset))
+            .map_err(FormatError::from)?;
+        let mut encoded = Vec::new();
+        let mut ids = Vec::new();
+        let mut elements = 0_usize;
+        let mut entries = 0_usize;
+        for index in range {
+            let entry = &self.validated.blocks[index];
+            read_block_at_current(
+                &mut self.file,
+                entry,
+                self.validated.directory_offset,
+                &mut encoded,
+            )?;
+            let count = to_usize(entry.logical_count)?;
+            match entry.encoding {
+                ENCODING_STRING_PLAIN => {
+                    let refs = string::decode_block_refs(&encoded, count)?;
+                    sink(string::StringChunk::Plain(&refs))?;
+                    elements = elements
+                        .checked_add(count)
+                        .ok_or(FormatError::Invalid("character object length overflow"))?;
+                }
+                ENCODING_STRING_DICT_ENTRIES => {
+                    let refs = string::decode_block_refs(&encoded, count)?;
+                    sink(string::StringChunk::DictionaryEntries(&refs))?;
+                    entries = entries
+                        .checked_add(count)
+                        .ok_or(FormatError::Invalid("dictionary length overflow"))?;
+                }
+                ENCODING_STRING_DICT_INDICES => {
+                    string::decode_indices(&encoded, count, entries, &mut ids)?;
+                    sink(string::StringChunk::DictionaryIndices(&ids))?;
+                    elements = elements
+                        .checked_add(count)
+                        .ok_or(FormatError::Invalid("character object length overflow"))?;
+                }
+                _ => return Err(FormatError::Invalid("unexpected character block encoding").into()),
+            }
+        }
+        if elements != length {
+            return Err(FormatError::Invalid("character object length mismatch").into());
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn read_names_attribute(&mut self) -> Result<Option<Vec<string::StringValue>>, FormatError> {
+        let length = match self.native_names_len()? {
+            None => return Ok(None),
+            Some(length) => length,
+        };
+        let mut output = try_vec_with_capacity(length, "character object allocation")?;
+        let mut dictionary: Vec<string::StringValue> = Vec::new();
+        self.read_native_names_with(|chunk| -> Result<(), FormatError> {
+            match chunk {
+                string::StringChunk::Plain(refs) => {
+                    for value in refs {
+                        output.push(value.to_value()?);
+                    }
+                }
+                string::StringChunk::DictionaryEntries(refs) => {
+                    for value in refs {
+                        dictionary.push(value.to_value()?);
+                    }
+                }
+                string::StringChunk::DictionaryIndices(ids) => {
+                    for &id in ids {
+                        output.push(dictionary[id as usize].clone());
+                    }
+                }
+            }
+            Ok(())
+        })?;
+        Ok(Some(output))
     }
 
     fn read_string_object(
@@ -567,7 +721,7 @@ fn validate_native_logical_schema(
     validate_leaf_object(name_object)?;
     validate_leaf_object(value_object)?;
     validate_object_blocks(name_object, blocks, ENCODING_STRING_PLAIN)?;
-    validate_object_blocks(value_object, blocks, ENCODING_STRING_PLAIN)?;
+    validate_string_object_blocks(value_object, blocks)?;
     let attribute = &attributes[0];
     if attribute.owner_id != 0
         || attribute.name_object_id != 1
@@ -684,6 +838,63 @@ fn validate_object_blocks(
     Ok(())
 }
 
+/// A character object may mix plain blocks with dictionary entry and index
+/// blocks. Plain and index blocks carry its elements; entry blocks do not
+/// count toward its length, and their total cannot exceed it, which bounds
+/// the dictionary a reader allocates.
+fn validate_string_object_blocks(
+    object: &ObjectEntry,
+    blocks: &[BlockEntry],
+) -> Result<(), FormatError> {
+    if object.block_count == 0 {
+        return Err(FormatError::Invalid("object has no data block"));
+    }
+    let mut elements = 0_u64;
+    let mut entries = 0_u64;
+    for index in object_block_range(object)? {
+        let block = blocks
+            .get(index)
+            .ok_or(FormatError::Invalid("object block range is out of bounds"))?;
+        match block.encoding {
+            ENCODING_STRING_PLAIN => {
+                elements = elements
+                    .checked_add(block.logical_count)
+                    .ok_or(FormatError::Limit("object logical length"))?;
+            }
+            ENCODING_STRING_DICT_ENTRIES => {
+                entries = entries
+                    .checked_add(block.logical_count)
+                    .ok_or(FormatError::Limit("dictionary length"))?;
+            }
+            ENCODING_STRING_DICT_INDICES => {
+                let count = to_usize(block.logical_count)?;
+                let stored = block.stored_len as usize;
+                if ![1, 2, 4]
+                    .iter()
+                    .any(|&width| string::index_block_len(count, width) == Some(stored))
+                {
+                    return Err(FormatError::Invalid(
+                        "dictionary index block length mismatch",
+                    ));
+                }
+                elements = elements
+                    .checked_add(block.logical_count)
+                    .ok_or(FormatError::Limit("object logical length"))?;
+            }
+            _ => return Err(FormatError::Invalid("object block encoding mismatch")),
+        }
+    }
+    if elements != object.logical_len {
+        return Err(FormatError::Invalid("object logical length mismatch"));
+    }
+    if entries > object.logical_len {
+        return Err(FormatError::Invalid(
+            "string dictionary is larger than its vector",
+        ));
+    }
+    Ok(())
+}
+
 fn object_block_range(object: &ObjectEntry) -> Result<std::ops::Range<usize>, FormatError> {
     let start = object.first_block as usize;
     let end = object
@@ -761,7 +972,7 @@ fn checksum_error(sequence: u32) -> FormatError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codec::string::{StringEncoding, StringValue};
+    use crate::codec::string::{DictionaryPolicy, StringEncoding, StringValue};
     use crate::container::{Codec, write_container, write_native_logical};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -792,6 +1003,91 @@ mod tests {
     }
 
     #[test]
+    fn dictionary_names_round_trip_through_the_container() -> Result<(), FormatError> {
+        let length = 2 * crate::codec::string::DICT_CHUNK_VALUES + 3;
+        let values: Vec<i32> = (0..length).map(|index| (index % 2) as i32).collect();
+        let names: Vec<StringValue> = (0..length)
+            .map(|index| match index % 4 {
+                0 => StringValue::Na,
+                _ => StringValue::Value {
+                    encoding: StringEncoding::Utf8,
+                    bytes: format!("n{}", index % 4).into_bytes(),
+                },
+            })
+            .collect();
+        for policy in [
+            DictionaryPolicy::Plain,
+            DictionaryPolicy::Block,
+            DictionaryPolicy::Global,
+            DictionaryPolicy::Auto,
+        ] {
+            let path = temp_path("dictionary")?;
+            write_native_logical(&path, &values, i32::MIN, Some(names.as_slice()), policy)?;
+            let reader = open(&path)?;
+            let mut decoded = vec![0; length];
+            assert_eq!(
+                reader.read_native_logical_into(&mut decoded, i32::MIN)?,
+                Some(names.clone()),
+                "{policy:?}"
+            );
+            assert_eq!(decoded, values);
+            assert_eq!(open(&path)?.read_native_names()?, Some(names.clone()));
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn string_objects_bound_their_dictionary_and_index_lengths() {
+        let object = ObjectEntry {
+            object_id: 2,
+            parent_id: 0,
+            role: ROLE_ATTRIBUTE_VALUE,
+            type_tag: TYPE_CHARACTER,
+            flags: 0,
+            logical_len: 2,
+            first_child: 0,
+            child_count: 0,
+            first_attribute: 0,
+            attribute_count: 0,
+            first_block: 0,
+            block_count: 2,
+        };
+        let block = |encoding: u16, logical_count: u64, stored_len: u32| BlockEntry {
+            sequence: 0,
+            flags: 0,
+            block_header_offset: 0,
+            payload_offset: 0,
+            stored_len,
+            logical_count,
+            decoded_len: u64::from(stored_len),
+            encoding,
+            compression: COMPRESSION_NONE,
+            checksum: 0,
+        };
+        let valid = [
+            block(ENCODING_STRING_DICT_ENTRIES, 2, 12),
+            block(ENCODING_STRING_DICT_INDICES, 2, 10),
+        ];
+        assert!(validate_string_object_blocks(&object, &valid).is_ok());
+        let oversized_dictionary = [
+            block(ENCODING_STRING_DICT_ENTRIES, 3, 18),
+            block(ENCODING_STRING_DICT_INDICES, 2, 10),
+        ];
+        assert!(validate_string_object_blocks(&object, &oversized_dictionary).is_err());
+        let bad_index_length = [
+            block(ENCODING_STRING_DICT_ENTRIES, 2, 12),
+            block(ENCODING_STRING_DICT_INDICES, 2, 11),
+        ];
+        assert!(validate_string_object_blocks(&object, &bad_index_length).is_err());
+        let foreign_encoding = [
+            block(ENCODING_STRING_DICT_ENTRIES, 2, 12),
+            block(ENCODING_RAW, 2, 2),
+        ];
+        assert!(validate_string_object_blocks(&object, &foreign_encoding).is_err());
+    }
+
+    #[test]
     fn native_logical_round_trips_with_names() -> Result<(), FormatError> {
         let path = temp_path("native-logical")?;
         let values = [0, 1, i32::MIN, 1, 0];
@@ -814,7 +1110,13 @@ mod tests {
                 bytes: vec![0xff],
             },
         ];
-        write_native_logical(&path, &values, i32::MIN, Some(&names))?;
+        write_native_logical(
+            &path,
+            &values,
+            i32::MIN,
+            Some(names.as_slice()),
+            DictionaryPolicy::Plain,
+        )?;
         let info = read_info(&path)?;
         assert_eq!(info.codec_id, CODEC_NATIVE_V1);
         assert_eq!(info.root_type, Some("logical"));
@@ -832,7 +1134,13 @@ mod tests {
     #[test]
     fn native_logical_wire_fixture_is_stable() -> Result<(), FormatError> {
         let path = temp_path("native-fixture")?;
-        write_native_logical(&path, &[0, 1, i32::MIN], i32::MIN, None)?;
+        write_native_logical(
+            &path,
+            &[0, 1, i32::MIN],
+            i32::MIN,
+            None::<&[StringValue]>,
+            DictionaryPolicy::Plain,
+        )?;
         let actual = fs::read(&path)?;
         let fixture = include_str!("../../tests/fixtures/logical-v1.hex");
         let digits: Vec<u8> = fixture
@@ -859,7 +1167,13 @@ mod tests {
     #[test]
     fn native_empty_logical_uses_one_zero_length_block() -> Result<(), FormatError> {
         let path = temp_path("native-empty")?;
-        write_native_logical(&path, &[], i32::MIN, None)?;
+        write_native_logical(
+            &path,
+            &[],
+            i32::MIN,
+            None::<&[StringValue]>,
+            DictionaryPolicy::Plain,
+        )?;
         let info = read_info(&path)?;
         assert_eq!(info.block_count, 1);
         assert_eq!(info.root_length, Some(0));
@@ -880,7 +1194,13 @@ mod tests {
             [("state", 0_usize, 0x03_u8), ("reserved", 1, 0x01)]
         {
             let path = temp_path(label)?;
-            write_native_logical(&path, &[0], i32::MIN, None)?;
+            write_native_logical(
+                &path,
+                &[0],
+                i32::MIN,
+                None::<&[StringValue]>,
+                DictionaryPolicy::Plain,
+            )?;
             let mut bytes = fs::read(&path)?;
             let trailer_start = bytes.len() - TRAILER_LEN;
             let directory_offset = read_u64(&bytes[trailer_start..], 8)? as usize;
@@ -911,7 +1231,13 @@ mod tests {
     #[test]
     fn malformed_native_object_descriptors_are_rejected() -> Result<(), FormatError> {
         let path = temp_path("native-object")?;
-        write_native_logical(&path, &[1], i32::MIN, None)?;
+        write_native_logical(
+            &path,
+            &[1],
+            i32::MIN,
+            None::<&[StringValue]>,
+            DictionaryPolicy::Plain,
+        )?;
         let mut bytes = fs::read(&path)?;
         let trailer_start = bytes.len() - TRAILER_LEN;
         let directory_offset = read_u64(&bytes[trailer_start..], 8)? as usize;
