@@ -69,6 +69,9 @@ test_that("native-encoded non-ASCII strings are left to the generic codec", {
 test_that("a file's strings read the same in another locale", {
   skip_on_cran()
   skip_on_os("windows")
+  # the child R loads the installed package, which test_local() does not make
+  skip_if(length(find.package("rdz", lib.loc = .libPaths(), quiet = TRUE)) == 0L,
+          "rdz is not installed")
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
   x <- rep_len(encoded(), 10L)
