@@ -220,7 +220,7 @@ static const char *const cases[] = {
     "block-range", "numeric-length", "logical-length", "string-length", "children-range",
     "depth", "frame-rows", "attribute-range", "delta-width", "int-run-end", "logical-run-end",
     "string-record-length", "dict-index-range", "zstd-length", "alp-exception-position",
-    "metadata-length", "reference-target", NULL};
+    "metadata-length", "reference-target", "string-count", NULL};
 
 static int is(const char *a, const char *b) { return strcmp(a, b) == 0; }
 
@@ -283,6 +283,14 @@ static int run(const char *dir, const char *name)
         static const uint8_t a[6] = {2, 1, 0, 0, 0, 'a'};
         o[0] = object(0, RDZ_ROOT_PARENT_ID, RDZ_ROLE_ROOT, RDZ_TYPE_CHARACTER, 2, 0, 1);
         add(&s, RDZ_ENCODING_STRING_PLAIN, 1, a, sizeof a);
+        s.objects = o;
+        s.nobjects = 1;
+    } else if (is(name, "string-count")) {
+        /* one 6-byte record declared as 2^40 strings */
+        static const uint8_t a[6] = {2, 1, 0, 0, 0, 'a'};
+        uint64_t huge = (uint64_t)1 << 40;
+        o[0] = object(0, RDZ_ROOT_PARENT_ID, RDZ_ROLE_ROOT, RDZ_TYPE_CHARACTER, huge, 0, 1);
+        add(&s, RDZ_ENCODING_STRING_PLAIN, huge, a, sizeof a);
         s.objects = o;
         s.nobjects = 1;
     } else if (is(name, "children-range")) {
