@@ -1,5 +1,39 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-06: plan-c Stage K
+
+`read_rdz(path, select = )` reads columns of a data frame or elements of a
+list, by name or position, in the order given. No format change was needed.
+
+How it works:
+
+- The R side resolves `select` against the root's names, which it reads on
+  their own.
+- The reader marks the objects to read: the root, its names, row names and
+  class, and each selected child with everything below it.
+- `rdz_graph_read_some()` skips every other object's blocks, which are never
+  read, checksummed or decoded.
+- A generic file is read whole and subset by the same rule.
+
+The result keeps a data frame's row names and class, and a list's names. Other
+root attributes, which may describe the parts left out (a data.table's key),
+are dropped as base R's `[` drops them; `rdz_attributes()` still reads them.
+
+A test corrupts an unselected column: the full read fails its checksum and
+the selected read succeeds. The fuzz target also reads every input with a
+selection.
+
+5e6-row frames, ms at 1 / 8 threads, against fst's `columns =` reads:
+
+| frame | columns | rdz | fst 50 |
+|---|---|---|---|
+| mixed | double | 9 / 9 | 12 / 15 |
+| mixed | integer + character | 48 / 41 | 205 / 199 |
+| dated | POSIXct | 10 / 10 | 15 / 20 |
+| dated | Date + double | 27 / 20 | 58 / 27 |
+
+Not yet: row ranges, selection below the root (`x$a$b`).
+
 ## Checkpoint 2026-10-05: plan-c Stage J
 
 Double encoding 23, decimals (ALP), added before the 0.1.0 release

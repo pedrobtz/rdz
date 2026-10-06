@@ -47,6 +47,12 @@ typedef struct {
 /* Reads every block of an open native file, in order, into the sinks. */
 int rdz_graph_read(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sinks, int threads,
                    rdz_tick_fn tick, void *tick_ctx, rdz_error *e);
+/* The same for the objects whose `want` byte is set (r->nobjects of them):
+   the others' blocks are neither read nor decoded, and their sinks never
+   called. NULL wants every object. */
+int rdz_graph_read_some(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sinks,
+                        const uint8_t *want, int threads, rdz_tick_fn tick, void *tick_ctx,
+                        rdz_error *e);
 
 /* Validates the object graph of a native file's directory (the container
    reader calls it). */

@@ -718,10 +718,57 @@ typedef struct {
     SEXP holder;  /* VECSXP: per object its R value, then per object its
                      dictionary (protected through the external pointer) */
     zb_buf sinks; /* rdz_r_names per object */
+    SEXP select;  /* R_NilValue, or the root's children to read (0-based
+                     integers; held by the caller) */
+    zb_buf want;  /* with a selection: a byte per object, set to read it */
     int threads;
     rdz_error e;
     int failed;
 } rdz_graph_in;
+
+/* With a selection, marks what to read: the root; its names, row names and
+   class (a selection keeps no other root attribute, which may describe the
+   unselected children: a data.table's key); the selected children; and
+   everything below a marked object (its children, levels and attributes,
+   which all come after it). */
+static int rdz_select_mask(rdz_graph_in *g)
+{
+    const rdz_reader *r = &g->r;
+    const rdz_object *root = &r->objects[0];
+    const int *sel = INTEGER(g->select);
+    R_xlen_t j, k = XLENGTH(g->select);
+    uint32_t i, a, c;
+    uint8_t *want;
+    if (root->type_tag != RDZ_TYPE_LIST && root->type_tag != RDZ_TYPE_DATA_FRAME) {
+        return rdz_unsupported(&g->e, "selecting from a root that is not a list or a data frame");
+    }
+    if (zb_put_zeros(&g->want, r->nobjects)) return rdz_memory(&g->e, "the selection");
+    want = g->want.data;
+    want[0] = 1;
+    for (a = 0; a < root->attribute_count; a++) {
+        const rdz_attribute *at = &r->attributes[root->first_attribute + a];
+        if (at->flags == RDZ_ATTRIBUTE_FLAG_OTHER) continue;
+        want[at->name_object_id] = 1;
+        want[at->value_object_id] = 1;
+    }
+    for (j = 0; j < k; j++) {
+        if (sel[j] == NA_INTEGER || sel[j] < 0 || (uint32_t)sel[j] >= root->child_count) {
+            return rdz_limit(&g->e, "selection index");
+        }
+        want[root->first_child + (uint32_t)sel[j]] = 1;
+    }
+    for (i = 1; i < r->nobjects; i++) {
+        const rdz_object *o = &r->objects[i];
+        if (!want[i]) continue;
+        for (c = 0; c < o->child_count; c++) want[o->first_child + c] = 1;
+        for (a = 0; a < o->attribute_count; a++) {
+            const rdz_attribute *at = &r->attributes[o->first_attribute + a];
+            want[at->name_object_id] = 1;
+            want[at->value_object_id] = 1;
+        }
+    }
+    return 0;
+}
 
 static void *rdz_r_values(void *ctx, uint32_t object)
 {
@@ -775,13 +822,24 @@ static SEXP rdz_graph_body(void *data)
     uint32_t i, n = r->nobjects, k;
     rdz_graph_sinks sinks;
     rdz_r_names *names;
+    const uint8_t *want = NULL;
+    int selecting = g->select != R_NilValue;
     g->failed = 1;
+    if (selecting) {
+        if (rdz_select_mask(g)) return R_NilValue;
+        want = g->want.data;
+    }
     for (i = 0; i < n; i++) {
         const rdz_object *o = &r->objects[i];
         SEXP x;
+        if (want && !want[i]) continue;
         if (o->logical_len > (uint64_t)R_XLEN_T_MAX || o->child_count > (uint32_t)INT_MAX) {
             rdz_limit(&g->e, "allocation size");
             return R_NilValue;
+        }
+        if (i == 0 && selecting) {
+            SET_VECTOR_ELT(g->holder, 0, Rf_allocVector(VECSXP, XLENGTH(g->select)));
+            continue;
         }
         switch (o->type_tag) {
         case RDZ_TYPE_LOGICAL: x = Rf_allocVector(LGLSXP, (R_xlen_t)o->logical_len); break;
@@ -816,7 +874,9 @@ static SEXP rdz_graph_body(void *data)
     sinks.ctx = g;
     sinks.values = rdz_r_values;
     sinks.strings = rdz_r_sink;
-    if (rdz_graph_read(&g->v, r, &sinks, g->threads, rdz_tick, NULL, &g->e)) return R_NilValue;
+    if (rdz_graph_read_some(&g->v, r, &sinks, want, g->threads, rdz_tick, NULL, &g->e)) {
+        return R_NilValue;
+    }
 
     /* last to first: every child, level and attribute value comes after
        its owner, so each is complete before it is attached */
@@ -824,12 +884,19 @@ static SEXP rdz_graph_body(void *data)
     for (i = n; i-- > 0;) {
         const rdz_object *o = &r->objects[i];
         SEXP x = VECTOR_ELT(g->holder, i);
-        int have_rn = 0, have_class = 0;
+        int have_rn = 0, have_class = 0, root_selection = i == 0 && selecting;
+        if (want && !want[i]) continue;
         if (o->type_tag == RDZ_TYPE_CHARACTER && names[i].filled != names[i].length) {
             rdz_invalid(&g->e, "character object length mismatch");
             return R_NilValue;
         }
-        if (o->type_tag == RDZ_TYPE_LIST || o->type_tag == RDZ_TYPE_DATA_FRAME) {
+        if (root_selection) {
+            const int *sel = INTEGER(g->select);
+            R_xlen_t j;
+            for (j = 0; j < XLENGTH(g->select); j++) {
+                SET_VECTOR_ELT(x, j, VECTOR_ELT(g->holder, o->first_child + (uint32_t)sel[j]));
+            }
+        } else if (o->type_tag == RDZ_TYPE_LIST || o->type_tag == RDZ_TYPE_DATA_FRAME) {
             for (k = 0; k < o->child_count; k++) {
                 SET_VECTOR_ELT(x, (R_xlen_t)k, VECTOR_ELT(g->holder, o->first_child + k));
             }
@@ -857,11 +924,14 @@ static SEXP rdz_graph_body(void *data)
         }
         for (k = 0; k < o->attribute_count; k++) {
             const rdz_attribute *a = &r->attributes[o->first_attribute + k];
-            SEXP nm = VECTOR_ELT(g->holder, a->name_object_id);
-            SEXP value = VECTOR_ELT(g->holder, a->value_object_id);
-            const char *name = rdz_attr_name(nm);
+            SEXP nm, value;
+            const char *name;
             rdz_set_attr set;
             int refused = 0;
+            if (root_selection && a->flags == RDZ_ATTRIBUTE_FLAG_OTHER) continue; /* not read */
+            nm = VECTOR_ELT(g->holder, a->name_object_id);
+            value = VECTOR_ELT(g->holder, a->value_object_id);
+            name = rdz_attr_name(nm);
             if (!name) {
                 rdz_invalid(&g->e, "an attribute's name is not a plain ASCII name");
                 return R_NilValue;
@@ -886,6 +956,15 @@ static SEXP rdz_graph_body(void *data)
                 }
                 if (a->flags == RDZ_ATTRIBUTE_FLAG_ROW_NAMES) have_rn = 1;
                 if (a->flags == RDZ_ATTRIBUTE_FLAG_CLASS) have_class = 1;
+            }
+            if (root_selection && a->flags == RDZ_ATTRIBUTE_FLAG_NAMES) {
+                /* the selected children's names, in the selection's order */
+                const int *sel = INTEGER(g->select);
+                R_xlen_t j, m = XLENGTH(g->select);
+                SEXP sub = Rf_allocVector(STRSXP, m);
+                SET_VECTOR_ELT(g->holder, a->value_object_id, sub); /* keeps it */
+                for (j = 0; j < m; j++) SET_STRING_ELT(sub, j, STRING_ELT(value, sel[j]));
+                value = sub;
             }
             set.x = x;
             set.sym = Rf_install(name);
@@ -922,6 +1001,7 @@ static void rdz_graph_in_finalize(SEXP ptr)
         rdz_vec_free(&g->v);
         rdz_reader_close(&g->r);
         zb_buf_release(&g->sinks);
+        zb_buf_release(&g->want);
         free(g);
         R_ClearExternalPtr(ptr);
     }
@@ -933,8 +1013,9 @@ static void rdz_graph_in_cleanup(void *data, Rboolean jump)
 }
 
 /* The value of a native file, given its open reader, which this takes over
-   (its buffers and file) and closes. */
-SEXP rdz_native_read_r(rdz_reader *opened, int threads, rdz_error *e, int *failed)
+   (its buffers and file) and closes; with `select` (0-based integers, or
+   R_NilValue for all), only those children of a list or data frame root. */
+SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, rdz_error *e, int *failed)
 {
     SEXP ptr, cont, out, holder;
     rdz_graph_in *g;
@@ -950,12 +1031,13 @@ SEXP rdz_native_read_r(rdz_reader *opened, int threads, rdz_error *e, int *faile
     g->r = *opened;
     rdz_reader_init(opened);
     rdz_vec_init(&g->v);
+    g->select = select;
     g->threads = threads;
     R_SetExternalPtrAddr(ptr, g);
     holder = Rf_allocVector(VECSXP, 2 * (R_xlen_t)g->r.nobjects);
     R_SetExternalPtrProtected(ptr, holder);
     g->holder = holder;
-    if (zb_buf_alloc(&g->sinks, 0, 0) ||
+    if (zb_buf_alloc(&g->want, 0, 0) || zb_buf_alloc(&g->sinks, 0, 0) ||
         zb_put_zeros(&g->sinks, (size_t)g->r.nobjects * sizeof(rdz_r_names))) {
         rdz_memory(e, "the reader");
         rdz_graph_in_finalize(ptr);
@@ -1076,7 +1158,7 @@ SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
     if (object && (r.objects[object].child_count || r.objects[object].attribute_count)) {
         /* a value with parts of its own: read with the whole object */
         SEXP x, sym = Rf_install(w);
-        x = PROTECT(rdz_native_read_r(&r, 1, &e, &failed)); /* closes r */
+        x = PROTECT(rdz_native_read_r(&r, 1, R_NilValue, &e, &failed)); /* closes r */
         if (failed) {
             UNPROTECT(1);
             return rdz_failure(&e);
@@ -1125,7 +1207,7 @@ SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
     view.objects = &only;
     view.nobjects = 1;
     view.nattributes = 0;
-    out = PROTECT(rdz_native_read_r(&view, 1, &e, &failed)); /* closes the view's buffers */
+    out = PROTECT(rdz_native_read_r(&view, 1, R_NilValue, &e, &failed)); /* closes the view's buffers */
     UNPROTECT(1);
     if (failed) return rdz_failure(&e);
     return out;
