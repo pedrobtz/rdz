@@ -201,14 +201,14 @@ static void test_manifest(const char *tmpdir)
     CHECK(rows >= 33, "only %d fixtures in the manifest", rows);
 }
 
-static void test_mutations(const char *name)
+static void test_mutations(const char *dir, const char *name)
 {
     char path[512];
     size_t n = 0, i;
     uint8_t *data;
     rdz_error e;
     int undetected = 0;
-    snprintf(path, sizeof path, FIXTURES "%s.rdz", name);
+    snprintf(path, sizeof path, "%s%s.rdz", dir, name);
     data = slurp(path, &n);
     CHECK(data != NULL, "cannot read %s", path);
     if (!data) return;
@@ -1095,8 +1095,21 @@ int main(int argc, char **argv)
     const char *tmpdir = argc > 1 ? argv[1] : ".";
     test_records();
     test_manifest(tmpdir);
-    test_mutations("gen_integer_auto");
-    test_mutations("lgl_names_encodings_global");
+    test_mutations(FIXTURES, "gen_integer_auto");
+    test_mutations(FIXTURES, "lgl_names_encodings_global");
+    {
+        /* every flipped byte and every prefix of frozen files that cover the
+           graph: frames, row names, nested lists, dictionaries, shared
+           vectors, decimals, metadata and empty vectors */
+        static const char *const frozen[] = {
+            "metadata_balanced", "chr_dictionary_balanced", "frame_classed_balanced",
+            "frame_row_names_balanced", "nested_list_balanced", "empty_vectors_balanced",
+            "shared_balanced", "dbl_decimal_balanced", "attributes_balanced"};
+        size_t k;
+        for (k = 0; k < sizeof frozen / sizeof *frozen; k++) {
+            test_mutations("tests/testthat/fixtures/v0.1.0/", frozen[k]);
+        }
+    }
     test_writer_errors(tmpdir);
     test_pipeline(tmpdir);
     test_native_manifest(tmpdir);
