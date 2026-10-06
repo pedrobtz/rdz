@@ -480,6 +480,7 @@ static int metadata_string(const uint8_t *data, size_t len, size_t *at, const ui
     if (*n > len - *at) return rdz_invalid(e, "truncated metadata"); /* GUARD: metadata-length */
     *s = data + *at;
     if (!zuf_utf8_valid((const char *)*s, *n)) return rdz_invalid(e, "metadata is not UTF-8");
+    if (*n && memchr(*s, 0, *n)) return rdz_invalid(e, "metadata holds a NUL byte");
     *at += *n;
     return 0;
 }
@@ -712,7 +713,8 @@ static int rdz_reader_validate(rdz_reader *r, rdz_error *e)
     const uint64_t max_directory =
         RDZ_MAX_ENTRY_WIDTH + (uint64_t)RDZ_MAX_OBJECTS * RDZ_MAX_ENTRY_WIDTH +
         (uint64_t)RDZ_MAX_ATTRIBUTES * RDZ_MAX_ENTRY_WIDTH +
-        (uint64_t)RDZ_MAX_BLOCKS * RDZ_MAX_ENTRY_WIDTH + RDZ_MAX_SYNOPSIS_LEN;
+        (uint64_t)RDZ_MAX_BLOCKS * RDZ_MAX_ENTRY_WIDTH + RDZ_MAX_SYNOPSIS_LEN +
+        RDZ_MAX_METADATA_LEN;
     uint32_t i;
 
     if (file_len < RDZ_HEADER_LEN + RDZ_DIRECTORY_HEADER_LEN + RDZ_TRAILER_LEN) {

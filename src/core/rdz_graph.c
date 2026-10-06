@@ -318,6 +318,13 @@ int rdz_graph_read_window(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sink
     const rdz_names_sink *sink = NULL;
     const rdz_block_plan *bp = NULL;
     if (windows) {
+        uint32_t i;
+        for (i = 0; i < r->nobjects; i++) { /* callers check too; the core does not rely on it */
+            if (windows[i].on &&
+                !(windows[i].lo <= windows[i].hi && windows[i].hi <= r->objects[i].logical_len)) {
+                return rdz_limit(e, "row range");
+            }
+        }
         if (plan_blocks(v, r, windows, e)) return 1;
         bp = (const rdz_block_plan *)(const void *)v->block_plan.data;
     }

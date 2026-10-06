@@ -28,8 +28,8 @@
 #'   convert to UTF-8 losslessly (unmarked strings in the C locale);
 #' * a non-ASCII attribute name, or names, row names or a class carrying
 #'   attributes of their own;
-#' * a factor with names, a data frame column of another length than its rows
-#'   (a matrix of two or more columns) or that is itself a data frame;
+#' * a factor with names, or a data frame column of another length than its
+#'   rows (a matrix of two or more columns);
 #' * nesting deeper than 1,000 levels, or more than 1,000,000 parts.
 #'
 #' Automatic mode also writes generically a value of at least 1,024 parts that

@@ -275,7 +275,7 @@ is the length of a metadata section that ends the directory, after the
 synopsis: `count:u32` (at most 1,024), then per entry a `u32` length and the
 key's UTF-8 bytes, a `u32` length and the value's. Keys are non-empty and
 distinct; readers reject a section that is truncated, has trailing bytes,
-is not UTF-8 or repeats a key. The directory's length includes it, so the
+is not UTF-8, holds a NUL byte or repeats a key. The directory's length includes it, so the
 directory checksum covers it. It describes the file (source, versions, a
 cache key's inputs) and is not part of the content hash; `rdz_info()` reads
 it as `metadata`, a named character vector.

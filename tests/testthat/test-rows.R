@@ -2,12 +2,6 @@
 # only the blocks covering range(rows) are read; the result is what `[`
 # gives on the whole value, with automatic row names kept automatic.
 
-rows_ref <- function(df, rows) {
-  ref <- df[rows, , drop = FALSE]
-  if (.row_names_info(df) < 0L) rownames(ref) <- NULL
-  ref
-}
-
 rows_frame <- function(n) {
   i <- seq_len(n)
   data.frame(

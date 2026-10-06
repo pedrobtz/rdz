@@ -111,6 +111,27 @@ static void rdz_scan_attributes(SEXP x, rdz_attr_scan *a, zb_buf *all)
 #endif
 }
 
+/* A data frame column's rows: a nested data frame's rows (its row names,
+   compact or not), anything else's length; UINT64_MAX for a nested data
+   frame with malformed row names. */
+static int rdz_has_class(SEXP cls, const char *a);
+
+static uint64_t rdz_column_rows(SEXP col)
+{
+    rdz_attr_scan a;
+    SEXP rn;
+    if (TYPEOF(col) != VECSXP) return (uint64_t)Rf_xlength(col);
+    rdz_scan_attributes(col, &a, NULL);
+    if (!rdz_has_class(a.cls, "data.frame")) return (uint64_t)Rf_xlength(col);
+    rn = a.row_names;
+    if (TYPEOF(rn) == INTSXP && XLENGTH(rn) == 2 && INTEGER_RO(rn)[0] == NA_INTEGER) {
+        int m = INTEGER_RO(rn)[1];
+        return (uint64_t)(m < 0 ? -(int64_t)m : m);
+    }
+    if (TYPEOF(rn) == INTSXP || TYPEOF(rn) == STRSXP) return (uint64_t)XLENGTH(rn);
+    return UINT64_MAX;
+}
+
 /* ---- strings ---------------------------------------------------------------------- */
 
 /* Rf_charIsASCII() entered R's API after the 4.1 floor: scan instead. */
@@ -523,7 +544,7 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
             return "a data frame with malformed row names";
         }
         for (k = 0; k < ncol; k++) {
-            if ((uint64_t)Rf_xlength(VECTOR_ELT(x, k)) != nrow) {
+            if (rdz_column_rows(VECTOR_ELT(x, k)) != nrow) {
                 return "a data frame whose columns differ in length";
             }
         }
@@ -912,6 +933,9 @@ static int rdz_r_make(SEXP into, R_xlen_t *at, R_xlen_t cap, const rdz_str *v, s
             c = NA_STRING;
         } else {
             if (v[i].len > INT_MAX) return rdz_invalid(e, "a string is longer than R permits");
+            if (v[i].len && memchr(v[i].bytes, 0, v[i].len)) {
+                return rdz_invalid(e, "a string holds a NUL byte, which R strings cannot");
+            }
             c = Rf_mkCharLenCE((const char *)v[i].bytes, (int)v[i].len, rdz_r_ce(v[i].tag));
         }
         SET_STRING_ELT(into, *at + (R_xlen_t)i, c);
@@ -1099,12 +1123,13 @@ static SEXP rdz_set_attr_refused(SEXP cond, void *data)
     return R_NilValue;
 }
 
-/* The attribute name object's one string as a symbol name: ASCII, native or
-   UTF-8, not empty (what writers write). NULL when it is not. */
+/* The attribute name object's one string as a symbol name: ASCII, not
+   empty, at most the 10,000 bytes R allows a symbol (what writers write).
+   NULL when it is not. */
 static const char *rdz_attr_name(SEXP nm)
 {
     SEXP c = STRING_ELT(nm, 0);
-    if (c == NA_STRING || LENGTH(c) == 0 || !rdz_ascii(c)) return NULL;
+    if (c == NA_STRING || LENGTH(c) == 0 || LENGTH(c) > 10000 || !rdz_ascii(c)) return NULL;
     return CHAR(c);
 }
 
@@ -1609,6 +1634,11 @@ SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
             return rdz_failure(&e);
         }
         if (strcmp(w, name) == 0) object = a->value_object_id;
+    }
+    /* a value shared with an earlier object: that object (validation: an
+       earlier one, never itself a reference) */
+    if (object && r.objects[object].type_tag == RDZ_TYPE_REFERENCE) {
+        object = r.objects[object].first_child;
     }
     if (object && (r.objects[object].child_count || r.objects[object].attribute_count)) {
         /* a value with parts of its own: read with the whole object */

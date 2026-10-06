@@ -11,3 +11,11 @@ roundtrip_rdz <- function(x) {
 test_threads <- function(n) {
   if (identical(Sys.getenv("NOT_CRAN"), "true")) n else pmin(n, 2L)
 }
+
+# What read_rdz(rows =) gives for a data frame: `[`'s rows, with automatic
+# row names kept automatic.
+rows_ref <- function(df, rows) {
+  ref <- df[rows, , drop = FALSE]
+  if (.row_names_info(df) < 0L) rownames(ref) <- NULL
+  ref
+}
