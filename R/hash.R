@@ -74,7 +74,8 @@ rdz_verify <- function(path, content = FALSE) {
   if (content) {
     info <- rdz_info(path)
     if (is.na(info$content_hash)) {
-      rdz_stop("The file records no content hash.", call. = FALSE)
+      rdz_stop("The file records no content hash (it was written with hash = FALSE, or ",
+               "before rdz 0.1.0).", class = "rdz_unsupported_error", call. = FALSE)
     }
     mode <- if (identical(info$codec, "native_v1")) "native" else "r"
     if (!identical(rdz_hash(read_rdz(path), mode = mode), info$content_hash)) {

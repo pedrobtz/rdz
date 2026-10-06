@@ -125,3 +125,26 @@ test_that("compress = is the level, as options(rdz.compress) is", {
   expect_identical(file.size(write_rdz(x, path)), raw_size)
   expect_identical(length(rdz_serialize(x, compress = 0)), as.integer(raw_size))
 })
+
+test_that("options(rdz.preset) still works, deprecated, once a session", {
+  x <- rep_len(letters, 3e5)
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  state <- rdz:::rdz_state
+  state$preset_warned <- NULL
+  old <- options(rdz.preset = "speed", rdz.compress = NULL)
+  on.exit(options(old), add = TRUE)
+  expect_warning(write_rdz(x, path), class = "rdz_deprecated_warning")
+  expect_true(all(rdz_block_encodings(path)$compression == 0)) # level 0
+  expect_no_warning(write_rdz(x, path)) # once a session
+  options(rdz.preset = "bogus")
+  expect_error(write_rdz(x, path), "rdz.compress", class = "rdz_argument_error")
+  # rdz.compress, and compress =, win
+  options(rdz.preset = "speed", rdz.compress = 1L)
+  write_rdz(x, path)
+  expect_false(all(rdz_block_encodings(path)$compression == 0))
+  options(rdz.compress = NULL)
+  write_rdz(x, path, compress = 1)
+  expect_false(all(rdz_block_encodings(path)$compression == 0))
+  state$preset_warned <- NULL
+})

@@ -98,7 +98,9 @@ static int rdz_replace(const char *from, const char *to)
 {
     wchar_t *a = rdz_widen(from), *b = rdz_widen(to);
     int r = -1;
-    if (a && b && MoveFileExW(a, b, MOVEFILE_REPLACE_EXISTING)) {
+    if (!a || !b) {
+        errno = ENOMEM;
+    } else if (MoveFileExW(a, b, MOVEFILE_REPLACE_EXISTING)) {
         r = 0;
     } else {
         switch (GetLastError()) {
@@ -168,10 +170,11 @@ static unsigned long rdz_pid(void)
 
 /* A symbolic link's target, to write in its place: not on Windows, where
    rdz replaces what the path names. */
-static char *rdz_link_target(const char *path)
+static int rdz_link_target(const char *path, char **out)
 {
     (void)path;
-    return NULL;
+    *out = NULL;
+    return 0;
 }
 #else
 static FILE *rdz_fopen_read(const char *path)
@@ -208,25 +211,34 @@ static int rdz_replace(const char *from, const char *to)
 
 /* A symbolic link's target, so that writing through the link replaces the
    file it names, not the link: one level (rdz_outfile_open() follows a
-   chain), relative to the link's directory (malloc()ed; NULL for anything
-   but a readable link). */
-static char *rdz_link_target(const char *path)
+   chain), relative to the link's directory, into *out (malloc()ed; NULL
+   when path is not a link). -1 with errno set when it is a link that cannot
+   be read, or whose target is too long: never replace such a link. */
+static int rdz_link_target(const char *path, char **out)
 {
     struct stat st;
-    char buf[4096], *out;
+    char buf[4096];
     ssize_t n;
     size_t dir = strlen(path);
-    if (lstat(path, &st) != 0 || !S_ISLNK(st.st_mode)) return NULL;
+    *out = NULL;
+    if (lstat(path, &st) != 0 || !S_ISLNK(st.st_mode)) return 0;
     n = readlink(path, buf, sizeof buf);
-    if (n <= 0 || (size_t)n >= sizeof buf) return NULL;
+    if (n < 0) return -1;
+    if (n == 0 || (size_t)n >= sizeof buf) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
     if (buf[0] == '/') dir = 0;
     else while (dir > 0 && path[dir - 1] != '/') dir--;
-    out = (char *)malloc(dir + (size_t)n + 1);
-    if (!out) return NULL;
-    memcpy(out, path, dir);
-    memcpy(out + dir, buf, (size_t)n);
-    out[dir + (size_t)n] = 0;
-    return out;
+    *out = (char *)malloc(dir + (size_t)n + 1);
+    if (!*out) {
+        errno = ENOMEM;
+        return -1;
+    }
+    memcpy(*out, path, dir);
+    memcpy(*out + dir, buf, (size_t)n);
+    (*out)[dir + (size_t)n] = 0;
+    return 0;
 }
 
 static int rdz_exists(const char *path, int *is_dir, unsigned *mode)
@@ -356,9 +368,12 @@ int rdz_outfile_open(rdz_outfile *f, const char *path, rdz_error *e)
         if (zb_buf_alloc(&f->memory, 0, 0)) return rdz_memory(e, "the output");
         return 0;
     }
-    target = f->links < 32 ? rdz_link_target(path) : NULL;
+    if (rdz_link_target(path, &target)) return rdz_io_errno(e, errno);
     if (target) {
-        f->links++;
+        if (++f->links > 32) { /* a loop, or a chain too long to trust */
+            free(target);
+            return rdz_io_errno(e, ELOOP);
+        }
         failed = rdz_outfile_open(f, target, e);
         free(target);
         return failed;

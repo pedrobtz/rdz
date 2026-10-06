@@ -23,4 +23,7 @@ jobs:
       - name: Compare with the base
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: Rscript tools/check-frozen-corpus.R "$BASE"
+        # a new branch or a forced push has no "before": the parent commit
+        run: |
+          case "$BASE" in ""|0000000000000000000000000000000000000000) BASE=HEAD~1 ;; esac
+          Rscript tools/check-frozen-corpus.R "$BASE"

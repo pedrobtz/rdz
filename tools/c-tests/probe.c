@@ -189,14 +189,20 @@ static void reseal_directory(file *f)
                 rdz_hash(f->data + f->directory, trailer - f->directory));
 }
 
+/* the directory header's length, as written (64 since 0.1.0) */
+static size_t header_len(const file *f)
+{
+    return zb_rd_u16le(f->data + f->directory + 6);
+}
+
 static uint8_t *object_entry(file *f, uint32_t i)
 {
-    return f->data + f->directory + RDZ_DIRECTORY_HEADER_LEN + (size_t)i * RDZ_OBJECT_ENTRY_LEN;
+    return f->data + f->directory + header_len(f) + (size_t)i * RDZ_OBJECT_ENTRY_LEN;
 }
 
 static uint8_t *block_entry(file *f, uint32_t nobjects, uint32_t nattributes, uint32_t i)
 {
-    return f->data + f->directory + RDZ_DIRECTORY_HEADER_LEN +
+    return f->data + f->directory + header_len(f) +
            (size_t)nobjects * RDZ_OBJECT_ENTRY_LEN + (size_t)nattributes * RDZ_ATTRIBUTE_ENTRY_LEN +
            (size_t)i * RDZ_BLOCK_ENTRY_LEN;
 }

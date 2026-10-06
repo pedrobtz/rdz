@@ -76,8 +76,9 @@ typedef struct rdz_pipeline {
 } rdz_pipeline;
 
 /* threads >= 1. Buffers grow to max. slots: 2 * threads, at least 2, but no
-   more than hold 1 GiB of blocks of `block` bytes (the largest block the
-   caller expects: a file's declared block size, or the writer's). */
+   more than hold 1 GiB of blocks of `block` bytes, input and output (the
+   largest block the caller expects: a file's declared block size, or the
+   writer's). */
 int rdz_pipeline_init(rdz_pipeline *p, int threads, rdz_job_fn job, size_t max, size_t block,
                       rdz_error *e);
 void rdz_pipeline_free(rdz_pipeline *p);
