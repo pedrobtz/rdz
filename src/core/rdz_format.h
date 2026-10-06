@@ -56,6 +56,7 @@
 #define RDZ_TYPE_FACTOR    5u
 #define RDZ_TYPE_LIST      6u
 #define RDZ_TYPE_DATA_FRAME 7u
+#define RDZ_TYPE_REFERENCE 8u /* the earlier object first_child names, shared (Stage O) */
 #define RDZ_ROLE_ROOT            0u
 #define RDZ_ROLE_ATTRIBUTE_NAME  1u
 #define RDZ_ROLE_ATTRIBUTE_VALUE 2u

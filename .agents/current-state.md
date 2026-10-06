@@ -1,5 +1,24 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-06: plan-c Stage O
+
+Shared objects. A vector of 4 KiB or more that appears twice in a value is
+written once: the planner keeps an address map, and a later occurrence
+becomes a reference (type 8) to the first. It reads back as one shared R
+object, so `list(x, x)` costs one copy.
+
+- **Validator:** a reference's target is earlier, not a reference, not an
+  attribute name and not an ancestor. Container and attribute checks look
+  through a reference to its target.
+- **Reads:** selections and targeted reads pull in the target of any
+  reference they reach.
+- **Inspection:** `rdz_schema()` shows a shared part's target, and paths
+  follow references.
+- **Hash:** sharing enters the content hash. A value read back keeps its
+  sharing, so it also keeps its hash.
+- **Gates:** a 25th mutation-checked guard; the frozen corpus gains
+  `shared_*`.
+
 ## Checkpoint 2026-10-06: plan-c Stage N
 
 User metadata. `write_rdz(metadata = )` takes named strings: up to 1,024

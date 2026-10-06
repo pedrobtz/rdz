@@ -220,7 +220,7 @@ static const char *const cases[] = {
     "block-range", "numeric-length", "logical-length", "string-length", "children-range",
     "depth", "frame-rows", "attribute-range", "delta-width", "int-run-end", "logical-run-end",
     "string-record-length", "dict-index-range", "zstd-length", "alp-exception-position",
-    "metadata-length", NULL};
+    "metadata-length", "reference-target", NULL};
 
 static int is(const char *a, const char *b) { return strcmp(a, b) == 0; }
 
@@ -245,6 +245,17 @@ static int run(const char *dir, const char *name)
         int_root(&s, o);
         s.metadata = md;
         s.metadata_len = sizeof md;
+    } else if (is(name, "reference-target")) {
+        /* a list whose first element shares its second: a later object */
+        o[0] = object(0, RDZ_ROOT_PARENT_ID, RDZ_ROLE_ROOT, RDZ_TYPE_LIST, 2, 0, 0);
+        o[0].first_child = 1;
+        o[0].child_count = 2;
+        o[1] = object(1, 0, RDZ_ROLE_CHILD, 8, 0, 0, 0);
+        o[1].first_child = 2;
+        o[2] = object(2, 0, RDZ_ROLE_CHILD, RDZ_TYPE_INTEGER, 3, 0, 1);
+        add(&s, 10, 3, ints3, sizeof ints3);
+        s.objects = o;
+        s.nobjects = 3;
     } else if (is(name, "header-checksum") || is(name, "directory-checksum") ||
         is(name, "block-checksum") || is(name, "object-count") ||
         is(name, "directory-length") || is(name, "block-offsets") ||

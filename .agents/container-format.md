@@ -54,7 +54,8 @@ cap; the file header records the file's own maximum), 1,000,000 blocks, and a
 conversions are checked before allocation or seeking.
 
 Native type tags are reserved as `0=NULL`, `1=logical`, `2=integer`, `3=double`,
-`4=character`, `5=factor`, `6=list`, and `7=data frame`. A tag is not usable
+`4=character`, `5=factor`, `6=list`, `7=data frame`, and `8=reference` (since
+plan-c Stage O). A tag is not usable
 until its codec phase defines its logical and physical record representation.
 Unknown IDs, versions, mandatory flags, or nonzero reserved fields are errors.
 
@@ -199,6 +200,22 @@ Root `parent_id` is `0xffffffff`. The 32-byte attribute entry contains
 byte-round-trip tests enforce these layouts. Roles are `0=root`,
 `1=attribute-name`, and `2=attribute-value`; the only Phase 1 attribute flag is
 bit 0 for `names`. All other role, object, and attribute flags are rejected.
+
+### Shared objects (since plan-c Stage O)
+
+An object of type 8 is a reference: it stands for the earlier object its
+`first_child` names, and reads back as that same R object, shared (the
+memo of pickle, the references of Kryo). It has no length, children,
+attributes or blocks. Its target comes before it and is not itself a
+reference, an attribute name, or one of its ancestors; checks of a
+container's children and of attribute values look through it to the
+target's type and length. Writers share a vector met twice in one value
+when its data is at least 4 KiB (1,024 logicals or integers, 512 doubles or
+strings): smaller ones are not worth it, and R's byte compiler shares small
+literal constants, which would make a value's representation depend on how
+its code ran. Sharing is part of what a file stores, so it enters the
+content hash: `list(x, x)` and `list(x, copy_of_x)` hash differently, while
+a value read back keeps its sharing and its hash.
 
 ### Content hash (since plan-c Stage M)
 

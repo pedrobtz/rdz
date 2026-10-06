@@ -122,6 +122,11 @@ frozen_fixture_specs <- function() {
       )
     })
   )
+  # a shared vector (Stage O): written once, read back shared
+  native[[length(native) + 1L]] <- list(name = "shared", value = function() {
+    x <- frozen_hash(5000L, 977L) / 4
+    list(a = x, b = x, c = list(x), d = data.frame(u = x, v = x))
+  })
   # user metadata (Stage N), native and generic
   native[[length(native) + 1L]] <- list(name = "metadata", value = function() 1:3,
                                         # names from strings, not symbols: the
