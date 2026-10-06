@@ -200,6 +200,37 @@ stated.
   "all-write" performance criterion against fst (long-run and alternating
   input) is waived for 0.1.0: it concerns speed, not the format.
 
+## Limits, and what the tests do and do not cover
+
+- **Selection is one level deep.** `select` names parts of the root (a
+  list's elements or a data frame's columns), and `rows` applies to the
+  root; neither reaches below it. `rdz_attributes(object =)` does.
+- **Graphs are trees with references.** A native graph has no cycles: a
+  reference points to an earlier object that is not its ancestor, and R
+  values that can form cycles (environments) are generic, where R
+  serialization keeps them. Tested: a self-referencing environment reads
+  back as one.
+- **Sizes.** Lengths and offsets are 64-bit throughout, so files over
+  2 GiB and long vectors are within the format. A container's parts are
+  `u32`-counted, and the writer refuses more than 1,000,000 parts. Neither
+  a file over 2 GiB nor a long vector is exercised by the tests (they need
+  that much disk and memory); `tools/benchmark.R` and manual runs cover the
+  large cases.
+- **Types.** Tested beyond the native types: time series (native, `tsp` as
+  an attribute), unforced promises, environment cycles, weak references
+  (as R serializes them: without key or value), S7 and S4 objects (generic).
+- **Hostile files.** Every marked reader guard is load-bearing (mutation
+  check); every flipped byte and every prefix of two Rust-era files and
+  nine frozen ones is rejected (the C harness); libFuzzer runs on every
+  push and nightly. Its inputs are at most 64 KiB, so it never builds a
+  1 MiB block or a dictionary over several blocks; the frozen corpus and
+  the R tests cover those.
+- **Not tested:** I/O failures (a full disk, a failed write or rename) are
+  handled by checking every call, but no test injects them; there is no
+  performance-regression gate in CI (`tools/benchmark.R` is run by hand);
+  reading in another locale is tested with a C-locale child process, not
+  on CRAN or Windows.
+
 ## Compatibility
 
 The format is frozen as of rdz 0.1.0 ([container-format.md](container-format.md),

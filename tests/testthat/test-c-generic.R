@@ -207,3 +207,44 @@ test_that("rdz_info() refuses a synopsis that is more than plain vectors", {
     expect_identical(rdz_info(path)$synopsis$root_type, typeof(x))
   }
 })
+
+test_that("time series, promises, cycles, weak references and S7 objects round-trip", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  # a time series: native (its tsp is an ordinary attribute)
+  t <- ts(c(1.5, 2, NA, 4), start = c(2020, 2), frequency = 12)
+  write_rdz(t, path, mode = "native")
+  expect_identical(read_rdz(path), t)
+  mts <- ts(matrix(1:6, 3), start = 2000)
+  write_rdz(mts, path)
+  expect_identical(read_rdz(path), mts)
+  # a promise, unforced, inside an environment: generic, and still a promise
+  e <- new.env(parent = emptyenv())
+  delayedAssign("p", stop("forced"), assign.env = e)
+  write_rdz(e, path)
+  got <- read_rdz(path)
+  expect_identical(rdz_info(path)$codec, "r_serial_v3")
+  expect_error(get("p", envir = got), "forced")
+  # a cycle (only environments make one): generic, and still a cycle
+  a <- new.env(parent = emptyenv())
+  a$self <- a
+  write_rdz(a, path)
+  got <- read_rdz(path)
+  expect_identical(got$self, got)
+  # a weak reference: R serializes it without its key and value, and so
+  # does rdz, as readRDS() would give it
+  skip_if_not_installed("rlang")
+  key <- new.env(parent = emptyenv())
+  w <- rlang::new_weakref(key, value = 1:3)
+  write_rdz(list(key = key, w = w), path)
+  got <- read_rdz(path)
+  base <- unserialize(serialize(list(key = key, w = w), NULL))
+  expect_true(rlang::is_weakref(got$w))
+  expect_identical(rlang::wref_value(got$w), rlang::wref_value(base$w))
+  skip_if_not_installed("S7")
+  Point <- S7::new_class("Point", properties = list(x = S7::class_double))
+  p <- Point(x = 2)
+  write_rdz(p, path)
+  expect_identical(rdz_info(path)$codec, "r_serial_v3")
+  expect_equal(read_rdz(path), p)
+})

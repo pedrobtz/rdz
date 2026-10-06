@@ -62,7 +62,9 @@ Every result must say:
 With `allow_full = FALSE`, a request that cannot be answered selectively returns a
 clear condition rather than silently reading the entire object. With
 `allow_full = TRUE`, the implementation may deserialize the complete root and
-then return the requested information, while reporting that a full read occurred.
+then return the requested information; the caller asked for that, so the
+result does not say so again (`rdz_attributes()` returns the attributes as a
+plain list either way).
 
 ## Native file layout
 
@@ -177,8 +179,13 @@ on an unchecked file value.
 
 ## Performance contract
 
-Benchmarks must record latency, bytes read, bytes decompressed, and peak allocation
-for:
+Not implemented as instrumentation: rdz does not count the bytes or blocks a
+read touches. What is tested instead is the property that matters, by
+corrupting the data a read must not need: `test-inspect.R` and `test-rows.R`
+corrupt a vector's data block and show that attribute reads, the schema and
+row windows elsewhere still succeed while a full read fails. Counting bytes
+and blocks (for benchmarks, and for range requests on remote files) is a
+candidate for a later version. The benchmarks below are the intended set:
 
 - container information only;
 - root schema only;
