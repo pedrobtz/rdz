@@ -48,7 +48,88 @@ static inline void v16_uzp(rdz_v16 a, rdz_v16 b, rdz_v16 *even, rdz_v16 *odd)
 }
 #endif
 
+/* Four 32-bit lanes for the integer codec's hot loops, which gcc at -O2
+   does not vectorize: masks are all-ones lanes; SSE2 has no 32-bit
+   min/max or unsigned compare, so they are built from compares. */
+#if defined(RDZ_VEC_SHUFFLE) && defined(__aarch64__)
+typedef uint32x4_t rdz_v4;
+static inline rdz_v4 v4_load(const int32_t *p) { return vreinterpretq_u32_s32(vld1q_s32(p)); }
+static inline void v4_store(uint32_t *p, rdz_v4 v) { vst1q_u32(p, v); }
+static inline rdz_v4 v4_dup(uint32_t x) { return vdupq_n_u32(x); }
+static inline rdz_v4 v4_eq(rdz_v4 a, rdz_v4 b) { return vceqq_u32(a, b); }
+static inline rdz_v4 v4_and(rdz_v4 a, rdz_v4 b) { return vandq_u32(a, b); }
+static inline rdz_v4 v4_or(rdz_v4 a, rdz_v4 b) { return vorrq_u32(a, b); }
+static inline rdz_v4 v4_add(rdz_v4 a, rdz_v4 b) { return vaddq_u32(a, b); }
+static inline rdz_v4 v4_sub(rdz_v4 a, rdz_v4 b) { return vsubq_u32(a, b); }
+static inline rdz_v4 v4_gtu(rdz_v4 a, rdz_v4 b) { return vcgtq_u32(a, b); }
+static inline rdz_v4 v4_sel(rdz_v4 m, rdz_v4 a, rdz_v4 b) { return vbslq_u32(m, a, b); }
+static inline rdz_v4 v4_mins(rdz_v4 a, rdz_v4 b)
+{
+    return vreinterpretq_u32_s32(vminq_s32(vreinterpretq_s32_u32(a), vreinterpretq_s32_u32(b)));
+}
+static inline rdz_v4 v4_maxs(rdz_v4 a, rdz_v4 b)
+{
+    return vreinterpretq_u32_s32(vmaxq_s32(vreinterpretq_s32_u32(a), vreinterpretq_s32_u32(b)));
+}
+static inline uint32_t v4_sum(rdz_v4 a) { return vaddvq_u32(a); }
+static inline int32_t v4_hmins(rdz_v4 a) { return vminvq_s32(vreinterpretq_s32_u32(a)); }
+static inline int32_t v4_hmaxs(rdz_v4 a) { return vmaxvq_s32(vreinterpretq_s32_u32(a)); }
+static inline uint32_t v4_any(rdz_v4 a) { return vmaxvq_u32(a); }
+#define RDZ_VEC_INT 1
+#elif defined(RDZ_VEC_SHUFFLE)
+typedef __m128i rdz_v4;
+static inline rdz_v4 v4_load(const int32_t *p) { return _mm_loadu_si128((const __m128i *)(const void *)p); }
+static inline void v4_store(uint32_t *p, rdz_v4 v) { _mm_storeu_si128((__m128i *)(void *)p, v); }
+static inline rdz_v4 v4_dup(uint32_t x) { return _mm_set1_epi32((int)x); }
+static inline rdz_v4 v4_eq(rdz_v4 a, rdz_v4 b) { return _mm_cmpeq_epi32(a, b); }
+static inline rdz_v4 v4_and(rdz_v4 a, rdz_v4 b) { return _mm_and_si128(a, b); }
+static inline rdz_v4 v4_or(rdz_v4 a, rdz_v4 b) { return _mm_or_si128(a, b); }
+static inline rdz_v4 v4_add(rdz_v4 a, rdz_v4 b) { return _mm_add_epi32(a, b); }
+static inline rdz_v4 v4_sub(rdz_v4 a, rdz_v4 b) { return _mm_sub_epi32(a, b); }
+static inline rdz_v4 v4_gtu(rdz_v4 a, rdz_v4 b)
+{
+    const __m128i flip = _mm_set1_epi32((int)0x80000000u);
+    return _mm_cmpgt_epi32(_mm_xor_si128(a, flip), _mm_xor_si128(b, flip));
+}
+static inline rdz_v4 v4_sel(rdz_v4 m, rdz_v4 a, rdz_v4 b)
+{
+    return _mm_or_si128(_mm_and_si128(m, a), _mm_andnot_si128(m, b));
+}
+static inline rdz_v4 v4_mins(rdz_v4 a, rdz_v4 b) { return v4_sel(_mm_cmpgt_epi32(a, b), b, a); }
+static inline rdz_v4 v4_maxs(rdz_v4 a, rdz_v4 b) { return v4_sel(_mm_cmpgt_epi32(a, b), a, b); }
+static inline uint32_t v4_lane(rdz_v4 a, int k)
+{
+    uint32_t t[4];
+    _mm_storeu_si128((__m128i *)(void *)t, a);
+    return t[k];
+}
+static inline uint32_t v4_sum(rdz_v4 a)
+{
+    return v4_lane(a, 0) + v4_lane(a, 1) + v4_lane(a, 2) + v4_lane(a, 3);
+}
+static inline int32_t v4_hmins(rdz_v4 a)
+{
+    int32_t m = (int32_t)v4_lane(a, 0), k;
+    for (k = 1; k < 4; k++) m = (int32_t)v4_lane(a, k) < m ? (int32_t)v4_lane(a, k) : m;
+    return m;
+}
+static inline int32_t v4_hmaxs(rdz_v4 a)
+{
+    int32_t m = (int32_t)v4_lane(a, 0), k;
+    for (k = 1; k < 4; k++) m = (int32_t)v4_lane(a, k) > m ? (int32_t)v4_lane(a, k) : m;
+    return m;
+}
+static inline uint32_t v4_any(rdz_v4 a) { return (uint32_t)(_mm_movemask_epi8(a) != 0); }
+#define RDZ_VEC_INT 1
+#endif
+
 #define INT_NA INT32_MIN
+
+/* On a little-endian host the values' bytes in memory are their file
+   bytes: raw records and shuffle sources are plain copies. */
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define RDZ_LE_HOST 1
+#endif
 
 static size_t packed_bytes(size_t n, unsigned width)
 {
@@ -84,31 +165,42 @@ static uint8_t *reserve(zb_buf *out, size_t n, rdz_error *e)
     X(0) X(1) X(2) X(3) X(4) X(5) X(6) X(7) X(8) X(9) X(10) X(11) X(12) X(13) X(14) X(15) X(16) \
     X(17) X(18) X(19) X(20) X(21) X(22) X(23) X(24) X(25) X(26) X(27) X(28) X(29) X(30) X(31)
 
-static inline void pack32(const uint32_t *codes, unsigned W, uint8_t *dst)
+/* Inlined into each width's function, so that W is a constant there (gcc
+   at -O2 would otherwise call one shared copy). */
+#if defined(__GNUC__) || defined(__clang__)
+#define RDZ_ALWAYS_INLINE inline __attribute__((always_inline))
+#else
+#define RDZ_ALWAYS_INLINE inline
+#endif
+
+static RDZ_ALWAYS_INLINE void pack32(const uint32_t *codes, unsigned W, uint8_t *dst)
 {
     uint32_t out[32];
-    unsigned w;
     memset(out, 0, sizeof out);
     /* code k's bits go to word k*W/32 at shift k*W%32, and spill into the
        next word when they cross it; all constants once W is */
 #define RDZ_PACK_ONE(k)                                                                          \
     out[(k) * W / 32] |= codes[k] << ((k) * W % 32);                                            \
-    if ((k) * W % 32 + W > 32) out[(k) * W / 32 + 1] |= codes[k] >> (32 - (k) * W % 32);
+    if ((k) * W % 32 + W > 32) out[(k) * W / 32 + 1] |= codes[k] >> ((32 - (k) * W % 32) & 31);
     RDZ_REP32(RDZ_PACK_ONE)
 #undef RDZ_PACK_ONE
-    for (w = 0; w < W; w++) zb_wr_u32le(dst + 4 * w, out[w]);
+    /* unrolled too, so that out[] stays in registers (gcc keeps a loop) */
+#define RDZ_STORE_ONE(w) if ((w) < W) zb_wr_u32le(dst + 4 * (w), out[w]);
+    RDZ_REP32(RDZ_STORE_ONE)
+#undef RDZ_STORE_ONE
 }
 
-static inline void unpack32(const uint8_t *src, unsigned W, uint32_t *codes)
+static RDZ_ALWAYS_INLINE void unpack32(const uint8_t *src, unsigned W, uint32_t *codes)
 {
     const uint32_t mask = W == 32 ? 0xffffffffu : (1u << W) - 1u;
     uint32_t in[33];
-    unsigned w;
-    for (w = 0; w < W; w++) in[w] = zb_rd_u32le(src + 4 * w);
-    in[W] = 0;
+    in[32] = 0;
+#define RDZ_LOAD_ONE(w) in[w] = (w) < W ? zb_rd_u32le(src + 4 * (w)) : 0;
+    RDZ_REP32(RDZ_LOAD_ONE)
+#undef RDZ_LOAD_ONE
 #define RDZ_UNPACK_ONE(k)                                                                        \
     codes[k] = ((in[(k) * W / 32] >> ((k) * W % 32)) |                                         \
-                ((k) * W % 32 + W > 32 ? in[(k) * W / 32 + 1] << (32 - (k) * W % 32) : 0)) &   \
+                ((k) * W % 32 + W > 32 ? in[(k) * W / 32 + 1] << ((32 - (k) * W % 32) & 31) : 0)) & \
                mask;
     RDZ_REP32(RDZ_UNPACK_ONE)
 #undef RDZ_UNPACK_ONE
@@ -410,7 +502,26 @@ int rdz_int_encode(const int32_t *v, size_t n, int compressing, zb_buf *out, uin
             mn = v[0] == INT_NA ? INT32_MAX : v[0];
             mx = v[0];
         }
-        for (i = 1; i < n; i++) {
+        i = 1;
+#ifdef RDZ_VEC_INT
+        if (n >= 5) {
+            const rdz_v4 na4 = v4_dup((uint32_t)INT_NA), max4 = v4_dup((uint32_t)INT32_MAX);
+            rdz_v4 vmn = v4_dup((uint32_t)mn), vmx = v4_dup((uint32_t)mx), vna = v4_dup(0),
+                   vch = v4_dup(0), all = v4_dup(0xffffffffu);
+            for (; i + 4 <= n; i += 4) {
+                rdz_v4 cur = v4_load(v + i), prev = v4_load(v + i - 1), isna = v4_eq(cur, na4);
+                vmn = v4_mins(vmn, v4_sel(isna, max4, cur));
+                vmx = v4_maxs(vmx, cur);
+                vna = v4_sub(vna, isna); /* a mask is -1 */
+                vch = v4_sub(vch, v4_sel(v4_eq(cur, prev), v4_dup(0), all));
+            }
+            mn = v4_hmins(vmn);
+            mx = v4_hmaxs(vmx);
+            na_count += v4_sum(vna);
+            changes += v4_sum(vch);
+        }
+#endif
+        for (; i < n; i++) {
             int32_t x = v[i] == INT_NA ? INT32_MAX : v[i];
             na_count += v[i] == INT_NA;
             changes += v[i] != v[i - 1];
@@ -438,7 +549,22 @@ int rdz_int_encode(const int32_t *v, size_t n, int compressing, zb_buf *out, uin
             dhi = d > dhi ? d : dhi;
         }
         if (bit_length((uint64_t)(dhi - dlo)) < for_width) {
-            for (i = probe; i < n; i++) {
+            i = probe;
+#ifdef RDZ_VEC_INT
+            /* no NA here, and a range of at most 2^31 - 1 keeps every
+               difference in 32 bits: four lanes */
+            if ((int64_t)hi - lo <= INT32_MAX && i + 4 <= n) {
+                rdz_v4 vlo = v4_dup((uint32_t)(int32_t)dlo), vhi = v4_dup((uint32_t)(int32_t)dhi);
+                for (; i + 4 <= n; i += 4) {
+                    rdz_v4 d = v4_sub(v4_load(v + i), v4_load(v + i - 1));
+                    vlo = v4_mins(vlo, d);
+                    vhi = v4_maxs(vhi, d);
+                }
+                dlo = v4_hmins(vlo) < dlo ? v4_hmins(vlo) : dlo;
+                dhi = v4_hmaxs(vhi) > dhi ? v4_hmaxs(vhi) : dhi;
+            }
+#endif
+            for (; i < n; i++) {
                 int64_t d = (int64_t)v[i] - (int64_t)v[i - 1];
                 dlo = d < dlo ? d : dlo;
                 dhi = d > dhi ? d : dhi;
@@ -474,7 +600,17 @@ int rdz_int_encode(const int32_t *v, size_t n, int compressing, zb_buf *out, uin
     if (delta_len < for_len && delta_len < raw_len) {
         uint32_t *codes;
         if (!(codes = codes_after(out, delta_len, n, e))) return 1;
-        for (i = 1; i < n; i++) codes[i - 1] = (uint32_t)((int64_t)v[i] - (int64_t)v[i - 1] - dlo);
+        i = 1;
+#ifdef RDZ_VEC_INT
+        {
+            /* modulo 2^32 the code is the same, and fits by delta_width */
+            const rdz_v4 lo4 = v4_dup((uint32_t)dlo);
+            for (; i + 4 <= n; i += 4) {
+                v4_store(codes + i - 1, v4_sub(v4_sub(v4_load(v + i), v4_load(v + i - 1)), lo4));
+            }
+        }
+#endif
+        for (; i < n; i++) codes[i - 1] = (uint32_t)((int64_t)v[i] - (int64_t)v[i - 1] - dlo);
         dst = out->data;
         dst[0] = (uint8_t)delta_width;
         zb_wr_u32le(dst + 4, (uint32_t)v[0]);
@@ -488,7 +624,18 @@ int rdz_int_encode(const int32_t *v, size_t n, int compressing, zb_buf *out, uin
         int32_t base = nas == n ? 0 : (int32_t)lo;
         uint32_t *codes;
         if (!(codes = codes_after(out, for_len, n, e))) return 1;
-        for (i = 0; i < n; i++) {
+        i = 0;
+#ifdef RDZ_VEC_INT
+        {
+            const rdz_v4 na4 = v4_dup((uint32_t)INT_NA), code4 = v4_dup(na_code),
+                         base4 = v4_dup((uint32_t)base);
+            for (; i + 4 <= n; i += 4) {
+                rdz_v4 x = v4_load(v + i);
+                v4_store(codes + i, v4_sel(v4_eq(x, na4), code4, v4_sub(x, base4)));
+            }
+        }
+#endif
+        for (; i < n; i++) {
             codes[i] = v[i] == INT_NA ? na_code : (uint32_t)v[i] - (uint32_t)base;
         }
         dst = out->data;
@@ -505,11 +652,19 @@ int rdz_int_encode(const int32_t *v, size_t n, int compressing, zb_buf *out, uin
         if (zb_buf_reserve(out, raw_len)) return rdz_memory(e, "a numeric block");
         dst = out->data;
         le = out->data + raw_len; /* scratch past the record */
+#ifdef RDZ_LE_HOST
+        memcpy(le, v, raw_len);
+#else
         for (i = 0; i < n; i++) zb_wr_u32le(le + 4 * i, (uint32_t)v[i]);
+#endif
         shuffle(le, n, 4, dst);
         *encoding = RDZ_ENCODING_INT_SHUFFLE;
     } else {
+#ifdef RDZ_LE_HOST
+        if (n) memcpy(dst, v, raw_len);
+#else
         for (i = 0; i < n; i++) zb_wr_u32le(dst + 4 * i, (uint32_t)v[i]);
+#endif
         *encoding = RDZ_ENCODING_INT_RAW;
     }
     return 0;
@@ -529,7 +684,11 @@ int rdz_int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, 
     }
     switch (encoding) {
     case RDZ_ENCODING_INT_RAW:
+#ifdef RDZ_LE_HOST
+        if (n) memcpy(out, enc, 4 * n);
+#else
         for (i = 0; i < n; i++) out[i] = (int32_t)zb_rd_u32le(enc + 4 * i);
+#endif
         return 0;
     case RDZ_ENCODING_INT_SHUFFLE:
         for (i = unshuffle_native(enc, n, 4, (uint8_t *)(void *)out); i < n; i++) {
@@ -558,14 +717,32 @@ int rdz_int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, 
             uint32_t limit = (uint32_t)(INT32_MAX - base), ubase = (uint32_t)base,
                      zero_bad = base == INT32_MIN, bad = 0;
             unpack_codes(enc + RDZ_INT_FOR_HEADER, len - RDZ_INT_FOR_HEADER, n, width, c);
+            i = 0;
+#ifdef RDZ_VEC_INT
+            {
+                const rdz_v4 code4 = v4_dup(has_na ? na_code : 0), use_na = v4_dup(has_na ? ~0u : 0),
+                             na4 = v4_dup((uint32_t)INT_NA), base4 = v4_dup(ubase),
+                             limit4 = v4_dup(limit), zero4 = v4_dup(0),
+                             zbad4 = v4_dup(zero_bad ? ~0u : 0);
+                rdz_v4 vbad = zero4;
+                for (; i + 4 <= n; i += 4) {
+                    rdz_v4 ci = v4_load((const int32_t *)(const void *)(c + i));
+                    rdz_v4 na = v4_and(use_na, v4_eq(ci, code4));
+                    rdz_v4 b = v4_or(v4_gtu(ci, limit4), v4_and(zbad4, v4_eq(ci, zero4)));
+                    vbad = v4_or(vbad, v4_sel(na, zero4, b));
+                    v4_store(c + i, v4_sel(na, na4, v4_add(ci, base4)));
+                }
+                bad |= v4_any(vbad) != 0;
+            }
+#endif
             if (has_na) {
-                for (i = 0; i < n; i++) {
+                for (; i < n; i++) {
                     uint32_t ci = c[i], na = ci == na_code;
                     bad |= (na ^ 1u) & ((ci > limit) | (zero_bad & (ci == 0)));
                     c[i] = na ? (uint32_t)INT_NA : ubase + ci;
                 }
             } else {
-                for (i = 0; i < n; i++) {
+                for (; i < n; i++) {
                     uint32_t ci = c[i];
                     bad |= (ci > limit) | (zero_bad & (ci == 0));
                     c[i] = ubase + ci;
@@ -611,7 +788,20 @@ int rdz_int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, 
             size_t end = zb_rd_u32le(rec + 4);
             if (end > n) return rdz_invalid(e, "an integer run ends past its block"); /* GUARD: int-run-end */
             if (end <= start || (r && value == out[start - 1])) return bad_int(e);
-            for (i = start; i < end; i++) out[i] = value;
+            i = start;
+#ifdef RDZ_VEC_INT
+            {
+                const rdz_v4 v4 = v4_dup((uint32_t)value);
+                for (; i + 16 <= end; i += 16) {
+                    uint32_t *o = (uint32_t *)(void *)(out + i);
+                    v4_store(o, v4);
+                    v4_store(o + 4, v4);
+                    v4_store(o + 8, v4);
+                    v4_store(o + 12, v4);
+                }
+            }
+#endif
+            for (; i < end; i++) out[i] = value;
             start = end;
         }
         return start == n ? 0 : bad_int(e);
@@ -689,11 +879,19 @@ int rdz_dbl_encode(const double *v, size_t n, int compressing, zb_buf *out, uint
         if (zb_buf_reserve(out, raw_len)) return rdz_memory(e, "a numeric block");
         dst = out->data;
         le = out->data + raw_len;
+#ifdef RDZ_LE_HOST
+        memcpy(le, v, raw_len);
+#else
         for (i = 0; i < n; i++) zb_wr_u64le(le + 8 * i, bits_of(v[i]));
+#endif
         shuffle(le, n, 8, dst);
         *encoding = RDZ_ENCODING_DBL_SHUFFLE;
     } else {
+#ifdef RDZ_LE_HOST
+        if (n) memcpy(dst, v, raw_len);
+#else
         for (i = 0; i < n; i++) zb_wr_u64le(dst + 8 * i, bits_of(v[i]));
+#endif
         *encoding = RDZ_ENCODING_DBL_RAW;
     }
     return 0;
@@ -711,7 +909,11 @@ int rdz_dbl_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, 
     }
     switch (encoding) {
     case RDZ_ENCODING_DBL_RAW:
+#ifdef RDZ_LE_HOST
+        if (n) memcpy(out, enc, 8 * n);
+#else
         for (i = 0; i < n; i++) out[i] = double_of(zb_rd_u64le(enc + 8 * i));
+#endif
         return 0;
     case RDZ_ENCODING_DBL_SHUFFLE:
         for (i = unshuffle_native(enc, n, 8, (uint8_t *)(void *)out); i < n; i++) {

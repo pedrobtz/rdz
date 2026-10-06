@@ -37,6 +37,10 @@
 #include "rdz_pipeline.h"
 #include "rdz_vector.h"
 
+#ifndef RDZ_INT_SWEEP_PINS
+#include "sweep_pins.h"
+#endif
+
 static int failures;
 static int checks;
 
@@ -572,9 +576,171 @@ static void numeric_case(uint16_t type, const void *values, size_t n, int level,
     remove(path);
 }
 
+/* ---- bit-exactness sweeps --------------------------------------------------------- */
+
+/* The encoders' bytes are part of the frozen format's practice: a change to
+   a codec, a compiler or a SIMD kernel must leave every record as it was.
+   The integer sweep folds, per block length and level, every record's
+   encoding, length and XXH3-64 into one value and compares it with the
+   value the encoders gave when the sweep was added (pinned below; set
+   RDZ_PRINT_PINS=1 to print them). Every record is also decoded back. */
+
+static uint32_t sweep_rand(uint32_t *x)
+{
+    *x = *x * 1103515245u + 12345u;
+    return *x >> 1 ^ *x << 15;
+}
+
+static uint64_t sweep_fold(uint64_t acc, uint16_t encoding, const zb_buf *rec)
+{
+    uint8_t b[22];
+    zb_wr_u64le(b, acc);
+    zb_wr_u16le(b + 8, encoding);
+    zb_wr_u32le(b + 10, (uint32_t)rec->len);
+    zb_wr_u64le(b + 14, rdz_hash(rec->data ? rec->data : b, rec->len));
+    return rdz_hash(b, sizeof b);
+}
+
+/* n values whose frame of reference needs `width` bits: a base, codes up to
+   the width's largest (one below it with NA, whose code is the largest) */
+static void sweep_ints(int32_t *v, size_t n, unsigned width, int na, uint32_t seed)
+{
+    uint32_t x = seed, top = width == 0 ? 0 : width == 32 ? 0xfffffffeu : (uint32_t)((1ull << width) - 1);
+    int64_t base = width >= 31 ? (int64_t)INT32_MIN + 1 : -(int64_t)(top / 2) - 7;
+    size_t i;
+    if (na && top) top--;
+    for (i = 0; i < n; i++) {
+        uint32_t c = top ? sweep_rand(&x) % (top == 0xffffffffu ? top : top + 1) : 0;
+        if (i == 0) c = 0;
+        if (i == 1) c = top;
+        v[i] = (int32_t)(base + (int64_t)c);
+        if (na && i % 7 == 3) v[i] = INT32_MIN;
+    }
+}
+
+static void test_bit_exact_ints(void)
+{
+    static const size_t lengths[] = {1, 2, 3, 15, 16, 17, 31, 32, 33, 63, 64, 65, 1023, 1024,
+                                     1025, 262143, 262144};
+    /* per length: level 0, then a compressing level */
+    static const uint64_t pins[17][2] = {
+        RDZ_INT_SWEEP_PINS
+    };
+    int print = getenv("RDZ_PRINT_PINS") != NULL;
+    int32_t *v = (int32_t *)malloc(RDZ_INT_BLOCK_VALUES * sizeof *v),
+            *back = (int32_t *)malloc(RDZ_INT_BLOCK_VALUES * sizeof *back);
+    zb_buf rec;
+    size_t k;
+    zb_buf_alloc(&rec, 0, 0);
+    for (k = 0; k < sizeof lengths / sizeof *lengths; k++) {
+        int comp;
+        for (comp = 0; comp <= 1; comp++) {
+            uint64_t acc = 0;
+            unsigned width;
+            int na;
+            for (width = 0; width <= 32; width++) {
+                for (na = 0; na <= 1; na++) {
+                    size_t n = lengths[k];
+                    uint16_t enc;
+                    rdz_error e;
+                    sweep_ints(v, n, width, na, (uint32_t)(n * 131 + width * 7 + (unsigned)na));
+                    if (rdz_int_encode(v, n, comp, &rec, &enc, &e)) {
+                        CHECK(0, "int sweep n %zu width %u: %s", n, width, e.message);
+                        continue;
+                    }
+                    acc = sweep_fold(acc, enc, &rec);
+                    CHECK(rdz_int_decode(rec.data, rec.len, enc, n, back, &e) == 0 &&
+                              memcmp(v, back, n * sizeof *v) == 0,
+                          "int sweep n %zu width %u na %d: no round trip", n, width, na);
+                }
+            }
+            if (print) {
+                printf("%s0x%016llxull%s", comp ? " " : "        {",
+                       (unsigned long long)acc, comp ? "}, \\\n" : ",");
+            } else {
+                CHECK(acc == pins[k][comp], "int sweep n %zu level %d: bytes changed", lengths[k],
+                      comp);
+            }
+        }
+    }
+    zb_buf_release(&rec);
+    free(v);
+    free(back);
+}
+
+/* The dispatched logical classifier (NEON, SSE2, AVX2) against the scalar
+   one: the same answer and the same bytes, at every tail length near the
+   group sizes and near a full block, for ten patterns, valid or with an
+   invalid value at n - 1, 63 or 64. */
+static void test_bit_exact_logical(void)
+{
+    int32_t *v = (int32_t *)malloc(65536 * sizeof *v), *back = (int32_t *)malloc(65536 * sizeof *back);
+    zb_buf a, b, sa, sb;
+    size_t n;
+    int pattern, bad;
+    zb_buf_alloc(&a, 0, 0);
+    zb_buf_alloc(&b, 0, 0);
+    zb_buf_alloc(&sa, 0, 0);
+    zb_buf_alloc(&sb, 0, 0);
+    for (n = 0; n <= 65536; n = n == 320 ? 65400 : n + 1) {
+        for (pattern = 0; pattern < 10; pattern++) {
+            for (bad = 0; bad <= 3; bad++) {
+                uint32_t x = (uint32_t)(n * 10 + (size_t)pattern);
+                size_t i, at;
+                uint16_t ea = 0, eb = 0;
+                rdz_error e;
+                int ra, rb;
+                for (i = 0; i < n; i++) {
+                    uint32_t r = sweep_rand(&x) % 1000;
+                    int s;
+                    switch (pattern) {
+                    case 0: s = (int)(r % 3); break;
+                    case 1: s = 0; break;
+                    case 2: s = 1; break;
+                    case 3: s = 2; break;
+                    case 4: s = r < 990 ? 0 : 1; break;
+                    case 5: s = r < 990 ? 1 : 2; break;
+                    case 6: s = (int)(i / 97 % 3); break;
+                    case 7: s = (int)(i % 3); break;
+                    case 8: s = (int)(i % 7 % 3); break;
+                    default: s = r < 20 ? 0 : 2;
+                    }
+                    v[i] = s == 0 ? 0 : s == 1 ? 1 : RDZ_LOGICAL_NA;
+                }
+                at = bad == 1 ? n - 1 : bad == 2 ? 63 : 64;
+                if (bad && (n == 0 || at >= n)) continue;
+                if (bad) v[at] = 2;
+                rdz_logical_force_scalar(1);
+                ra = rdz_logical_encode(v, n, &a, &ea, &sa, &e);
+                rdz_logical_force_scalar(0);
+                rb = rdz_logical_encode(v, n, &b, &eb, &sb, &e);
+                if (ra != rb || (!ra && (ea != eb || a.len != b.len ||
+                                         (a.len && memcmp(a.data, b.data, a.len) != 0)))) {
+                    CHECK(0, "logical sweep n %zu pattern %d bad %d: kernels differ", n, pattern,
+                          bad);
+                    continue;
+                }
+                CHECK(ra == (bad != 0), "logical sweep n %zu pattern %d bad %d: result %d", n,
+                      pattern, bad, ra);
+                if (!ra) {
+                    CHECK(rdz_logical_decode(b.data, b.len, eb, n, back, &e) == 0 &&
+                              (n == 0 || memcmp(v, back, n * sizeof *v) == 0),
+                          "logical sweep n %zu pattern %d: no round trip", n, pattern);
+                }
+            }
+        }
+    }
+    zb_buf_release(&a);
+    zb_buf_release(&b);
+    zb_buf_release(&sa);
+    zb_buf_release(&sb);
+    free(v);
+    free(back);
+}
+
 static void test_numeric(const char *tmpdir)
 {
-    size_t n = 600000, i;
+    size_t n = 600007, i; /* not a multiple of 16: the transposes' scalar tail runs */
     int32_t *iv = (int32_t *)malloc(n * sizeof *iv);
     double *dv = (double *)malloc(n * sizeof *dv);
     char path[512];
@@ -608,6 +774,15 @@ static void test_numeric(const char *tmpdir)
        code 0 on a base of INT32_MIN (it would read as NA), are refused,
        with or without the NA code */
     {
+        /* width 32, from foreign files only (rdz writes raw instead): the
+           NA code is 0xffffffff, and the largest valid code INT32_MAX - base */
+        static const struct {
+            int32_t base;
+            uint32_t code;
+            uint8_t has_na;
+            int ok;
+        } wide[] = {{0, 0x7fffffffu, 0, 1},   {0, 0x80000000u, 0, 0}, {INT32_MIN + 1, 0xfffffffeu, 0, 1},
+                    {INT32_MIN + 1, 0xffffffffu, 0, 0}, {INT32_MIN + 1, 0xffffffffu, 1, 1}};
         static const struct {
             int32_t base;
             uint8_t code, has_na;
@@ -627,11 +802,50 @@ static void test_numeric(const char *tmpdir)
             rec[RDZ_INT_FOR_HEADER] = edges[k].code;
             ok = rdz_int_decode(rec, sizeof rec, RDZ_ENCODING_INT_FOR, 1, &got, &e) == 0;
             CHECK(ok == edges[k].ok, "FOR edge %zu: decoded %d", k, ok);
+            if (k < sizeof wide / sizeof *wide) {
+                uint8_t w32[RDZ_INT_FOR_HEADER + 4] = {32, 0, 0, 0};
+                int32_t g = 0;
+                int wok;
+                w32[1] = wide[k].has_na;
+                zb_wr_u32le(w32 + 4, (uint32_t)wide[k].base);
+                zb_wr_u32le(w32 + RDZ_INT_FOR_HEADER, wide[k].code);
+                wok = rdz_int_decode(w32, sizeof w32, RDZ_ENCODING_INT_FOR, 1, &g, &e) == 0;
+                CHECK(wok == wide[k].ok, "FOR width 32 edge %zu: decoded %d", k, wok);
+                if (wok && wide[k].has_na && wide[k].code == 0xffffffffu) {
+                    CHECK(g == INT32_MIN, "FOR width 32 edge %zu: the NA code reads as NA", k);
+                } else if (wok) {
+                    CHECK((int64_t)g == (int64_t)wide[k].base + wide[k].code,
+                          "FOR width 32 edge %zu: %d", k, (int)g);
+                }
+            }
             if (ok && edges[k].has_na && edges[k].code == 3) {
                 CHECK(got == INT32_MIN, "FOR edge %zu: the NA code reads as NA", k);
             } else if (ok) {
                 CHECK(got == edges[k].base + edges[k].code, "FOR edge %zu: %d", k, (int)got);
             }
+        }
+    }
+    /* delta at width 32 (foreign files only): first value 0, minimum delta
+       -INT32_MAX, so code 0xfffffffe lands on INT32_MAX and 0xffffffff one
+       past it */
+    {
+        static const struct {
+            uint32_t code;
+            int ok;
+            int32_t want;
+        } d32[] = {{0x7ffffffeu, 1, -1}, {0xfffffffeu, 1, INT32_MAX}, {0xffffffffu, 0, 0}};
+        size_t k;
+        for (k = 0; k < sizeof d32 / sizeof *d32; k++) {
+            uint8_t rec[RDZ_INT_DELTA_HEADER + 4] = {32, 0, 0, 0};
+            int32_t got[2] = {0, 0};
+            rdz_error e;
+            int ok;
+            zb_wr_u32le(rec + 4, 0);
+            zb_wr_u64le(rec + 8, (uint64_t)(int64_t)-INT32_MAX);
+            zb_wr_u32le(rec + RDZ_INT_DELTA_HEADER, d32[k].code);
+            ok = rdz_int_decode(rec, sizeof rec, RDZ_ENCODING_INT_DELTA, 2, got, &e) == 0;
+            CHECK(ok == d32[k].ok, "delta width 32 edge %zu: decoded %d", k, ok);
+            if (ok) CHECK(got[0] == 0 && got[1] == d32[k].want, "delta width 32 edge %zu: %d", k, (int)got[1]);
         }
     }
     /* an empty block of no bytes: only raw and shuffled layouts hold nothing
@@ -1200,6 +1414,8 @@ int main(int argc, char **argv)
     test_alp(tmpdir);
     test_extensions(tmpdir);
     test_empty_logical(tmpdir);
+    test_bit_exact_ints();
+    test_bit_exact_logical();
     printf("logical kernel: %s\n", rdz_logical_kernel());
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
