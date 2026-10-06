@@ -71,6 +71,13 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
 #' may describe the parts left out (a data.table's key), are not kept, and
 #' [rdz_attributes()] still reads them.
 #'
+#' A data.table's `.internal.selfref`, a pointer to the table itself, is never
+#' stored: `read_rdz()` rebuilds it with `data.table::setalloccol()` for every
+#' data.table it reads, at the root or nested in lists, so the tables can be
+#' changed in place at once. data.table is loaded only for a file that holds
+#' one; without it, the tables come back as they were stored. Tibbles need
+#' nothing rebuilt.
+#'
 #' @param path A single, non-missing path to read.
 #' @param select `NULL` (everything), or the columns of a data frame or the
 #'   elements of a list to read: distinct names, or distinct positive
@@ -93,16 +100,23 @@ read_rdz <- function(path, select = NULL) {
       index <- rdz_select_index(path, info, select)
     }
   }
-  value <- rdz_check(.Call(rdz_c_read, path, rdz_settings(), index))
-  if (!is.null(select) && is.null(index)) {
+  # a native file's data.tables are rebuilt as they are read, wherever they
+  # are in the object
+  read <- rdz_check(.Call(rdz_c_read, path, rdz_settings(), index, rdz_restore_table))
+  value <- read[[1L]]
+  if (!read[[2L]] && !is.null(select)) {
+    # a generic value's tables were rebuilt in C; a selected root is new
     value <- rdz_select_generic(value, select)
-  }
-  # A data.table's .internal.selfref is not stored (it is a pointer to the
-  # object itself); data.table restores it, as it does for every reader.
-  if (inherits(value, "data.table") && requireNamespace("data.table", quietly = TRUE)) {
-    value <- data.table::setalloccol(value)
+    if (inherits(value, "data.table")) value <- rdz_restore_table(value)
   }
   value
+}
+
+# A data.table read back gets its .internal.selfref, which is a pointer to
+# the object itself and so never stored, from data.table (loaded only now,
+# when a file holds a data.table); without data.table it stays as read.
+rdz_restore_table <- function(x) {
+  if (requireNamespace("data.table", quietly = TRUE)) data.table::setalloccol(x) else x
 }
 
 # The 0-based children `select` names in a native file's list or data frame

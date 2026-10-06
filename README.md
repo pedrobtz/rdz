@@ -20,8 +20,11 @@ through R's own serializer, streamed through the same blocks.
   root, so sharing and references are kept.
 - **Selective:** `read_rdz(path, select = )` reads some columns of a data frame
   or some elements of a list, decoding nothing else.
-- **Inspectable:** `rdz_info()`, `rdz_schema()` and `rdz_attributes()` read a
-  native file's directory and attributes without decoding its data.
+- **Inspectable:** `rdz_schema()` shows a native file's tree (each part's
+  type, class, shape, attributes and size), and `rdz_attributes(path, object =
+  c("sales", "date"))` reads any part's attributes, without decoding its data.
+- **Tables as written:** data.tables come back usable in place, nested or not,
+  and tibbles as tibbles.
 - **Checked:** every header, directory and block carries an XXH3-64 checksum,
   and every length and offset is bounded before anything is allocated.
 - **Portable:** files are byte-identical on every platform, little- and
@@ -47,7 +50,7 @@ path <- tempfile(fileext = ".rdz")
 write_rdz(mtcars, path)
 read_rdz(path)
 read_rdz(path, select = c("mpg", "wt"))          # only these columns are read
-rdz_info(path)
+rdz_schema(path)                                  # the tree, from the directory
 rdz_attributes(path, names = "names")
 
 options(rdz.preset = "compact", rdz.threads = 4)  # smaller files, more threads

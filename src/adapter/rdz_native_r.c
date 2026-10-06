@@ -722,6 +722,9 @@ typedef struct {
                      integers; held by the caller) */
     SEXP targets; /* R_NilValue, or objects to read alone (0-based ids; held
                      by the caller): the result is the list of them */
+    SEXP restore; /* R_NilValue, or a function (data.table::setalloccol) for
+                     each data.table read: it gets back its .internal.selfref,
+                     which is not stored (held by the caller) */
     zb_buf want;  /* with a selection: a byte per object, set to read it */
     int threads;
     rdz_error e;
@@ -839,6 +842,11 @@ static const char *rdz_attr_name(SEXP nm)
     SEXP c = STRING_ELT(nm, 0);
     if (c == NA_STRING || LENGTH(c) == 0 || !rdz_ascii(c)) return NULL;
     return CHAR(c);
+}
+
+static int rdz_is_data_table(SEXP x)
+{
+    return rdz_has_class(Rf_getAttrib(x, R_ClassSymbol), "data.table");
 }
 
 /* Builds the whole value of an open native file. */
@@ -1018,6 +1026,13 @@ static SEXP rdz_graph_body(void *data)
                 Rf_setAttrib(x, R_ClassSymbol, cls);
                 UNPROTECT(1);
             }
+            /* a data.table, rebuilt before its owner (an earlier object)
+               takes it: the owner holds the rebuilt one */
+            if (have_class && g->restore != R_NilValue && rdz_is_data_table(x)) {
+                SEXP call = PROTECT(Rf_lang2(g->restore, x));
+                SET_VECTOR_ELT(g->holder, i, Rf_eval(call, R_GlobalEnv));
+                UNPROTECT(1);
+            }
         }
     }
     g->failed = 0;
@@ -1055,15 +1070,16 @@ static void rdz_graph_in_cleanup(void *data, Rboolean jump)
    (its buffers and file) and closes; with `select` (0-based integers, or
    R_NilValue for all), only those children of a list or data frame root. */
 static SEXP rdz_native_read_in(rdz_reader *opened, int threads, SEXP select, SEXP targets,
-                               rdz_error *e, int *failed);
+                               SEXP restore, rdz_error *e, int *failed);
 
-SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, rdz_error *e, int *failed)
+SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, SEXP restore, rdz_error *e,
+                       int *failed)
 {
-    return rdz_native_read_in(opened, threads, select, R_NilValue, e, failed);
+    return rdz_native_read_in(opened, threads, select, R_NilValue, restore, e, failed);
 }
 
 static SEXP rdz_native_read_in(rdz_reader *opened, int threads, SEXP select, SEXP targets,
-                               rdz_error *e, int *failed)
+                               SEXP restore, rdz_error *e, int *failed)
 {
     SEXP ptr, cont, out, holder;
     rdz_graph_in *g;
@@ -1081,6 +1097,7 @@ static SEXP rdz_native_read_in(rdz_reader *opened, int threads, SEXP select, SEX
     rdz_vec_init(&g->v);
     g->select = select;
     g->targets = targets;
+    g->restore = restore;
     g->threads = threads;
     R_SetExternalPtrAddr(ptr, g);
     holder = Rf_allocVector(VECSXP, 2 * (R_xlen_t)g->r.nobjects);
@@ -1207,7 +1224,7 @@ SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
     if (object && (r.objects[object].child_count || r.objects[object].attribute_count)) {
         /* a value with parts of its own: read with the whole object */
         SEXP x, sym = Rf_install(w);
-        x = PROTECT(rdz_native_read_r(&r, 1, R_NilValue, &e, &failed)); /* closes r */
+        x = PROTECT(rdz_native_read_r(&r, 1, R_NilValue, R_NilValue, &e, &failed)); /* closes r */
         if (failed) {
             UNPROTECT(1);
             return rdz_failure(&e);
@@ -1256,7 +1273,7 @@ SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
     view.objects = &only;
     view.nobjects = 1;
     view.nattributes = 0;
-    out = PROTECT(rdz_native_read_r(&view, 1, R_NilValue, &e, &failed)); /* closes the view's buffers */
+    out = PROTECT(rdz_native_read_r(&view, 1, R_NilValue, R_NilValue, &e, &failed)); /* closes the view's buffers */
     UNPROTECT(1);
     if (failed) return rdz_failure(&e);
     return out;
@@ -1382,7 +1399,7 @@ SEXP rdz_c_directory(SEXP path)
 
 /* Objects of a native file (0-based ids) and everything below each, read
    alone: the list of them. */
-SEXP rdz_c_read_objects(SEXP path, SEXP ids, SEXP settings)
+SEXP rdz_c_read_objects(SEXP path, SEXP ids, SEXP settings, SEXP restore)
 {
     const char *p = rdz_path(path);
     rdz_reader r;
@@ -1395,7 +1412,7 @@ SEXP rdz_c_read_objects(SEXP path, SEXP ids, SEXP settings)
         rdz_reader_close(&r);
         return rdz_failure(&e);
     }
-    out = PROTECT(rdz_native_read_in(&r, threads, R_NilValue, ids, &e, &failed)); /* closes r */
+    out = PROTECT(rdz_native_read_in(&r, threads, R_NilValue, ids, restore, &e, &failed)); /* closes r */
     UNPROTECT(1);
     return failed ? rdz_failure(&e) : out;
 }

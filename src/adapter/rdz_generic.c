@@ -28,8 +28,8 @@
 
 #include "../core/rdz_vector.h"
 
-SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, rdz_error *e,
-                       int *failed);
+SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, SEXP restore,
+                       rdz_error *e, int *failed);
 
 /* settings: c(level, threads, block_size); level 0 stores raw, block_size 0
    is the format's 1 MiB. */
@@ -330,8 +330,80 @@ static void rdz_gen_in_cleanup(void *data, Rboolean jump)
 }
 
 /* select: R_NilValue, or 0-based children of a native list or data frame
-   root to read alone (R selects from a generic root after reading it). */
-SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select)
+   root to read alone (R selects from a generic root after reading it).
+   restore: R_NilValue, or the function a native data.table is passed to
+   (R restores a generic value's tables itself). */
+/* Passes each data.table in a value read whole to `restore`: the root and
+   those in plain lists below it, at any depth, deepest first; one pass over
+   the lists, with an explicit stack (a value may nest past R's recursion
+   limit). The value is fresh from R_Unserialize(), so lists are changed in
+   place. */
+typedef struct {
+    SEXP list;
+    R_xlen_t next;
+} rdz_walk;
+
+static int rdz_is_table(SEXP x)
+{
+    SEXP cls = Rf_getAttrib(x, R_ClassSymbol);
+    R_xlen_t i;
+    if (TYPEOF(cls) != STRSXP) return 0;
+    for (i = 0; i < XLENGTH(cls); i++) {
+        if (strcmp(CHAR(STRING_ELT(cls, i)), "data.table") == 0) return 1;
+    }
+    return 0;
+}
+
+static SEXP rdz_restore_call(SEXP restore, SEXP x)
+{
+    SEXP call = PROTECT(Rf_lang2(restore, x)), out = Rf_eval(call, R_GlobalEnv);
+    UNPROTECT(1);
+    return out;
+}
+
+static SEXP rdz_restore_tables(SEXP root, SEXP restore)
+{
+    /* the stack is R_alloc() memory, which R reclaims when the .Call
+       returns or an R error (in restore) unwinds it */
+    size_t cap = 64, depth = 0;
+    rdz_walk *stack;
+    SEXP out;
+    PROTECT(root);
+    if (TYPEOF(root) == VECSXP && !Rf_isObject(root)) {
+        stack = (rdz_walk *)(void *)R_alloc(cap, sizeof *stack);
+        stack[depth].list = root; /* every list on the stack is reachable from root */
+        stack[depth++].next = 0;
+        while (depth) {
+            rdz_walk *w = &stack[depth - 1];
+            SEXP e;
+            R_xlen_t at;
+            if (w->next == XLENGTH(w->list)) {
+                depth--;
+                continue;
+            }
+            at = w->next++;
+            e = VECTOR_ELT(w->list, at);
+            if (TYPEOF(e) != VECSXP) continue;
+            if (rdz_is_table(e)) {
+                SET_VECTOR_ELT(w->list, at, rdz_restore_call(restore, e));
+            } else if (!Rf_isObject(e)) {
+                if (depth == cap) {
+                    rdz_walk *grown = (rdz_walk *)(void *)R_alloc(2 * cap, sizeof *stack);
+                    memcpy(grown, stack, cap * sizeof *stack);
+                    stack = grown;
+                    cap *= 2;
+                }
+                stack[depth].list = e;
+                stack[depth++].next = 0;
+            }
+        }
+    }
+    out = TYPEOF(root) == VECSXP && rdz_is_table(root) ? rdz_restore_call(restore, root) : root;
+    UNPROTECT(1);
+    return out;
+}
+
+SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP restore, int *native)
 {
     const char *p = rdz_path(path);
     rdz_settings set = rdz_settings_of(settings);
@@ -354,10 +426,11 @@ SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select)
         UNPROTECT(2);
         return rdz_failure(&e);
     }
+    *native = g->r.codec_id == RDZ_CODEC_NATIVE_V1;
     if (g->r.codec_id == RDZ_CODEC_NATIVE_V1) {
         int failed;
         /* the native reader takes the open reader over */
-        out = PROTECT(rdz_native_read_r(&g->r, set.threads, select, &e, &failed));
+        out = PROTECT(rdz_native_read_r(&g->r, set.threads, select, restore, &e, &failed));
         rdz_gen_in_finalize(ptr);
         UNPROTECT(3);
         return failed ? rdz_failure(&e) : out;
@@ -371,6 +444,7 @@ SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select)
     }
     out = PROTECT(R_UnwindProtect(rdz_gen_unserialize, g, rdz_gen_in_cleanup, ptr, cont));
     rdz_gen_in_finalize(ptr);
+    if (restore != R_NilValue) out = rdz_restore_tables(out, restore);
     UNPROTECT(3);
     return out;
 }
