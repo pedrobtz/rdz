@@ -23,6 +23,8 @@
 #include <R.h>
 #include <Rinternals.h>
 
+#include <zufast/hash.h>
+
 #include "../core/rdz_pipeline.h"
 #include "../rdz_r.h"
 
@@ -183,6 +185,61 @@ static void rdz_gen_out_cleanup(void *data, Rboolean jump)
     if (jump) rdz_gen_out_finalize((SEXP)data);
 }
 
+/* ---- the content hash of a generic value -------------------------------------------- */
+
+/* R serialization version 2 (ALTREP written as its values) past its 14-byte
+   header (which names the writing R's version), as digest hashes R values,
+   streamed into XXH3-128: nothing allocated, so an R error mid-stream loses
+   nothing. */
+typedef struct {
+    zuf_hasher h;
+    size_t skip;
+} rdz_hash_stream;
+
+static void rdz_hash_out_bytes(R_outpstream_t stream, void *buf, int n)
+{
+    rdz_hash_stream *hs = (rdz_hash_stream *)stream->data;
+    const unsigned char *p = (const unsigned char *)buf;
+    size_t len = (size_t)n;
+    if (hs->skip) {
+        size_t drop = hs->skip < len ? hs->skip : len;
+        hs->skip -= drop;
+        p += drop;
+        len -= drop;
+    }
+    if (len) zuf_hasher_update(&hs->h, p, len);
+}
+
+static void rdz_hash_out_char(R_outpstream_t stream, int c)
+{
+    unsigned char b = (unsigned char)c;
+    rdz_hash_out_bytes(stream, &b, 1);
+}
+
+void rdz_generic_hash(SEXP x, uint8_t out[16])
+{
+    static const unsigned char magic[8] = {'R', 'D', 'Z', 'H', 1, 'G', 0, 0};
+    rdz_hash_stream hs;
+    struct R_outpstream_st stream;
+    zuf_digest128 d;
+    zuf_hasher_init(&hs.h, 0);
+    zuf_hasher_update(&hs.h, magic, sizeof magic);
+    hs.skip = 14; /* "X\n", then the format, R's and the reader's minimum versions */
+    R_InitOutPStream(&stream, (R_pstream_data_t)&hs, R_pstream_xdr_format, 2, rdz_hash_out_char,
+                     rdz_hash_out_bytes, NULL, R_NilValue);
+    R_Serialize(x, &stream);
+    d = zuf_hasher_digest128(&hs.h);
+    zb_wr_u64le(out, d.low);
+    zb_wr_u64le(out + 8, d.high);
+}
+
+SEXP rdz_c_hash_generic(SEXP x)
+{
+    uint8_t digest[16];
+    rdz_generic_hash(x, digest);
+    return rdz_hash_text(digest);
+}
+
 SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, int fail_after)
 {
     const char *p = rdz_path(path);
@@ -210,6 +267,9 @@ SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, int fail
                                set.block_size, &e)) {
         /* e is set */
     } else {
+        /* the content hash first: the directory the write ends with holds it */
+        rdz_generic_hash(x, g->w.content_hash);
+        g->w.hash_scheme = RDZ_CONTENT_HASH_V1;
         g->pipe.level = set.level;
         g->cur = rdz_gen_next(g);
         R_UnwindProtect(rdz_gen_serialize, g, rdz_gen_out_cleanup, ptr, cont);

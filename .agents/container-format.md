@@ -200,6 +200,36 @@ byte-round-trip tests enforce these layouts. Roles are `0=root`,
 `1=attribute-name`, and `2=attribute-value`; the only Phase 1 attribute flag is
 bit 0 for `names`. All other role, object, and attribute flags are rejected.
 
+### Content hash (since plan-c Stage M)
+
+A directory header of at least 64 bytes holds, after its 40 known bytes, the
+file's content hash: XXH3-128 (seed 0) as a low then a high `u64`, a
+`scheme:u16` and six zero bytes. Scheme 1 is defined below; readers ignore a
+hash whose scheme they do not know, and a file without one (the Rust
+reference's, any 40-byte header) is as valid as before. `rdz_info()` reports
+the hash as `content_hash`, 32 hexadecimal digits, high `u64` first (the
+canonical XXH128 text).
+
+Scheme 1 hashes the value, not its bytes on disk:
+
+- **Native files:** the eight bytes `RDZH 01 N 00 00`, then every object in
+  file order as `type:u16 role:u16 flags:u32 parent:u32 length:u64
+  first_child:u32 child_count:u32 first_attribute:u32 attribute_count:u32`
+  followed by its values: logical, integer and factor codes as little-endian
+  `i32`, doubles as little-endian `u64` bits, each string as its record
+  digest (XXH3-64 of `tag:u8 length:u32` and its bytes) as a little-endian
+  `u64`; then every attribute entry as `owner name_object value_object
+  ordinal flags`, each a `u32`. No encoding, compression, block size,
+  dictionary, preset or thread count enters it, nor whether a vector was
+  ALTREP.
+- **Generic files:** the eight bytes `RDZH 01 G 00 00`, then R serialization
+  version 2 (XDR) of the root without its first 14 bytes (format and R
+  versions), as the digest package hashes R values; so neither the writing
+  R nor ALTREP enters it.
+
+`rdz_hash(x, mode)` computes the same hash for an object in memory, the
+native one when `mode` would write `x` natively.
+
 ## Block directory entry: 64 bytes
 
 | Offset | Width | Field |

@@ -1,5 +1,51 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-06: plan-c Stage M
+
+Content hashes for caches and build tools (container-format.md, "Content
+hash").
+
+**The hash.** Every file records an XXH3-128 hash of its value in the
+directory header's extension (64 bytes; 0.1.0 readers skip it).
+`rdz_hash(x, mode)` computes the same hash for an object in memory.
+
+- **Native files** hash a canonical stream: types, lengths, attribute
+  structure, and values as little-endian bits, with strings as per-record
+  digests. It is independent of preset, threads, blocks, dictionary policy
+  and ALTREP.
+- **Generic files** hash R serialization version 2 minus its header, as
+  digest does.
+- **Where it is computed:** the writer feeds it while writing, through the
+  string encoder, so a dictionary entry is digested once. `rdz_hash()` uses
+  the same accumulator, with digests cached per CHARSXP.
+
+**The helpers.**
+
+- `rdz_info()$content_hash` reads the hash in O(1).
+- `write_rdz(skip_unchanged = TRUE)` leaves a file untouched, bytes and
+  modification time, when it already holds the value.
+- `rdz_verify(path, content = FALSE)` checks every block checksum without
+  decompressing (6 ms for a 35 MB file); with `content = TRUE` it also checks
+  the value against the stored hash.
+
+**Cost, on the 5e6-row mixed frame** (both builds measured in fresh R
+sessions):
+
+| Measurement | Before | After |
+|---|---|---|
+| Write, 1 thread | 142 ms | 152 ms |
+| Write, 8 threads | 77 ms | 88 ms |
+| `rdz_hash(df)` | — | 137 ms (digest's xxhash64: 462 ms) |
+
+**What the tests caught.** The bit-exact hash found that a fixture
+constructor's `-0` became `+0` once R's JIT compiled it; `identical()` cannot
+tell the two apart. The fixtures now build `-0` from bits, and AGENTS.md
+records the trap.
+
+**The corpus.** It was regenerated before release, with each file's hash in
+the manifest. Every platform checks the hashes: the arch legs, big-endian
+s390x included, and the cross-OS exchange.
+
 ## Checkpoint 2026-10-06: plan-c Stage L
 
 Inspection below the root, and tables as written. No format change.

@@ -220,7 +220,7 @@ rdz_block_encodings <- function(path) {
   objects <- le(directory + 16L, 4L)
   attributes <- le(directory + 20L, 4L)
   blocks <- le(directory + 24L, 4L)
-  first <- directory + 40L + 48L * objects + 32L * attributes
+  first <- directory + le(directory + 6L, 2L) + 48L * objects + 32L * attributes
   entry <- first + 64L * (seq_len(blocks) - 1L)
   list(
     encoding = vapply(entry, function(at) le(at + 48L, 2L), numeric(1L)),

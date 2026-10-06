@@ -50,6 +50,11 @@ typedef int (*rdz_emit_fn)(void *ctx, uint16_t encoding, uint64_t count, const u
 
 int rdz_string_encode(const rdz_str_source *src, int policy, rdz_emit_fn emit, void *ectx,
                       rdz_error *e);
+/* The same, feeding each string's record digest, in order, to a content
+   hash (rdz_content.h): a dictionary's entries are digested once. */
+struct rdz_content_s;
+int rdz_string_encode_hashed(const rdz_str_source *src, int policy, rdz_emit_fn emit, void *ectx,
+                             struct rdz_content_s *content, rdz_error *e);
 
 /* Decodes the `count` records of a plain or dictionary-entry block into
    out[0, count), pointing into `block`. */

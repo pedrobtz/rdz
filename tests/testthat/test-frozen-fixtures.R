@@ -39,6 +39,23 @@ test_that("every frozen file reads to its spec's value", {
   }
 })
 
+test_that("every frozen value hashes as its file records, on every platform", {
+  # the content hash is defined by the value, not the platform or the build;
+  # R on x87 (i386) changes NA's payload when copying it (as below)
+  na <- writeBin(c(NA_real_, 0)[1L], raw(), endian = "little")
+  skip_if(!identical(na, as.raw(c(0xa2, 0x07, 0, 0, 0, 0, 0xf0, 0x7f))),
+          "R on this platform changes NaN payloads")
+  manifest <- frozen_manifest()
+  for (spec in frozen_fixture_specs()) {
+    want <- manifest$content_hash[manifest$name == spec$name]
+    path <- file.path(frozen_dir(), paste0(spec$name, ".rdz"))
+    expect_identical(rdz_info(path)$content_hash, want, label = spec$name)
+    if (identical(spec$codec, "native_v1")) {
+      expect_identical(rdz_hash(spec$value(), mode = "native"), want, label = spec$name)
+    }
+  }
+})
+
 test_that("this rdz writes every frozen native speed file's bytes again", {
   # R on x87 (i386) sets the quiet bit of NA_real_, a signalling NaN, when it
   # merely copies it, so a spec's doubles there are not the bits the corpus

@@ -33,6 +33,9 @@
 #include <Rinternals.h>
 #include <Rversion.h>
 
+#include <zubin/rw.h>
+
+#include "../core/rdz_content.h"
 #include "../core/rdz_graph.h"
 #include "../rdz_r.h"
 
@@ -551,6 +554,81 @@ static int rdz_plan_small_parts(rdz_plan *p)
     return parts >= RDZ_SMALL_PARTS_MIN && bytes < (double)RDZ_SMALL_PARTS_BYTES * parts;
 }
 
+/* ---- the content hash (container-format.md, "Content hash") -------------------------- */
+
+/* A string vector into the content hash: each element's record digest, in
+   order. An R character vector's elements are read straight from its data,
+   and a CHARSXP seen before (R's string cache makes equal strings one
+   CHARSXP) is neither checked nor digested again. */
+#define RDZ_STRING_CACHE 65536u /* direct-mapped, by CHARSXP address */
+
+static int rdz_hash_strings(rdz_content *c, const rdz_str_source *src, rdz_error *e)
+{
+    size_t k;
+    if (src->value == rdz_r_value) {
+        SEXP x = (SEXP)src->ctx;
+        const SEXP *elt = STRING_PTR_RO(x);
+        /* R_alloc(): reclaimed when the .Call returns */
+        SEXP *key = (SEXP *)(void *)R_alloc(RDZ_STRING_CACHE, sizeof(SEXP));
+        uint64_t *digest = (uint64_t *)(void *)R_alloc(RDZ_STRING_CACHE, sizeof(uint64_t));
+        memset(key, 0, RDZ_STRING_CACHE * sizeof(SEXP));
+        for (k = 0; k < src->n; k++) {
+            SEXP ch = elt[k];
+            size_t slot = ((uintptr_t)ch >> 4) % RDZ_STRING_CACHE;
+            if (key[slot] != ch) {
+                rdz_str s;
+                if (rdz_r_value(x, k, &s, e)) return 1; /* checks it is native */
+                key[slot] = ch;
+                digest[slot] = rdz_string_digest(&s);
+            }
+            rdz_content_digest(c, digest[slot]);
+        }
+        return 0;
+    }
+    for (k = 0; k < src->n; k++) {
+        rdz_str s;
+        if (src->value(src->ctx, k, &s, e)) return 1;
+        rdz_content_string(c, &s);
+    }
+    return 0;
+}
+
+/* The native content hash of a plan without writing it (rdz_hash()): the
+   stream rdz_graph_write() feeds while writing (rdz_content.h). */
+static int rdz_plan_hash(rdz_plan *p, uint8_t out[16], rdz_error *e)
+{
+    rdz_content content, *c = &content; /* on the stack: the hasher needs its 64-byte alignment */
+    uint32_t i, count = rdz_plan_count(p);
+    rdz_content_begin(c);
+    for (i = 0; i < count; i++) {
+        const rdz_node *n = rdz_plan_node(p, i);
+        rdz_content_node(c, n);
+        switch (n->type) {
+        case RDZ_TYPE_LOGICAL:
+        case RDZ_TYPE_INTEGER:
+        case RDZ_TYPE_FACTOR: rdz_content_values(c, n->values, (size_t)n->length, 4); break;
+        case RDZ_TYPE_DOUBLE: rdz_content_values(c, n->values, (size_t)n->length, 8); break;
+        case RDZ_TYPE_CHARACTER:
+            if (rdz_hash_strings(c, n->strings, e)) return 1;
+            break;
+        default: break;
+        }
+    }
+    rdz_content_attributes(c, (const rdz_attribute *)(const void *)p->attrs.data,
+                           p->attrs.len / sizeof(rdz_attribute));
+    rdz_content_end(c, out);
+    return 0;
+}
+
+/* The canonical XXH128 text of a stored digest: high, then low, in hex. */
+SEXP rdz_hash_text(const uint8_t digest[16])
+{
+    char s[33];
+    snprintf(s, sizeof s, "%016llx%016llx", (unsigned long long)zb_rd_u64le(digest + 8),
+             (unsigned long long)zb_rd_u64le(digest));
+    return Rf_mkString(s);
+}
+
 static void rdz_tick(void *ctx)
 {
     (void)ctx;
@@ -585,6 +663,60 @@ static void rdz_plan_cleanup(void *data, Rboolean jump)
 /* TRUE when written; FALSE when x is not for the native codecs and strict is
    FALSE (automatic mode then writes it generically); a failure otherwise.
    settings: c(level, threads, block size), as rdz_settings() gives them. */
+/* A plan of x behind an external pointer (protect it): planned, or the
+   reason x is not native (automatic mode's policies included unless
+   strict); *out the plan. */
+static SEXP rdz_plan_start(SEXP x, int strict, rdz_plan **out, const char **why)
+{
+    SEXP ptr = PROTECT(R_MakeExternalPtr(NULL, R_NilValue, x));
+    rdz_plan *p;
+    R_RegisterCFinalizerEx(ptr, rdz_plan_finalize, TRUE);
+    p = (rdz_plan *)calloc(1, sizeof(rdz_plan));
+    if (!p) Rf_error("rdz could not allocate memory for a writer");
+    rdz_vec_init(&p->v);
+    zb_buf_alloc(&p->nodes, 0, 0);
+    zb_buf_alloc(&p->objects, 0, 0);
+    zb_buf_alloc(&p->names, 0, 0);
+    zb_buf_alloc(&p->depth, 0, 0);
+    zb_buf_alloc(&p->attrs, 0, 0);
+    zb_buf_alloc(&p->sources, 0, 0);
+    zb_buf_alloc(&p->pairs, 0, 0);
+    R_SetExternalPtrAddr(ptr, p);
+    *out = p;
+    *why = rdz_plan_build(p, x);
+    if (!*why && !strict && rdz_plan_small_parts(p)) *why = "an object of many small parts";
+    UNPROTECT(1);
+    return ptr;
+}
+
+/* The native content hash of x as rdz would write it: its text, FALSE when
+   automatic mode would write it generically, or (strict) an unsupported
+   failure. */
+SEXP rdz_c_hash_native(SEXP x, SEXP strict)
+{
+    rdz_plan *p;
+    const char *why;
+    rdz_error e;
+    uint8_t digest[16];
+    int s = Rf_asLogical(strict);
+    SEXP ptr = PROTECT(rdz_plan_start(x, s, &p, &why));
+    if (!why && rdz_plan_hash(p, digest, &e)) {
+        /* a string the native codecs cannot take (e says which) */
+        rdz_plan_finalize(ptr);
+        UNPROTECT(1);
+        if (e.code == RDZ_E_UNSUPPORTED && !s) return Rf_ScalarLogical(0);
+        return rdz_failure(&e);
+    }
+    rdz_plan_finalize(ptr);
+    UNPROTECT(1);
+    if (why) {
+        if (!s) return Rf_ScalarLogical(0);
+        rdz_unsupported(&e, why);
+        return rdz_failure(&e);
+    }
+    return rdz_hash_text(digest);
+}
+
 SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy, SEXP settings)
 {
     const char *p = rdz_path(path);
@@ -594,25 +726,10 @@ SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy, SEXP se
     if (TYPEOF(settings) != INTSXP || XLENGTH(settings) != 3) {
         Rf_error("`settings` must be an integer vector of length 3.");
     }
-    ptr = PROTECT(R_MakeExternalPtr(NULL, R_NilValue, x));
-    R_RegisterCFinalizerEx(ptr, rdz_plan_finalize, TRUE);
+    ptr = PROTECT(rdz_plan_start(x, Rf_asLogical(strict), &call.p, &why));
     cont = PROTECT(R_MakeUnwindCont());
-    call.p = (rdz_plan *)calloc(1, sizeof(rdz_plan));
-    if (!call.p) Rf_error("rdz could not allocate memory for a writer");
-    rdz_vec_init(&call.p->v);
-    zb_buf_alloc(&call.p->nodes, 0, 0);
-    zb_buf_alloc(&call.p->objects, 0, 0);
-    zb_buf_alloc(&call.p->names, 0, 0);
-    zb_buf_alloc(&call.p->depth, 0, 0);
-    zb_buf_alloc(&call.p->attrs, 0, 0);
-    zb_buf_alloc(&call.p->sources, 0, 0);
-    zb_buf_alloc(&call.p->pairs, 0, 0);
-    R_SetExternalPtrAddr(ptr, call.p);
-
-    why = rdz_plan_build(call.p, x);
-    if (!why && !Rf_asLogical(strict) && rdz_plan_small_parts(call.p)) {
-        why = "an object of many small parts";
-    }
+    /* the writer computes the content hash as it goes */
+    call.p->v.hash_content = 1;
     if (why) {
         rdz_plan_finalize(ptr);
         UNPROTECT(2);

@@ -81,12 +81,12 @@ test_that("only the selected parts are read", {
   nobj <- sum(as.numeric(bytes[dir + 17:20]) * 256^(0:3))
   natt <- sum(as.numeric(bytes[dir + 21:24]) * 256^(0:3))
   names_of <- vapply(seq_len(nobj) - 1L, function(i) {
-    e <- dir + 40 + 48 * i
+    e <- dir + dir_header_len(bytes, dir) + 48 * i
     sum(as.numeric(bytes[e + 11:12]) * 256^(0:1)) # type tag
   }, numeric(1L))
   b <- which(names_of == 2)[[2L]] - 1L # the second integer object
-  first_block <- sum(as.numeric(bytes[dir + 40 + 48 * b + 41:44]) * 256^(0:3))
-  entry <- dir + 40 + 48 * nobj + 32 * natt + 64 * first_block
+  first_block <- sum(as.numeric(bytes[dir + dir_header_len(bytes, dir) + 48 * b + 41:44]) * 256^(0:3))
+  entry <- dir + dir_header_len(bytes, dir) + 48 * nobj + 32 * natt + 64 * first_block
   payload <- le_u64(bytes, entry + 16)
   bytes[payload + 1L] <- xor(bytes[payload + 1L], as.raw(0xff))
   writeBin(bytes, path)

@@ -147,7 +147,7 @@ test_that("a corrupt numeric record is a classed error", {
   stored_len <- sum(as.numeric(bytes[(32L + 33L):(32L + 36L)]) * 256^(0:3))
   stored <- bytes[(32L + 48L + 1L):(32L + 48L + stored_len)]
   bytes[(32L + 41L):(32L + 48L)] <- hash_le(stored)
-  entry <- dir_off + 40L + 48L
+  entry <- dir_off + sum(as.numeric(bytes[dir_off + 7:8]) * 256^(0:1)) + 48L # one object entry
   bytes[(entry + 57L):(entry + 64L)] <- hash_le(stored)
   dir_len <- sum(as.numeric(bytes[(n - 23L):(n - 16L)]) * 256^(0:7))
   bytes[(n - 15L):(n - 8L)] <- hash_le(bytes[(dir_off + 1L):(dir_off + dir_len)])

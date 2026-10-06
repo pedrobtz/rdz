@@ -25,10 +25,16 @@ frozen_strings <- function() {
   c("plain", NA, "", frozen_utf8("été ☃"), latin1, bytes)
 }
 
+# -0 from its bits: R's byte compiler folds the literal `-0` to +0, so a
+# function's -0 changes once the JIT compiles it
+frozen_neg_zero <- function() {
+  readBin(as.raw(c(0, 0, 0, 0, 0, 0, 0, 0x80)), "double", endian = "little")
+}
+
 frozen_doubles <- function() {
   # NaN payloads and -0 as bits, never as long literals
   na_payload <- readBin(as.raw(c(1, 0, 0, 0, 0, 0, 0xf8, 0x7f)), "double", endian = "little")
-  c(0, -0, 1.5, -2^-1074, 2^1023, Inf, -Inf, NA, NaN, na_payload, 2^-24)
+  c(0, frozen_neg_zero(), 1.5, -2^-1074, 2^1023, Inf, -Inf, NA, NaN, na_payload, 2^-24)
 }
 
 frozen_frame <- function(n) {
@@ -75,7 +81,7 @@ frozen_fixture_specs <- function() {
     list(name = "dbl_decimal", value = function() {
       c(round(100 + cumsum(c(0, (frozen_hash(9999L, 41L) - 20L) / 100)), 2),
         1.7e9 + frozen_hash(5000L, 30000000L) / 1000,
-        replace(frozen_hash(3000L, 500L) / 10, c(7L, 99L), c(NA, -0)))
+        replace(frozen_hash(3000L, 500L) / 10, c(7L, 99L), c(NA, frozen_neg_zero())))
     }),
     list(name = "chr_plain", value = function() rep_len(frozen_strings(), 600L)),
     list(name = "chr_dictionary", value = function() {

@@ -83,6 +83,16 @@
 #define RDZ_WRITER_PATCH 0u
 #define RDZ_WRITER_IS_DEV 1
 
+/* The content hash (Stage M): a directory header of at least 64 bytes
+   holds, after the 40 known ones, the XXH3-128 of the value (low u64, high
+   u64) and the scheme that defines it (u16; 1: container-format.md,
+   "Content hash"), then six zero bytes. Readers that do not know the scheme
+   ignore the hash. */
+#define RDZ_DIRECTORY_HEADER_HASHED_LEN 64u
+#define RDZ_DH_CONTENT_HASH             40u
+#define RDZ_DH_CONTENT_HASH_SCHEME      56u
+#define RDZ_CONTENT_HASH_V1             1u
+
 /* Directory entries may be wider than these, never narrower; readers skip
    the extra bytes. */
 #define RDZ_MAX_ENTRY_WIDTH 256u

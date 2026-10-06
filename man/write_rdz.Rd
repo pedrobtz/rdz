@@ -4,7 +4,7 @@
 \alias{write_rdz}
 \title{Write an R Object to an rdz File}
 \usage{
-write_rdz(x, path, mode = c("auto", "native", "r"))
+write_rdz(x, path, mode = c("auto", "native", "r"), skip_unchanged = FALSE)
 }
 \arguments{
 \item{x}{An R object to serialize.}
@@ -14,15 +14,22 @@ write_rdz(x, path, mode = c("auto", "native", "r"))
 \item{mode}{Codec selection. \code{"auto"} uses a native codec only when the
 complete value is supported and otherwise uses whole-root R serialization;
 \code{"native"} rejects unsupported values; \code{"r"} forces R serialization.}
+
+\item{skip_unchanged}{Whether to leave an existing file untouched (its
+bytes and modification time) when it already holds \code{x}: when its stored
+content hash equals \code{\link[=rdz_hash]{rdz_hash()}} of \code{x} under the same \code{mode}. For caches
+and build tools that key on files.}
 }
 \value{
 \code{path}, invisibly.
 }
 \description{
 \code{write_rdz()} writes an object through the versioned \code{rdz} block container.
-Plain logical vectors and logical vectors with a supported \code{names} attribute
-use the native two-bit codec. Other objects use a whole-root, portable R XDR
-stream in automatic mode, written in blocks of 1 MiB.
+Logical, integer, double and character vectors, factors, lists and data
+frames, nested and with their attributes, are stored natively; anything
+else (in automatic mode) goes whole through R serialization, streamed in
+blocks of 1 MiB. Every file records the object's content hash
+(\code{\link[=rdz_hash]{rdz_hash()}}).
 }
 \details{
 Two options control how blocks are stored and how many threads do the

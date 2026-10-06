@@ -1,45 +1,45 @@
-name	preset	codec	bytes	sha256	encodings	compressions	writer
-lgl_kinds_speed	speed	native_v1	36742	e660462a070560bdfbbf8904627ff1310e74076bb586e077446c6602d9b826ff	3 4	0	rdz 0.0.0 (development)
-lgl_kinds_balanced	balanced	native_v1	1825	2a4b8975a87853813656b2dfd4d2d8c6bc28865858c60d452d880ed01c4f9721	3 4	0 1	rdz 0.0.0 (development)
-lgl_runs_speed	speed	native_v1	320	b280af29003cde3a8b521ddbf5fc71bc8a58fd7d965b3438993296f7c87e23cf	6	0	rdz 0.0.0 (development)
-lgl_runs_balanced	balanced	native_v1	320	b280af29003cde3a8b521ddbf5fc71bc8a58fd7d965b3438993296f7c87e23cf	6	0	rdz 0.0.0 (development)
-lgl_periodic_speed	speed	native_v1	282	5b350c23a856bb43b5e5707730aece810d6c1ae0ee9a93cadd1bc9717c086eb8	7	0	rdz 0.0.0 (development)
-lgl_periodic_balanced	balanced	native_v1	282	5b350c23a856bb43b5e5707730aece810d6c1ae0ee9a93cadd1bc9717c086eb8	7	0	rdz 0.0.0 (development)
-lgl_sparse_named_speed	speed	native_v1	49645	4e2b9942fa051f9661e9e88b5cfdb4a6d017f9e1b5a28f28f22700d714ac189e	2 5	0	rdz 0.0.0 (development)
-lgl_sparse_named_balanced	balanced	native_v1	4561	f852a929b551410e8e8fa13678ce92372b04a1019ff1894ca54979fbfe64770f	2 5	0 1	rdz 0.0.0 (development)
-int_kinds_speed	speed	native_v1	187836	ad70c7e763edb69159274b9d05e5aa9887cec7857314576b989a21eb5ebfcf00	10 13	0	rdz 0.0.0 (development)
-int_kinds_balanced	balanced	native_v1	5243	a535f5bb4817fcc78b38df1dbbfa310eb0886108ad71493d9634b33b40c1b210	11 13	0 1	rdz 0.0.0 (development)
-int_delta_speed	speed	native_v1	288	e568a9414e37a5831e7f921174152df613f0900a8e4e26c16578848abf511f1d	13	0	rdz 0.0.0 (development)
-int_delta_balanced	balanced	native_v1	288	e568a9414e37a5831e7f921174152df613f0900a8e4e26c16578848abf511f1d	13	0	rdz 0.0.0 (development)
-int_runs_speed	speed	native_v1	304	d69a3b62ddebc2af69b92793786302ce98872d1cbc1a777f3b2859cae9e2c488	14	0	rdz 0.0.0 (development)
-int_runs_balanced	balanced	native_v1	304	d69a3b62ddebc2af69b92793786302ce98872d1cbc1a777f3b2859cae9e2c488	14	0	rdz 0.0.0 (development)
-dbl_kinds_speed	speed	native_v1	24672	235653cf3ea52a6b30035de0e1a8aceea4b25f2fe351b8a028a22848eafcd912	20 22	0	rdz 0.0.0 (development)
-dbl_kinds_balanced	balanced	native_v1	6354	61f3d89d51943b561d620f18e2dcced0c2fc897d195e515b1300c4c38a043d27	20 22	1	rdz 0.0.0 (development)
-dbl_decimal_speed	speed	native_v1	144272	b12c053967e8ebea8ca2261c022ed9a81c44ea93b83a515cf5cdea6faa92838c	20	0	rdz 0.0.0 (development)
-dbl_decimal_balanced	balanced	native_v1	25360	457322758105b54c8b173be4e271f2b757a571e499795441e3cbabba748be236	23	1	rdz 0.0.0 (development)
-chr_plain_speed	speed	native_v1	1042	fcee3aad2a7e6a846a9b80034408518e9ec015f07598b69b6d8efbc5629d116d	8 9	0	rdz 0.0.0 (development)
-chr_plain_balanced	balanced	native_v1	460	8892d3d55474a3c0c2f80843004a2d19b71c03bf15045a65c80044bdc16f7924	8 9	0 1	rdz 0.0.0 (development)
-chr_dictionary_speed	speed	native_v1	80538	9da9aa53fff2467490140c87fb8b4c1f8bbeeeeb166d6cd1907e585c2064fe66	8 9	0	rdz 0.0.0 (development)
-chr_dictionary_balanced	balanced	native_v1	571	c4cbff8afb118e13bfbfae82007cfb7ac00d1a9159dfc2b1e4a825d5f72f25ae	8 9	0 1	rdz 0.0.0 (development)
-chr_named_speed	speed	native_v1	671	a357b4cfe56980d7b54e2f60896f97749d3253c4caae31c50325d1a2660b6b93	2	0	rdz 0.0.0 (development)
-chr_named_balanced	balanced	native_v1	671	a357b4cfe56980d7b54e2f60896f97749d3253c4caae31c50325d1a2660b6b93	2	0	rdz 0.0.0 (development)
-factor_speed	speed	native_v1	962	e3adead2eae1c273b51789a1f83cdc18d41dc1b488273124e89487081c738115	2 12	0	rdz 0.0.0 (development)
-factor_balanced	balanced	native_v1	480	659fb53b19a078c1ea4fba383ddfa5202afaeb0393fa42e3c27a420be58d4e2c	2 12	0 1	rdz 0.0.0 (development)
-ordered_extra_speed	speed	native_v1	828	dce68063853b68b3a99edbeadd9311ad77cc9635040f4473079ca43722e3ac7d	2 10	0	rdz 0.0.0 (development)
-ordered_extra_balanced	balanced	native_v1	828	4ede7c523858e41897731f4c99d415632e292408fc751bd8e82bdf72580c453d	2 11	0	rdz 0.0.0 (development)
-empty_vectors_speed	speed	native_v1	1220	8dcf9a1d792c68ad91c0060dfa389da0e3795ee05466a166696d3392a230f477	2 4 10 20	0	rdz 0.0.0 (development)
-empty_vectors_balanced	balanced	native_v1	1220	8dcf9a1d792c68ad91c0060dfa389da0e3795ee05466a166696d3392a230f477	2 4 10 20	0	rdz 0.0.0 (development)
-nested_list_speed	speed	native_v1	2136	ab9e416f83ea7c843011f75ba52f20affbdea246b4b97b39f58f3174f1f44c90	2 3 10 20	0	rdz 0.0.0 (development)
-nested_list_balanced	balanced	native_v1	2136	ff1e3ea510c1f20d043bd35f216f16170b7d5397cceba692acc858bb06d34cff	2 3 11 21	0	rdz 0.0.0 (development)
-frame_speed	speed	native_v1	19757	f64b569258204a5e6b994d6b8203e972541974ff32bc7908675ce547c481b048	2 4 8 9 12 13 20	0	rdz 0.0.0 (development)
-frame_balanced	balanced	native_v1	4883	43c51cb069af9dbd20e1b3082d7d8af320ac264d0abe6425b34eb3db3a85e7a4	2 4 8 9 12 13 20 21	0 1	rdz 0.0.0 (development)
-frame_row_names_speed	speed	native_v1	2616	c2bb3e24eefb48c72e985247599f668fb10b63617327ac0fd78ecf342dc93fc5	2 4 12 20	0	rdz 0.0.0 (development)
-frame_row_names_balanced	balanced	native_v1	2616	10be8140128897778c5c8b5b06693d0df370de1088d89777db7946929156735d	2 4 12 21	0	rdz 0.0.0 (development)
-frame_classed_speed	speed	native_v1	1648	73486b1f45ec2bfce2fc6d95ba5ced6e02d6d5406f0d566850fd2c3e1bf3a759	2 12	0	rdz 0.0.0 (development)
-frame_classed_balanced	balanced	native_v1	1648	73486b1f45ec2bfce2fc6d95ba5ced6e02d6d5406f0d566850fd2c3e1bf3a759	2 12	0	rdz 0.0.0 (development)
-attributes_speed	speed	native_v1	5317	179f4c2d1bab7dfa0d95b8848d12d463cd05e05e707e5789b28cd7038e89038d	2 10 12 20	0	rdz 0.0.0 (development)
-attributes_balanced	balanced	native_v1	5317	973af401f7b3d3a78c281b9fb040edb0af098b8c89b1c415446b7f5e58282703	2 11 12 21	0	rdz 0.0.0 (development)
-gen_rare_speed	speed	r_serial_v3	836	db356bf60e8602f88d226ee2233f842df94611dc76a82433115dfe024bed8714	0	0	rdz 0.0.0 (development)
-gen_rare_balanced	balanced	r_serial_v3	760	9c88343121dff39e2682727562c69ed40b164930a261c42df27cd7989f7c66c9	0	1	rdz 0.0.0 (development)
-gen_large_speed	speed	r_serial_v3	1100804	b720bbd2a1c2725ed79a657dfb735016f9792a5266bd7ef5009075c3933fd5fd	0	0	rdz 0.0.0 (development)
-gen_large_balanced	balanced	r_serial_v3	6659	1956ee58f69ca5f1b06daf0bebcce8630b7dfc4881e8ff4869123fe8130d7375	0	1	rdz 0.0.0 (development)
+name	preset	codec	bytes	sha256	encodings	compressions	writer	content_hash
+lgl_kinds_speed	speed	native_v1	36766	bcbb87bf4319141edfca2b7b52b967cd606f9458061f018f5c49a706b7542a10	3 4	0	rdz 0.0.0 (development)	2b1556947faafe546b21fd136c428f1e
+lgl_kinds_balanced	balanced	native_v1	1849	e353ec7d08381797070b61b6f5015dca7d8ff86edef554e45077b97b53c552c0	3 4	0 1	rdz 0.0.0 (development)	2b1556947faafe546b21fd136c428f1e
+lgl_runs_speed	speed	native_v1	344	d3d13c1873bc04ffe87375ade46148e215d71549d55ef1ba693046783ec76661	6	0	rdz 0.0.0 (development)	d638155833a03b77dca0cb43b44e6da1
+lgl_runs_balanced	balanced	native_v1	344	d3d13c1873bc04ffe87375ade46148e215d71549d55ef1ba693046783ec76661	6	0	rdz 0.0.0 (development)	d638155833a03b77dca0cb43b44e6da1
+lgl_periodic_speed	speed	native_v1	306	926ef785214f8624721b5f8c268fa4364950ed1e33c956d29bdf4115250eb86f	7	0	rdz 0.0.0 (development)	a13ec9cd34af0c6dceb27faa084f58b0
+lgl_periodic_balanced	balanced	native_v1	306	926ef785214f8624721b5f8c268fa4364950ed1e33c956d29bdf4115250eb86f	7	0	rdz 0.0.0 (development)	a13ec9cd34af0c6dceb27faa084f58b0
+lgl_sparse_named_speed	speed	native_v1	49669	dfd2c261df368485b286c8784101660c73bd2f7d287bfb55a57c9a0264e20160	2 5	0	rdz 0.0.0 (development)	5fba7add2684cc44a8f5a2afbb32c27e
+lgl_sparse_named_balanced	balanced	native_v1	4585	43c40328550f529fbba48fe37c0b8ad189297cdde21ff4f4617fc17cd423372f	2 5	0 1	rdz 0.0.0 (development)	5fba7add2684cc44a8f5a2afbb32c27e
+int_kinds_speed	speed	native_v1	187860	10b03c8b48f9aed78d70552c03d6858c61b2ea1f5b0dade6804ec0aacb731292	10 13	0	rdz 0.0.0 (development)	9e3f73302acaa31f5d25410719743015
+int_kinds_balanced	balanced	native_v1	5267	cf606962f0c4075351fc31f6a07feebdb3af9dd2930a6e00116d08e346f4e4d3	11 13	0 1	rdz 0.0.0 (development)	9e3f73302acaa31f5d25410719743015
+int_delta_speed	speed	native_v1	312	08eef3c9f7439fb1b576ceb2eb6ac896f05bfc5ed9bca2ead41cee7b2228ce24	13	0	rdz 0.0.0 (development)	7ada2f19466bab857b2dc26e3004f38d
+int_delta_balanced	balanced	native_v1	312	08eef3c9f7439fb1b576ceb2eb6ac896f05bfc5ed9bca2ead41cee7b2228ce24	13	0	rdz 0.0.0 (development)	7ada2f19466bab857b2dc26e3004f38d
+int_runs_speed	speed	native_v1	328	c3d2e99e58817eb60483dd7c25cddd5672f0bee50884b3fe6c1eb22ab7b258ac	14	0	rdz 0.0.0 (development)	be7633f9e4becf16b3d3f65e37d77ec5
+int_runs_balanced	balanced	native_v1	328	c3d2e99e58817eb60483dd7c25cddd5672f0bee50884b3fe6c1eb22ab7b258ac	14	0	rdz 0.0.0 (development)	be7633f9e4becf16b3d3f65e37d77ec5
+dbl_kinds_speed	speed	native_v1	24696	4350bbc728a398f274b7e03793a8b1668047e1dc640af39459f963ccda71428b	20 22	0	rdz 0.0.0 (development)	91b0ef1f55089fdf2a1a82efcaa161dd
+dbl_kinds_balanced	balanced	native_v1	6383	3f0197e173574a349fbd58c68f61e56e3fc2160f0cf687d16136b88ba9754d79	20 22	1	rdz 0.0.0 (development)	91b0ef1f55089fdf2a1a82efcaa161dd
+dbl_decimal_speed	speed	native_v1	144296	963a81ab20f2d9acf52c439005c11c3dd84380a5905829db887d19f7600dc386	20	0	rdz 0.0.0 (development)	a400cb27aa01801a7559334b715da396
+dbl_decimal_balanced	balanced	native_v1	25384	6bb24126fe6e5cdaab685973d81602051638c700809fe32d85fda7bc1b002c4d	23	1	rdz 0.0.0 (development)	a400cb27aa01801a7559334b715da396
+chr_plain_speed	speed	native_v1	1066	6e169abb09a7185fabf45c90f06878b91f85e1b9c793a75f235b092c71138b14	8 9	0	rdz 0.0.0 (development)	c8111e7c171d12ebabad6f0235060896
+chr_plain_balanced	balanced	native_v1	484	2d6c22b8a914415996152a70fa856284cd0258e87b7aa75773e90c1ecf85e54e	8 9	0 1	rdz 0.0.0 (development)	c8111e7c171d12ebabad6f0235060896
+chr_dictionary_speed	speed	native_v1	80562	d87a2dd680c41d7dc4cac112453619704616a18d6f70db163286ec1861ed4599	8 9	0	rdz 0.0.0 (development)	f43b4cff009b0b64fe2605c540e3fdef
+chr_dictionary_balanced	balanced	native_v1	595	b53ec4fb5e4c69f032d1259304fcf934175045b0e6da680b5a12997d7ef12482	8 9	0 1	rdz 0.0.0 (development)	f43b4cff009b0b64fe2605c540e3fdef
+chr_named_speed	speed	native_v1	695	e71e99cdb1e32c502f93f2813420b51fcb58c6bd1e29c191eb79ca18a912bd06	2	0	rdz 0.0.0 (development)	99ff8c52f5516d7d8ffbe461c3e97ed2
+chr_named_balanced	balanced	native_v1	695	e71e99cdb1e32c502f93f2813420b51fcb58c6bd1e29c191eb79ca18a912bd06	2	0	rdz 0.0.0 (development)	99ff8c52f5516d7d8ffbe461c3e97ed2
+factor_speed	speed	native_v1	986	9e85f73fea7cc96db290a13596dcd2ce8aaffa55da3e4c5c9a652e5140c5f9ec	2 12	0	rdz 0.0.0 (development)	63de4c01c8187c7b1c562d352838eb19
+factor_balanced	balanced	native_v1	504	10cd3ac976d10e647d060572e4bf4565960cd5a4b3b272b313fa62066d86645c	2 12	0 1	rdz 0.0.0 (development)	63de4c01c8187c7b1c562d352838eb19
+ordered_extra_speed	speed	native_v1	852	c403a93a15ad190233418623f0d646efd7da9e4458270fff5a9f5a563cd97561	2 10	0	rdz 0.0.0 (development)	8f6b09ac9045ce02597b3181a7c14711
+ordered_extra_balanced	balanced	native_v1	852	c46584d73f9c1906327c96c2625b4b58853fd438b119b94fe2e131481e32b824	2 11	0	rdz 0.0.0 (development)	8f6b09ac9045ce02597b3181a7c14711
+empty_vectors_speed	speed	native_v1	1244	21484e4ea592c5687cb5d217d19751e15da09c8d3efe130294601f2fd45ba1d6	2 4 10 20	0	rdz 0.0.0 (development)	bc185110be2f3e7749866844c4aa6334
+empty_vectors_balanced	balanced	native_v1	1244	21484e4ea592c5687cb5d217d19751e15da09c8d3efe130294601f2fd45ba1d6	2 4 10 20	0	rdz 0.0.0 (development)	bc185110be2f3e7749866844c4aa6334
+nested_list_speed	speed	native_v1	2160	f5dd72153188fa033ea4e9798a05cffadc7f359fd2995491b212d7b1658fe439	2 3 10 20	0	rdz 0.0.0 (development)	98674f82e5714aeaf45f1852f19cd51b
+nested_list_balanced	balanced	native_v1	2160	d9477d8c2cb4e3ed32d51048f2461c4b7e6f335e03181e1c72b4b0b3799e0c9d	2 3 11 21	0	rdz 0.0.0 (development)	98674f82e5714aeaf45f1852f19cd51b
+frame_speed	speed	native_v1	19781	87c5cb2ada119b99fa189ef773f6acb3538a16002db56ffd5e83ca6b95db7f19	2 4 8 9 12 13 20	0	rdz 0.0.0 (development)	b397d427b944cda6aad1c0e29cfa3463
+frame_balanced	balanced	native_v1	5222	d733ab3bc77c858f66660733de5bb93e8792169a9bde918efd6d74ba7a81f4e0	2 4 8 9 12 13 23	0 1	rdz 0.0.0 (development)	b397d427b944cda6aad1c0e29cfa3463
+frame_row_names_speed	speed	native_v1	2640	7f984dcb23c22c4dbb21337ec216b68072968f526eeb6bea759ec3b5490b3378	2 4 12 20	0	rdz 0.0.0 (development)	7b0f05189d7155a3c30699e62928ef95
+frame_row_names_balanced	balanced	native_v1	2640	34cd663131ddc0aa8552f1a2de57dde7d009b87e6d5b114db7e6b9c9c5be76e1	2 4 12 21	0	rdz 0.0.0 (development)	7b0f05189d7155a3c30699e62928ef95
+frame_classed_speed	speed	native_v1	1672	32c1ee46e1cbf55a7a507bfa57ebef4763513964c13e3e4341a5543513b5311e	2 12	0	rdz 0.0.0 (development)	994a0be2093745a884d52082cacff857
+frame_classed_balanced	balanced	native_v1	1672	32c1ee46e1cbf55a7a507bfa57ebef4763513964c13e3e4341a5543513b5311e	2 12	0	rdz 0.0.0 (development)	994a0be2093745a884d52082cacff857
+attributes_speed	speed	native_v1	5341	e41fa91e934058cf22053de417d452f9f6b479436c4f9d195bc96dbe57e82da4	2 10 12 20	0	rdz 0.0.0 (development)	dd8fdef98e6830a883403f157de6df70
+attributes_balanced	balanced	native_v1	5341	4d34ab07bb423b5c02b1b0205c01545955c5a1d3598572263e7aeaf385d4679f	2 11 12 21	0	rdz 0.0.0 (development)	dd8fdef98e6830a883403f157de6df70
+gen_rare_speed	speed	r_serial_v3	860	314f69cdd26cd3cce614ce69f5d1a52f4f654ca3984555a55f3b434a50bc656e	0	0	rdz 0.0.0 (development)	bc2685483568f554268e7d64b6d496d9
+gen_rare_balanced	balanced	r_serial_v3	784	b86443c2ea7c3c9200fcaa783511754560c49700865e043e5e33028e3bc81bcf	0	1	rdz 0.0.0 (development)	bc2685483568f554268e7d64b6d496d9
+gen_large_speed	speed	r_serial_v3	1100828	833420328bcc91c3de372d4a0c7a7885735a857e03077122aa2e12d68c18a1fd	0	0	rdz 0.0.0 (development)	fd53939c436d4a3d0ea91bfd9d43477a
+gen_large_balanced	balanced	r_serial_v3	6683	1ae4ea1fe93994f37d49ac35eccbc6804148c760557c13f9ff63eea366005090	0	1	rdz 0.0.0 (development)	fd53939c436d4a3d0ea91bfd9d43477a

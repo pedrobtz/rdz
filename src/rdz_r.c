@@ -115,8 +115,8 @@ SEXP rdz_c_info(SEXP path)
     if (r->codec_id == RDZ_CODEC_R_SERIAL_V3) codec = "r_serial_v3";
     if (r->codec_id == RDZ_CODEC_NATIVE_V1) codec = "native_v1";
 
-    out = PROTECT(Rf_allocVector(VECSXP, 15));
-    names = PROTECT(Rf_allocVector(STRSXP, 15));
+    out = PROTECT(Rf_allocVector(VECSXP, 16));
+    names = PROTECT(Rf_allocVector(STRSXP, 16));
     rdz_set(out, names, 0, "container_version", Rf_ScalarInteger(r->container_version));
     rdz_set(out, names, 1, "codec", Rf_mkString(codec));
     rdz_set(out, names, 2, "codec_id", Rf_ScalarInteger(r->codec_id));
@@ -173,6 +173,11 @@ SEXP rdz_c_info(SEXP path)
                      (r->writer[0] & RDZ_WRITER_DEV) ? " (development)" : "");
         }
         rdz_set(out, names, 14, "writer", Rf_mkString(w));
+    }
+    if (r->hash_scheme == RDZ_CONTENT_HASH_V1) {
+        rdz_set(out, names, 15, "content_hash", rdz_hash_text(r->content_hash));
+    } else {
+        rdz_set(out, names, 15, "content_hash", Rf_ScalarString(NA_STRING));
     }
     Rf_setAttrib(out, R_NamesSymbol, names);
 
@@ -295,4 +300,44 @@ SEXP rdz_test_write_generic(SEXP payload, SEXP synopsis, SEXP path)
         return rdz_failure(&e);
     }
     return R_NilValue;
+}
+
+/* Every block's stored bytes against its checksum, after the header,
+   trailer and directory checks of opening: nothing decompressed, no R
+   object built. The block and stored byte counts. */
+SEXP rdz_c_verify(SEXP path)
+{
+    const char *p = rdz_path(path);
+    rdz_reader *r;
+    rdz_error e;
+    uint32_t i;
+    double bytes = 0;
+    SEXP ptr = PROTECT(rdz_reader_handle(&r)), out;
+    if (rdz_reader_open(r, p, &e)) {
+        rdz_reader_finalize(ptr);
+        UNPROTECT(1);
+        return rdz_failure(&e);
+    }
+    for (i = 0; i < r->nblocks; i++) {
+        const rdz_block *b = &r->blocks[i];
+        if (rdz_reader_read_stored(r, i, &r->scratch, &e)) {
+            rdz_reader_finalize(ptr);
+            UNPROTECT(1);
+            return rdz_failure(&e);
+        }
+        if (rdz_hash(r->scratch.data, r->scratch.len) != b->checksum) {
+            rdz_invalid_block(&e, "checksum mismatch in block %lu", b->sequence);
+            rdz_reader_finalize(ptr);
+            UNPROTECT(1);
+            return rdz_failure(&e);
+        }
+        bytes += (double)b->stored_len;
+        if ((i & 63) == 63) R_CheckUserInterrupt(); /* the reader is ptr's */
+    }
+    out = PROTECT(Rf_allocVector(REALSXP, 2));
+    REAL(out)[0] = (double)r->nblocks;
+    REAL(out)[1] = bytes;
+    rdz_reader_finalize(ptr);
+    UNPROTECT(2);
+    return out;
 }

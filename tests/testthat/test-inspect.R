@@ -59,8 +59,8 @@ test_that("attributes and the schema are read without the parts' data", {
   dir <- le_u64(bytes, n - 32L)
   nobj <- sum(as.numeric(bytes[dir + 17:20]) * 256^(0:3))
   natt <- sum(as.numeric(bytes[dir + 21:24]) * 256^(0:3))
-  first_block <- sum(as.numeric(bytes[dir + 40 + 48 * 3 + 41:44]) * 256^(0:3))
-  entry <- dir + 40 + 48 * nobj + 32 * natt + 64 * first_block
+  first_block <- sum(as.numeric(bytes[dir + dir_header_len(bytes, dir) + 48 * 3 + 41:44]) * 256^(0:3))
+  entry <- dir + dir_header_len(bytes, dir) + 48 * nobj + 32 * natt + 64 * first_block
   payload <- le_u64(bytes, entry + 16)
   bytes[payload + 1L] <- xor(bytes[payload + 1L], as.raw(0xff))
   writeBin(bytes, path)

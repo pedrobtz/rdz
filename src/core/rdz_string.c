@@ -2,6 +2,7 @@
 
 #include <zubin/rw.h>
 
+#include "rdz_content.h"
 #include "rdz_string.h"
 
 #define AUTO_SAMPLE ((size_t)16 * 1024)
@@ -122,7 +123,7 @@ static int record_len(const rdz_str *v, size_t *len, rdz_error *e)
 }
 
 static int encode_plain(const rdz_str_source *src, size_t from, rdz_emit_fn emit, void *ectx,
-                        zb_buf *buf, rdz_error *e)
+                        zb_buf *buf, rdz_content *content, rdz_error *e)
 {
     size_t i, count = 0;
     int emitted = 0;
@@ -131,6 +132,7 @@ static int encode_plain(const rdz_str_source *src, size_t from, rdz_emit_fn emit
         rdz_str v;
         size_t rec;
         if (src->value(src->ctx, i, &v, e) || record_len(&v, &rec, e)) return 1;
+        if (content) rdz_content_string(content, &v);
         if (count != 0 && buf->len + rec > RDZ_BLOCK_SIZE) {
             if (emit(ectx, RDZ_ENCODING_STRING_PLAIN, count, buf->data, buf->len, e)) return 1;
             zb_buf_reset(buf);
@@ -226,8 +228,14 @@ static int encode_indices(const uint32_t *ids, size_t n, zb_buf *out, rdz_error 
 int rdz_string_encode(const rdz_str_source *src, int policy, rdz_emit_fn emit, void *ectx,
                       rdz_error *e)
 {
+    return rdz_string_encode_hashed(src, policy, emit, ectx, NULL, e);
+}
+
+int rdz_string_encode_hashed(const rdz_str_source *src, int policy, rdz_emit_fn emit, void *ectx,
+                             rdz_content *content, rdz_error *e)
+{
     rdz_map ids;
-    zb_buf buf, chunk_ids, first_seen;
+    zb_buf buf, chunk_ids, first_seen, digests; /* digests: per dictionary id */
     size_t start = 0, n = src->n;
     uint32_t next_id = 0;
     int failed = 1;
@@ -239,12 +247,13 @@ int rdz_string_encode(const rdz_str_source *src, int policy, rdz_emit_fn emit, v
         policy = share < AUTO_MAX_DISTINCT_SHARE ? RDZ_DICT_GLOBAL : RDZ_DICT_PLAIN;
     }
     if (policy == RDZ_DICT_PLAIN || n == 0) {
-        failed = encode_plain(src, 0, emit, ectx, &buf, e);
+        failed = encode_plain(src, 0, emit, ectx, &buf, content, e);
         goto done_buf;
     }
     if (map_init(&ids, 1024, e)) goto done_buf;
     zb_buf_alloc(&chunk_ids, 0, 0);
     zb_buf_alloc(&first_seen, 0, 0);
+    zb_buf_alloc(&digests, 0, 0);
     while (start < n) {
         size_t end = n - start < RDZ_DICT_CHUNK_VALUES ? n : start + RDZ_DICT_CHUNK_VALUES;
         size_t i, nfirst, entry_count = 0;
@@ -281,7 +290,7 @@ int rdz_string_encode(const rdz_str_source *src, int policy, rdz_emit_fn emit, v
         }
         if (ids.len > MAX_DICTIONARY_ENTRIES) {
             /* nothing from this chunk has been emitted yet */
-            failed = encode_plain(src, start, emit, ectx, &buf, e);
+            failed = encode_plain(src, start, emit, ectx, &buf, content, e);
             goto done;
         }
         fs = (size_t *)(void *)first_seen.data;
@@ -291,6 +300,13 @@ int rdz_string_encode(const rdz_str_source *src, int policy, rdz_emit_fn emit, v
             rdz_str v;
             size_t rec;
             if (src->value(src->ctx, fs[i], &v, e) || record_len(&v, &rec, e)) goto done;
+            if (content) { /* entries come in id order */
+                uint64_t d = rdz_string_digest(&v);
+                if (zb_put_bytes(&digests, &d, sizeof d)) {
+                    rdz_memory(e, "dictionary digests");
+                    goto done;
+                }
+            }
             if (entry_count != 0 && buf.len + rec > RDZ_BLOCK_SIZE) {
                 if (emit(ectx, RDZ_ENCODING_STRING_DICT_ENTRIES, entry_count, buf.data, buf.len, e)) {
                     goto done;
@@ -305,6 +321,10 @@ int rdz_string_encode(const rdz_str_source *src, int policy, rdz_emit_fn emit, v
             emit(ectx, RDZ_ENCODING_STRING_DICT_ENTRIES, entry_count, buf.data, buf.len, e)) {
             goto done;
         }
+        if (content) {
+            rdz_content_digests(content, (const uint64_t *)(const void *)digests.data, cid,
+                                end - start);
+        }
         if (encode_indices(cid, end - start, &buf, e) ||
             emit(ectx, RDZ_ENCODING_STRING_DICT_INDICES, end - start, buf.data, buf.len, e)) {
             goto done;
@@ -315,6 +335,7 @@ int rdz_string_encode(const rdz_str_source *src, int policy, rdz_emit_fn emit, v
 done:
     zb_buf_release(&chunk_ids);
     zb_buf_release(&first_seen);
+    zb_buf_release(&digests);
     zb_buf_release(&ids.mem);
 done_buf:
     zb_buf_release(&buf);

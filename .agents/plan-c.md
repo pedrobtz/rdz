@@ -338,6 +338,14 @@ elements; nothing else read. **Exit:** one column read faster than fst's `column
 directory; data.tables rebuilt wherever they are read. **Exit:** a part's attributes and the
 tree read with that part's data corrupt.
 
+### Stage M — Content hashes · S
+
+**Status:** done 2026-10-06 (current-state.md, "Checkpoint 2026-10-06: plan-c Stage M").
+
+**Do:** a value hash recorded in every file and computable from an object; `skip_unchanged`;
+`rdz_verify()`. **Exit:** the same hash from object and file on every platform, preset and
+thread count.
+
 ## 7. Gates
 
 - **Differential against the oracle.** Every Rust fixture is read to an `identical()`
