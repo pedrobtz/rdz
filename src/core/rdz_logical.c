@@ -8,6 +8,10 @@
 #define RDZ_HAVE_AVX2_KERNEL 1
 #include <immintrin.h>
 #endif
+#if defined(__x86_64__) && defined(__SSE2__)
+#define RDZ_HAVE_SSE2_KERNEL 1 /* every x86-64 CPU has SSE2 */
+#include <emmintrin.h>
+#endif
 #if defined(__aarch64__) && defined(__ARM_NEON)
 #define RDZ_HAVE_NEON_KERNEL 1
 #include <arm_neon.h>
@@ -147,32 +151,33 @@ static int classify_scalar_from(const int32_t *values, size_t from, size_t n,
 }
 
 #ifdef RDZ_HAVE_AVX2_KERNEL
+/* The valid values are 0, 1 and INT_MIN: NA is the sign bit, which movemask
+   reads directly, and TRUE is bit 0, moved to the sign by a shift. A value
+   is invalid when it has any other bit, or both. Groups of 64. */
 __attribute__((target("avx2"))) static int classify_avx2(const int32_t *values, size_t n,
                                                          uint8_t *tp, uint8_t *ap,
                                                          size_t *done, rdz_error *e)
 {
-    const __m256i zero = _mm256_setzero_si256();
-    const __m256i one = _mm256_set1_epi32(1);
-    const __m256i na = _mm256_set1_epi32(RDZ_LOGICAL_NA);
-    size_t groups = n / 32, g;
+    const __m256i other = _mm256_set1_epi32(0x7ffffffe);
+    size_t groups = n / 64, g;
     for (g = 0; g < groups; g++) {
-        uint32_t t = 0, a = 0;
+        uint64_t t = 0, a = 0;
+        __m256i bad = _mm256_setzero_si256();
         int lane;
-        for (lane = 0; lane < 4; lane++) {
-            __m256i in = _mm256_loadu_si256((const __m256i *)(const void *)(values + g * 32 +
-                                                                             (size_t)lane * 8));
-            __m256i is_zero = _mm256_cmpeq_epi32(in, zero);
-            __m256i is_true = _mm256_cmpeq_epi32(in, one);
-            __m256i is_na = _mm256_cmpeq_epi32(in, na);
-            __m256i ok = _mm256_or_si256(_mm256_or_si256(is_zero, is_true), is_na);
-            if (_mm256_movemask_ps(_mm256_castsi256_ps(ok)) != 0xff) return bad_value(e);
-            t |= (uint32_t)_mm256_movemask_ps(_mm256_castsi256_ps(is_true)) << (lane * 8);
-            a |= (uint32_t)_mm256_movemask_ps(_mm256_castsi256_ps(is_na)) << (lane * 8);
+        for (lane = 0; lane < 8; lane++) {
+            __m256i v = _mm256_loadu_si256((const __m256i *)(const void *)(values + g * 64 +
+                                                                            (size_t)lane * 8));
+            __m256i up = _mm256_slli_epi32(v, 31);
+            bad = _mm256_or_si256(bad, _mm256_or_si256(_mm256_and_si256(v, other),
+                                                       _mm256_and_si256(v, up)));
+            t |= (uint64_t)(uint32_t)_mm256_movemask_ps(_mm256_castsi256_ps(up)) << (lane * 8);
+            a |= (uint64_t)(uint32_t)_mm256_movemask_ps(_mm256_castsi256_ps(v)) << (lane * 8);
         }
-        zb_wr_u32le(tp + g * 4, t);
-        zb_wr_u32le(ap + g * 4, a);
+        if (!_mm256_testz_si256(bad, bad)) return bad_value(e);
+        zb_wr_u64le(tp + g * 8, t);
+        zb_wr_u64le(ap + g * 8, a);
     }
-    *done = groups * 32;
+    *done = groups * 64;
     return 0;
 }
 
@@ -180,6 +185,34 @@ static int cpu_has_avx2(void)
 {
     __builtin_cpu_init();
     return __builtin_cpu_supports("avx2");
+}
+#endif
+
+#ifdef RDZ_HAVE_SSE2_KERNEL
+/* As classify_avx2(), four lanes at a time: the baseline of every x86-64. */
+static int classify_sse2(const int32_t *values, size_t n, uint8_t *tp, uint8_t *ap,
+                         size_t *done, rdz_error *e)
+{
+    const __m128i other = _mm_set1_epi32(0x7ffffffe), zero = _mm_setzero_si128();
+    size_t groups = n / 64, g;
+    for (g = 0; g < groups; g++) {
+        uint64_t t = 0, a = 0;
+        __m128i bad = zero;
+        int lane;
+        for (lane = 0; lane < 16; lane++) {
+            __m128i v = _mm_loadu_si128((const __m128i *)(const void *)(values + g * 64 +
+                                                                         (size_t)lane * 4));
+            __m128i up = _mm_slli_epi32(v, 31);
+            bad = _mm_or_si128(bad, _mm_or_si128(_mm_and_si128(v, other), _mm_and_si128(v, up)));
+            t |= (uint64_t)(uint32_t)_mm_movemask_ps(_mm_castsi128_ps(up)) << (lane * 4);
+            a |= (uint64_t)(uint32_t)_mm_movemask_ps(_mm_castsi128_ps(v)) << (lane * 4);
+        }
+        if (_mm_movemask_epi8(_mm_cmpeq_epi32(bad, zero)) != 0xffff) return bad_value(e);
+        zb_wr_u64le(tp + g * 8, t);
+        zb_wr_u64le(ap + g * 8, a);
+    }
+    *done = groups * 64;
+    return 0;
 }
 #endif
 
@@ -244,7 +277,9 @@ const char *rdz_logical_kernel(void)
 #ifdef RDZ_HAVE_AVX2_KERNEL
     if (cpu_has_avx2()) return "avx2";
 #endif
-#ifdef RDZ_HAVE_NEON_KERNEL
+#if defined(RDZ_HAVE_SSE2_KERNEL)
+    return "sse2";
+#elif defined(RDZ_HAVE_NEON_KERNEL)
     return "neon";
 #else
     return "scalar";
@@ -262,10 +297,15 @@ static int classify(const int32_t *values, size_t n, rdz_planes *p, zb_buf *scra
     p->na_plane = p->plane_len ? scratch->data + p->plane_len : scratch->data; /* NULL + 0 is UB */
     if (!rdz_scalar_only) {
 #ifdef RDZ_HAVE_AVX2_KERNEL
-        if (cpu_has_avx2() && classify_avx2(values, n, p->true_plane, p->na_plane, &done, e)) {
-            return 1;
-        }
+        if (cpu_has_avx2()) {
+            if (classify_avx2(values, n, p->true_plane, p->na_plane, &done, e)) return 1;
+        } else
 #endif
+        {
+#ifdef RDZ_HAVE_SSE2_KERNEL
+            if (classify_sse2(values, n, p->true_plane, p->na_plane, &done, e)) return 1;
+#endif
+        }
 #ifdef RDZ_HAVE_NEON_KERNEL
         if (classify_neon(values, n, p->true_plane, p->na_plane, &done, e)) return 1;
 #endif
@@ -565,6 +605,15 @@ static void dense_expand8(uint8_t t, uint8_t a, int32_t *out)
     uint32_t *o = (uint32_t *)(void *)out;
     vst1q_u32(o, vorrq_u32(vandq_u32(vtstq_u32(vt, lo), one), vandq_u32(vtstq_u32(va, lo), sign)));
     vst1q_u32(o + 4, vorrq_u32(vandq_u32(vtstq_u32(vt, hi), one), vandq_u32(vtstq_u32(va, hi), sign)));
+#elif defined(RDZ_HAVE_SSE2_KERNEL)
+    const __m128i lo = _mm_set_epi32(8, 4, 2, 1), hi = _mm_set_epi32(128, 64, 32, 16);
+    const __m128i one = _mm_set1_epi32(1), sign = _mm_set1_epi32((int)0x80000000u);
+    const __m128i vt = _mm_set1_epi32(t), va = _mm_set1_epi32(a);
+    __m128i *o = (__m128i *)(void *)out;
+    _mm_storeu_si128(o, _mm_or_si128(_mm_and_si128(_mm_cmpeq_epi32(_mm_and_si128(vt, lo), lo), one),
+                                     _mm_and_si128(_mm_cmpeq_epi32(_mm_and_si128(va, lo), lo), sign)));
+    _mm_storeu_si128(o + 1, _mm_or_si128(_mm_and_si128(_mm_cmpeq_epi32(_mm_and_si128(vt, hi), hi), one),
+                                         _mm_and_si128(_mm_cmpeq_epi32(_mm_and_si128(va, hi), hi), sign)));
 #else
     uint32_t *o = (uint32_t *)(void *)out;
     int k;

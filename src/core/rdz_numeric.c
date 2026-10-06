@@ -5,12 +5,47 @@
 #include "rdz_alp.h"
 #include "rdz_numeric.h"
 
-/* NEON byte transposes for the shuffled layouts, on little-endian arm64,
-   where a value's bytes in memory are its little-endian bytes */
+/* Byte transposes for the shuffled layouts with 16-byte vectors, where a
+   value's bytes in memory are its little-endian bytes: NEON on
+   little-endian arm64, SSE2 on x86-64 (every one has it). Each provides
+   load, store, zip (interleave the bytes of a and b: low halves, then high)
+   and uzp (de-interleave a then b: even bytes, then odd), its inverse. */
 #if defined(__aarch64__) && defined(__ARM_NEON) && defined(__BYTE_ORDER__) && \
     __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-#define RDZ_NEON_SHUFFLE 1
+#define RDZ_VEC_SHUFFLE 1
 #include <arm_neon.h>
+typedef uint8x16_t rdz_v16;
+static inline rdz_v16 v16_load(const uint8_t *p) { return vld1q_u8(p); }
+static inline void v16_store(uint8_t *p, rdz_v16 v) { vst1q_u8(p, v); }
+static inline void v16_zip(rdz_v16 a, rdz_v16 b, rdz_v16 *lo, rdz_v16 *hi)
+{
+    uint8x16x2_t z = vzipq_u8(a, b);
+    *lo = z.val[0];
+    *hi = z.val[1];
+}
+static inline void v16_uzp(rdz_v16 a, rdz_v16 b, rdz_v16 *even, rdz_v16 *odd)
+{
+    uint8x16x2_t u = vuzpq_u8(a, b);
+    *even = u.val[0];
+    *odd = u.val[1];
+}
+#elif defined(__x86_64__) && defined(__SSE2__)
+#define RDZ_VEC_SHUFFLE 1
+#include <emmintrin.h>
+typedef __m128i rdz_v16;
+static inline rdz_v16 v16_load(const uint8_t *p) { return _mm_loadu_si128((const __m128i *)(const void *)p); }
+static inline void v16_store(uint8_t *p, rdz_v16 v) { _mm_storeu_si128((__m128i *)(void *)p, v); }
+static inline void v16_zip(rdz_v16 a, rdz_v16 b, rdz_v16 *lo, rdz_v16 *hi)
+{
+    *lo = _mm_unpacklo_epi8(a, b);
+    *hi = _mm_unpackhi_epi8(a, b);
+}
+static inline void v16_uzp(rdz_v16 a, rdz_v16 b, rdz_v16 *even, rdz_v16 *odd)
+{
+    const __m128i low = _mm_set1_epi16(0x00ff);
+    *even = _mm_packus_epi16(_mm_and_si128(a, low), _mm_and_si128(b, low));
+    *odd = _mm_packus_epi16(_mm_srli_epi16(a, 8), _mm_srli_epi16(b, 8));
+}
 #endif
 
 #define INT_NA INT32_MIN
@@ -195,87 +230,103 @@ static int padding_clear(const uint8_t *src, size_t n, unsigned width)
     return (src[bits / 8] >> (bits % 8)) == 0;
 }
 
-#ifdef RDZ_NEON_SHUFFLE
+#ifdef RDZ_VEC_SHUFFLE
 /* 16 values at a time: three rounds of byte de-interleaving (uzp) split 16
    eight-byte values into their 8 byte planes; zip, its inverse, joins them. */
-static size_t shuffle8_neon(const uint8_t *src, size_t n, uint8_t *dst)
+static size_t shuffle8_vec(const uint8_t *src, size_t n, uint8_t *dst)
 {
     size_t i;
     for (i = 0; i + 16 <= n; i += 16) {
         const uint8_t *s = src + 8 * i;
-        uint8x16x2_t a = vuzpq_u8(vld1q_u8(s), vld1q_u8(s + 16)),
-                     b = vuzpq_u8(vld1q_u8(s + 32), vld1q_u8(s + 48)),
-                     c = vuzpq_u8(vld1q_u8(s + 64), vld1q_u8(s + 80)),
-                     d = vuzpq_u8(vld1q_u8(s + 96), vld1q_u8(s + 112));
-        uint8x16x2_t e0 = vuzpq_u8(a.val[0], b.val[0]), e1 = vuzpq_u8(c.val[0], d.val[0]),
-                     o0 = vuzpq_u8(a.val[1], b.val[1]), o1 = vuzpq_u8(c.val[1], d.val[1]);
-        uint8x16x2_t p04 = vuzpq_u8(e0.val[0], e1.val[0]), p26 = vuzpq_u8(e0.val[1], e1.val[1]),
-                     p15 = vuzpq_u8(o0.val[0], o1.val[0]), p37 = vuzpq_u8(o0.val[1], o1.val[1]);
-        vst1q_u8(dst + i, p04.val[0]);
-        vst1q_u8(dst + n + i, p15.val[0]);
-        vst1q_u8(dst + 2 * n + i, p26.val[0]);
-        vst1q_u8(dst + 3 * n + i, p37.val[0]);
-        vst1q_u8(dst + 4 * n + i, p04.val[1]);
-        vst1q_u8(dst + 5 * n + i, p15.val[1]);
-        vst1q_u8(dst + 6 * n + i, p26.val[1]);
-        vst1q_u8(dst + 7 * n + i, p37.val[1]);
+        rdz_v16 a0, a1, b0, b1, c0, c1, d0, d1, e00, e01, e10, e11, o00, o01, o10, o11;
+        rdz_v16 p0, p4, p2, p6, p1, p5, p3, p7;
+        v16_uzp(v16_load(s), v16_load(s + 16), &a0, &a1);
+        v16_uzp(v16_load(s + 32), v16_load(s + 48), &b0, &b1);
+        v16_uzp(v16_load(s + 64), v16_load(s + 80), &c0, &c1);
+        v16_uzp(v16_load(s + 96), v16_load(s + 112), &d0, &d1);
+        v16_uzp(a0, b0, &e00, &e01);
+        v16_uzp(c0, d0, &e10, &e11);
+        v16_uzp(a1, b1, &o00, &o01);
+        v16_uzp(c1, d1, &o10, &o11);
+        v16_uzp(e00, e10, &p0, &p4);
+        v16_uzp(e01, e11, &p2, &p6);
+        v16_uzp(o00, o10, &p1, &p5);
+        v16_uzp(o01, o11, &p3, &p7);
+        v16_store(dst + i, p0);
+        v16_store(dst + n + i, p1);
+        v16_store(dst + 2 * n + i, p2);
+        v16_store(dst + 3 * n + i, p3);
+        v16_store(dst + 4 * n + i, p4);
+        v16_store(dst + 5 * n + i, p5);
+        v16_store(dst + 6 * n + i, p6);
+        v16_store(dst + 7 * n + i, p7);
     }
     return i;
 }
 
-static size_t unshuffle8_neon(const uint8_t *src, size_t n, uint8_t *dst)
+static size_t unshuffle8_vec(const uint8_t *src, size_t n, uint8_t *dst)
 {
     size_t i;
     for (i = 0; i + 16 <= n; i += 16) {
         uint8_t *d = dst + 8 * i;
-        uint8x16x2_t p04 = vzipq_u8(vld1q_u8(src + i), vld1q_u8(src + 4 * n + i)),
-                     p26 = vzipq_u8(vld1q_u8(src + 2 * n + i), vld1q_u8(src + 6 * n + i)),
-                     p15 = vzipq_u8(vld1q_u8(src + n + i), vld1q_u8(src + 5 * n + i)),
-                     p37 = vzipq_u8(vld1q_u8(src + 3 * n + i), vld1q_u8(src + 7 * n + i));
-        uint8x16x2_t e0 = vzipq_u8(p04.val[0], p26.val[0]), e1 = vzipq_u8(p04.val[1], p26.val[1]),
-                     o0 = vzipq_u8(p15.val[0], p37.val[0]), o1 = vzipq_u8(p15.val[1], p37.val[1]);
-        uint8x16x2_t a = vzipq_u8(e0.val[0], o0.val[0]), b = vzipq_u8(e0.val[1], o0.val[1]),
-                     c = vzipq_u8(e1.val[0], o1.val[0]), dd = vzipq_u8(e1.val[1], o1.val[1]);
-        vst1q_u8(d, a.val[0]);
-        vst1q_u8(d + 16, a.val[1]);
-        vst1q_u8(d + 32, b.val[0]);
-        vst1q_u8(d + 48, b.val[1]);
-        vst1q_u8(d + 64, c.val[0]);
-        vst1q_u8(d + 80, c.val[1]);
-        vst1q_u8(d + 96, dd.val[0]);
-        vst1q_u8(d + 112, dd.val[1]);
+        rdz_v16 m0l, m0h, m2l, m2h, m1l, m1h, m3l, m3h, e00, e01, e10, e11, o00, o01, o10, o11;
+        rdz_v16 a0, a1, b0, b1, c0, c1, d0, d1;
+        v16_zip(v16_load(src + i), v16_load(src + 4 * n + i), &m0l, &m0h);
+        v16_zip(v16_load(src + 2 * n + i), v16_load(src + 6 * n + i), &m2l, &m2h);
+        v16_zip(v16_load(src + n + i), v16_load(src + 5 * n + i), &m1l, &m1h);
+        v16_zip(v16_load(src + 3 * n + i), v16_load(src + 7 * n + i), &m3l, &m3h);
+        v16_zip(m0l, m2l, &e00, &e01);
+        v16_zip(m0h, m2h, &e10, &e11);
+        v16_zip(m1l, m3l, &o00, &o01);
+        v16_zip(m1h, m3h, &o10, &o11);
+        v16_zip(e00, o00, &a0, &a1);
+        v16_zip(e01, o01, &b0, &b1);
+        v16_zip(e10, o10, &c0, &c1);
+        v16_zip(e11, o11, &d0, &d1);
+        v16_store(d, a0);
+        v16_store(d + 16, a1);
+        v16_store(d + 32, b0);
+        v16_store(d + 48, b1);
+        v16_store(d + 64, c0);
+        v16_store(d + 80, c1);
+        v16_store(d + 96, d0);
+        v16_store(d + 112, d1);
     }
     return i;
 }
 
-static size_t shuffle4_neon(const uint8_t *src, size_t n, uint8_t *dst)
+static size_t shuffle4_vec(const uint8_t *src, size_t n, uint8_t *dst)
 {
     size_t i;
     for (i = 0; i + 16 <= n; i += 16) {
         const uint8_t *s = src + 4 * i;
-        uint8x16x2_t a = vuzpq_u8(vld1q_u8(s), vld1q_u8(s + 16)),
-                     b = vuzpq_u8(vld1q_u8(s + 32), vld1q_u8(s + 48));
-        uint8x16x2_t p02 = vuzpq_u8(a.val[0], b.val[0]), p13 = vuzpq_u8(a.val[1], b.val[1]);
-        vst1q_u8(dst + i, p02.val[0]);
-        vst1q_u8(dst + n + i, p13.val[0]);
-        vst1q_u8(dst + 2 * n + i, p02.val[1]);
-        vst1q_u8(dst + 3 * n + i, p13.val[1]);
+        rdz_v16 a0, a1, b0, b1, p0, p2, p1, p3;
+        v16_uzp(v16_load(s), v16_load(s + 16), &a0, &a1);
+        v16_uzp(v16_load(s + 32), v16_load(s + 48), &b0, &b1);
+        v16_uzp(a0, b0, &p0, &p2);
+        v16_uzp(a1, b1, &p1, &p3);
+        v16_store(dst + i, p0);
+        v16_store(dst + n + i, p1);
+        v16_store(dst + 2 * n + i, p2);
+        v16_store(dst + 3 * n + i, p3);
     }
     return i;
 }
 
-static size_t unshuffle4_neon(const uint8_t *src, size_t n, uint8_t *dst)
+static size_t unshuffle4_vec(const uint8_t *src, size_t n, uint8_t *dst)
 {
     size_t i;
     for (i = 0; i + 16 <= n; i += 16) {
         uint8_t *d = dst + 4 * i;
-        uint8x16x2_t p02 = vzipq_u8(vld1q_u8(src + i), vld1q_u8(src + 2 * n + i)),
-                     p13 = vzipq_u8(vld1q_u8(src + n + i), vld1q_u8(src + 3 * n + i));
-        uint8x16x2_t a = vzipq_u8(p02.val[0], p13.val[0]), b = vzipq_u8(p02.val[1], p13.val[1]);
-        vst1q_u8(d, a.val[0]);
-        vst1q_u8(d + 16, a.val[1]);
-        vst1q_u8(d + 32, b.val[0]);
-        vst1q_u8(d + 48, b.val[1]);
+        rdz_v16 m0l, m0h, m1l, m1h, a0, a1, b0, b1;
+        v16_zip(v16_load(src + i), v16_load(src + 2 * n + i), &m0l, &m0h);
+        v16_zip(v16_load(src + n + i), v16_load(src + 3 * n + i), &m1l, &m1h);
+        v16_zip(m0l, m1l, &a0, &a1);
+        v16_zip(m0h, m1h, &b0, &b1);
+        v16_store(d, a0);
+        v16_store(d + 16, a1);
+        v16_store(d + 32, b0);
+        v16_store(d + 48, b1);
     }
     return i;
 }
@@ -286,8 +337,8 @@ static size_t unshuffle4_neon(const uint8_t *src, size_t n, uint8_t *dst)
 static void shuffle(const uint8_t *src, size_t n, size_t width, uint8_t *dst)
 {
     size_t i = 0, k;
-#ifdef RDZ_NEON_SHUFFLE
-    i = width == 8 ? shuffle8_neon(src, n, dst) : shuffle4_neon(src, n, dst);
+#ifdef RDZ_VEC_SHUFFLE
+    i = width == 8 ? shuffle8_vec(src, n, dst) : shuffle4_vec(src, n, dst);
 #endif
     for (; i < n; i++) {
         for (k = 0; k < width; k++) dst[k * n + i] = src[i * width + k];
@@ -295,12 +346,12 @@ static void shuffle(const uint8_t *src, size_t n, size_t width, uint8_t *dst)
 }
 
 /* The inverse: n values of `width` little-endian bytes from their planes.
-   Returns how many it wrote as native values (all of them on a
-   little-endian NEON host, else none: the caller assembles the rest). */
+   Returns how many it wrote as native values (the whole groups of 16 with
+   vector transposes, else none: the caller assembles the rest). */
 static size_t unshuffle_native(const uint8_t *src, size_t n, size_t width, uint8_t *dst)
 {
-#ifdef RDZ_NEON_SHUFFLE
-    return width == 8 ? unshuffle8_neon(src, n, dst) : unshuffle4_neon(src, n, dst);
+#ifdef RDZ_VEC_SHUFFLE
+    return width == 8 ? unshuffle8_vec(src, n, dst) : unshuffle4_vec(src, n, dst);
 #else
     (void)src;
     (void)n;
