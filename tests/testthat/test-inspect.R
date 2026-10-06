@@ -91,6 +91,11 @@ test_that("the schema describes the tree depth first", {
   shallow <- rdz_schema(path, recursive = FALSE)$objects
   expect_identical(shallow$path, c("", "$sales", "$models", "$label"))
   expect_output(print(rdz_schema(path)), "\\$at: POSIXct/POSIXt 200")
+  # whole counts, never scientific notation
+  write_rdz(list(df = data.frame(a = seq_len(100000L)), m = matrix(0L, 100000L, 1L)), path)
+  o <- rdz_schema(path)$objects
+  expect_identical(o$shape[o$path == "$df"], "100000 x 1")
+  expect_identical(o$shape[o$path == "$m"], "100000 x 1")
 })
 
 test_that("a generic file needs allow_full for attributes below the root", {

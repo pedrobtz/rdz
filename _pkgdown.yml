@@ -1,0 +1,34 @@
+url: https://pedrobtz.github.io/rdz/
+template:
+  bootstrap: 5
+
+development:
+  mode: auto
+
+reference:
+  - title: Writing and reading
+    contents:
+      - write_rdz
+      - read_rdz
+      - rdz_serialize
+  - title: Several objects
+    contents:
+      - rdz_save
+  - title: Inspecting files
+    contents:
+      - rdz_info
+      - rdz_schema
+      - rdz_attributes
+  - title: Hashes and integrity
+    contents:
+      - rdz_hash
+      - rdz_verify
+  - title: The package
+    contents:
+      - rdz-package
+
+articles:
+  - title: Using rdz
+    navbar: ~
+    contents:
+      - articles/rdz

@@ -1,0 +1,187 @@
+---
+title: "Using rdz"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+rdz writes R objects to files (or raw vectors) that can be read back whole or
+in part. This article walks through a typical session: writing and reading,
+reading only what you need, looking inside a file without reading it, caching
+on content hashes, and keeping several objects in one file.
+
+```{r setup}
+library(rdz)
+```
+
+## Writing and reading
+
+`write_rdz()` and `read_rdz()` work as `saveRDS()` and `readRDS()` do.
+
+```{r}
+path <- tempfile(fileext = ".rdz")
+write_rdz(mtcars, path)
+identical(read_rdz(path), mtcars)
+```
+
+Logical, integer, double and character vectors, factors, lists and data
+frames, nested and with their attributes, are stored *natively*: column by
+column, in checksummed blocks, each vector with the encoding that suits it.
+Anything else (an environment, a function, a model with a formula) goes
+through R's own serializer in the same blocks. Either way the value comes back
+as written.
+
+```{r}
+fit <- lm(mpg ~ wt, data = mtcars)
+write_rdz(fit, path)
+rdz_info(path)$codec
+all.equal(read_rdz(path), fit)
+```
+
+`mode = "native"` makes `write_rdz()` fail instead of falling back, for code
+that relies on selective reads, and `mode = "r"` always uses R's serializer.
+
+## Presets and threads
+
+Two options choose how blocks are stored, and neither changes what a reader
+needs: any setting reads any file.
+
+```{r}
+set.seed(1)
+sales <- data.frame(
+  day = as.Date("2026-01-01") + 0:99999 %/% 100,
+  store = factor(sample(c("north", "south", "east", "west"), 1e5, TRUE)),
+  units = sample.int(50L, 1e5, TRUE),
+  price = round(runif(1e5, 1, 100), 2)
+)
+
+sizes <- sapply(c("speed", "balanced", "compact"), function(preset) {
+  old <- options(rdz.preset = preset)
+  on.exit(options(old))
+  write_rdz(sales, path)
+  file.size(path)
+})
+rds <- tempfile(fileext = ".rds")
+saveRDS(sales, rds)
+c(sizes, saveRDS = file.size(rds))
+```
+
+`"balanced"` (the default) compresses each block with Zstandard at level 1;
+`"compact"` uses a higher level; `"speed"` stores blocks uncompressed.
+`options(rdz.threads = 4)` compresses and decompresses blocks on four
+threads, and the file is byte for byte the same whatever the number.
+
+## Reading only what you need
+
+`select` takes columns of a data frame (or elements of a list) by name or
+position, and `rows` takes rows of a data frame (or elements of a vector).
+Only the blocks that hold them are read and decoded.
+
+```{r}
+write_rdz(sales, path)
+read_rdz(path, select = c("day", "price"), rows = 1:5)
+read_rdz(path, rows = c(99999, 100000))
+```
+
+The result is what `[` gives on the whole value, so classes, factor levels and
+automatic row names come through as they would in memory.
+
+## Looking inside a file
+
+`rdz_info()` reads the header and directory, never the data. `rdz_schema()`
+lists a native file's tree, with each part's class, shape, attributes and
+stored size.
+
+```{r}
+report <- list(sales = sales, note = "Q1", models = list(fit = coef(fit)))
+write_rdz(report, path)
+rdz_schema(path)
+```
+
+`rdz_attributes()` reads the attributes of any part, given its path through
+the tree as names or positions, without decoding that part's data.
+
+```{r}
+rdz_attributes(path, object = c("sales", "store"))
+rdz_attributes(path, object = c("models", "fit"))
+```
+
+Files can also carry their own key-value metadata, such as a source or a code
+version, which `rdz_info()` returns without reading the value.
+
+```{r}
+write_rdz(sales, path, metadata = c(source = "pos-export", version = "2026.10"))
+rdz_info(path)$metadata
+```
+
+## Caching on content
+
+Every file records a 128-bit hash of the value it holds, and `rdz_hash()`
+gives the same hash for an object in memory, whatever the preset, the threads
+or the platform. That makes a file its own cache key.
+
+```{r}
+rdz_info(path)$content_hash
+rdz_hash(sales)
+```
+
+With `skip_unchanged = TRUE`, `write_rdz()` leaves a file that already holds
+the value untouched, bytes and modification time alike, so build tools and
+caches keyed on files see no change.
+
+```{r}
+before <- file.mtime(path)
+Sys.sleep(1)
+write_rdz(sales, path, skip_unchanged = TRUE,
+          metadata = c(source = "pos-export", version = "2026.10"))
+identical(file.mtime(path), before)
+```
+
+`rdz_verify()` checks every block's checksum without building the value, and
+with `content = TRUE` it also checks that the value hashes to the stored hash.
+It returns the path, invisibly, when the file is sound, and an error says
+which check failed when it is not.
+
+```{r, error = TRUE}
+rdz_verify(path, content = TRUE)
+
+damaged <- readBin(path, "raw", file.size(path))
+damaged[200] <- xor(damaged[200], as.raw(0xff)) # one flipped byte
+writeBin(damaged, path)
+rdz_verify(path)
+```
+
+## In memory
+
+`rdz_serialize()` gives the file's bytes as a raw vector, for a database
+column, a message queue or a socket, and every reader takes a raw vector where
+it takes a path.
+
+```{r}
+bytes <- rdz_serialize(sales)
+length(bytes)
+read_rdz(bytes, select = "units", rows = 1:3)
+identical(rdz_unserialize(bytes), sales)
+```
+
+## Several objects in one file
+
+`rdz_save()` and `rdz_load()` work as `save()` and `load()` do, and
+`rdz_load()` reads only the objects you name.
+
+```{r}
+archive <- tempfile(fileext = ".rdz")
+rdz_save(sales, fit, file = archive)
+rm(sales, fit)
+rdz_load(archive, names = "fit")
+exists("fit")
+exists("sales")
+```
+
+The archive is an ordinary rdz file holding a named list, so `read_rdz()` and
+`rdz_schema()` work on it too.
+
+```{r, include = FALSE}
+unlink(c(path, archive, rds))
+```
