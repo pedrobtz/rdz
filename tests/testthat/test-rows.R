@@ -197,3 +197,24 @@ test_that("matrices, time series and one-column matrix columns give their rows",
   write_rdz(df, path, mode = "native")
   expect_identical(read_rdz(path, rows = 9:10), rows_ref(df, 9:10))
 })
+
+test_that("a frame's attributes survive rows =, whole, even when shared", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  v <- as.numeric(1:600) # 4,800 bytes: shared, and the attribute is met first
+  df <- data.frame(a = v)
+  attr(df, "x") <- v
+  attr(df, "note") <- "kept"
+  write_rdz(df, path)
+  got <- read_rdz(path, rows = 2:3)
+  ref <- df[2:3, , drop = FALSE]
+  rownames(ref) <- NULL
+  expect_identical(got, ref)
+  expect_identical(attr(got, "x"), v)
+  expect_identical(attr(got, "note"), "kept")
+  # the reader refuses to window the shared vector (it would cut the
+  # attribute short), so the value is read whole
+  raw <- .Call(rdz:::rdz_c_read, path, rdz:::rdz_settings(0L), NULL, c(1, 3))
+  expect_true(inherits(raw, "rdz_failure"))
+  expect_identical(attr(raw, "kind"), "unsupported")
+})
