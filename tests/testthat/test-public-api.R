@@ -286,4 +286,10 @@ test_that("writing through a symbolic link replaces the file it names", {
   expect_identical(read_rdz(target), 4:6)
   expect_identical(read_rdz(link), 4:6)
   expect_setequal(list.files(dir), c("data.rdz", "latest.rdz"))
+  # a relative link, through another link
+  rel <- file.path(dir, "rel.rdz")
+  skip_if_not(file.symlink("latest.rdz", rel), "no relative links here")
+  write_rdz(7:9, rel)
+  expect_identical(read_rdz(target), 7:9)
+  expect_setequal(list.files(dir), c("data.rdz", "latest.rdz", "rel.rdz"))
 })

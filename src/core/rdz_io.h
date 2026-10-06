@@ -46,6 +46,7 @@ typedef struct {
     int have_mode;
     unsigned mode;
     int to_memory; /* writing into `memory` instead of a file (rdz_serialize) */
+    int links;     /* symbolic links followed to the destination */
     zb_buf memory;
 } rdz_outfile;
 
