@@ -18,6 +18,8 @@ through R's own serializer, streamed through the same blocks.
 - **Generic:** anything else, such as environments, closures, calls, complex
   and raw vectors, and S4 objects, goes through R serialization as one whole
   root, so sharing and references are kept.
+- **Selective:** `read_rdz(path, select = )` reads some columns of a data frame
+  or some elements of a list, decoding nothing else.
 - **Inspectable:** `rdz_info()`, `rdz_schema()` and `rdz_attributes()` read a
   native file's directory and attributes without decoding its data.
 - **Checked:** every header, directory and block carries an XXH3-64 checksum,
@@ -44,6 +46,7 @@ library(rdz)
 path <- tempfile(fileext = ".rdz")
 write_rdz(mtcars, path)
 read_rdz(path)
+read_rdz(path, select = c("mpg", "wt"))          # only these columns are read
 rdz_info(path)
 rdz_attributes(path, names = "names")
 

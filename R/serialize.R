@@ -63,23 +63,97 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
 #' `read_rdz()` validates the header, trailer, directory, block headers, bounds,
 #' and block checksums before deserializing a generic payload.
 #'
+#' `select` reads some columns of a data frame or some elements of a list,
+#' by name or by position, in the order given. From a natively written file
+#' only the selected parts are read and decoded; a file written through R
+#' serialization is read whole and then subset. A data frame keeps its row
+#' names and class, and a list its names; the root's other attributes, which
+#' may describe the parts left out (a data.table's key), are not kept, and
+#' [rdz_attributes()] still reads them.
+#'
 #' @param path A single, non-missing path to read.
-#' @returns The R object stored in `path`.
+#' @param select `NULL` (everything), or the columns of a data frame or the
+#'   elements of a list to read: distinct names, or distinct positive
+#'   positions.
+#' @returns The R object stored in `path`, or its selected part.
 #' @examples
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(c(TRUE, FALSE, NA), path)
 #' read_rdz(path)
+#' write_rdz(mtcars, path)
+#' read_rdz(path, select = c("mpg", "wt"))
 #' unlink(path)
 #' @export
-read_rdz <- function(path) {
+read_rdz <- function(path, select = NULL) {
   path <- validate_existing_rdz_path(path)
-  value <- rdz_check(.Call(rdz_c_read, path, rdz_settings()))
+  index <- NULL
+  if (!is.null(select)) {
+    info <- rdz_info(path)
+    if (identical(info$codec, "native_v1")) {
+      index <- rdz_select_index(path, info, select)
+    }
+  }
+  value <- rdz_check(.Call(rdz_c_read, path, rdz_settings(), index))
+  if (!is.null(select) && is.null(index)) {
+    value <- rdz_select_generic(value, select)
+  }
   # A data.table's .internal.selfref is not stored (it is a pointer to the
   # object itself); data.table restores it, as it does for every reader.
   if (inherits(value, "data.table") && requireNamespace("data.table", quietly = TRUE)) {
     value <- data.table::setalloccol(value)
   }
   value
+}
+
+# The 0-based children `select` names in a native file's list or data frame
+# root, reading only its names.
+rdz_select_index <- function(path, info, select) {
+  if (!info$root_type %in% c("list", "data.frame")) {
+    stop("`select` needs a list or a data frame; the file holds ",
+         if (nzchar(info$root_type)) info$root_type else "neither", ".", call. = FALSE)
+  }
+  n <- info$root_length
+  names <- if ("names" %in% info$attribute_names) {
+    rdz_check(.Call(rdz_c_read_native_attribute, path, "names"))
+  }
+  rdz_select_positions(select, n, names) - 1L
+}
+
+# The 1-based positions `select` names among n parts with these names.
+rdz_select_positions <- function(select, n, names) {
+  if (is.character(select)) {
+    if (anyNA(select)) stop("`select` must not contain NA.", call. = FALSE)
+    if (is.null(names)) stop("`select` names parts, but they have no names.", call. = FALSE)
+    at <- match(select, names)
+    if (anyNA(at)) {
+      stop("Unknown in `select`: ", paste(select[is.na(at)], collapse = ", "), call. = FALSE)
+    }
+  } else if (is.numeric(select)) {
+    if (anyNA(select) || any(select != trunc(select)) || any(select < 1) || any(select > n)) {
+      stop("`select` positions must be whole numbers from 1 to ", n, ".", call. = FALSE)
+    }
+    at <- as.integer(select)
+  } else {
+    stop("`select` must be NULL, a character vector or a numeric vector.", call. = FALSE)
+  }
+  if (anyDuplicated(at)) stop("`select` must not repeat a part.", call. = FALSE)
+  at
+}
+
+# The same selection from a value read whole (a generic file): the parts,
+# with their names; a data frame's row names and class.
+rdz_select_generic <- function(value, select) {
+  if (typeof(value) != "list") {
+    stop("`select` needs a list or a data frame.", call. = FALSE)
+  }
+  at <- rdz_select_positions(select, length(value), names(value))
+  out <- unclass(value)[at]
+  attributes(out) <- if (is.null(names(value))) NULL else list(names = names(value)[at])
+  if (is.data.frame(value)) {
+    attr(out, "row.names") <- .row_names_info(value, 0L)
+    class(out) <- class(value)
+  }
+  out
 }
 
 #' Inspect an rdz Container Without Reading Its Payload

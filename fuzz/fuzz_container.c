@@ -104,6 +104,18 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
                 rdz_vec_init(&v);
                 rdz_graph_read(&v, &r, &sinks, 2, NULL, NULL, &e);
                 rdz_vec_free(&v);
+                /* and a selection: objects picked by the input's last byte */
+                {
+                    uint8_t *want = (uint8_t *)calloc(r.nobjects ? r.nobjects : 1, 1);
+                    uint8_t pick = size ? data[size - 1] : 0;
+                    if (want) {
+                        for (k = 0; k < r.nobjects; k++) want[k] = (uint8_t)((pick >> (k % 8)) & 1u);
+                        rdz_vec_init(&v);
+                        rdz_graph_read_some(&v, &r, &sinks, want, 2, NULL, NULL, &e);
+                        rdz_vec_free(&v);
+                        free(want);
+                    }
+                }
             }
             free(g.arena);
         }

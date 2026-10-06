@@ -4,21 +4,36 @@
 \alias{read_rdz}
 \title{Read an R Object from an rdz File}
 \usage{
-read_rdz(path)
+read_rdz(path, select = NULL)
 }
 \arguments{
 \item{path}{A single, non-missing path to read.}
+
+\item{select}{\code{NULL} (everything), or the columns of a data frame or the
+elements of a list to read: distinct names, or distinct positive
+positions.}
 }
 \value{
-The R object stored in \code{path}.
+The R object stored in \code{path}, or its selected part.
 }
 \description{
 \code{read_rdz()} validates the header, trailer, directory, block headers, bounds,
 and block checksums before deserializing a generic payload.
 }
+\details{
+\code{select} reads some columns of a data frame or some elements of a list,
+by name or by position, in the order given. From a natively written file
+only the selected parts are read and decoded; a file written through R
+serialization is read whole and then subset. A data frame keeps its row
+names and class, and a list its names; the root's other attributes, which
+may describe the parts left out (a data.table's key), are not kept, and
+\code{\link[=rdz_attributes]{rdz_attributes()}} still reads them.
+}
 \examples{
 path <- tempfile(fileext = ".rdz")
 write_rdz(c(TRUE, FALSE, NA), path)
 read_rdz(path)
+write_rdz(mtcars, path)
+read_rdz(path, select = c("mpg", "wt"))
 unlink(path)
 }

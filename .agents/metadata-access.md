@@ -47,8 +47,9 @@ rdz_attributes(path, object = NULL, names = NULL, allow_full = FALSE)
 `rdz_info()` returns bounded container information plus the root synopsis.
 `rdz_schema()` returns native object descriptors without allocating leaf vectors.
 `rdz_attributes()` reads all or selected attributes for the root or a stable
-object identifier/path. A later selective reader can reuse the same directory for
-data-frame column projection.
+object identifier/path. `read_rdz(select =)` (plan-c Stage K) reuses the same
+directory for column projection: a data frame's columns or a list's elements,
+by name or position, reading only their blocks.
 
 Every result must say:
 

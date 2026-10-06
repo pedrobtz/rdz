@@ -323,6 +323,13 @@ encoding 23 if it moves the frontier; its guard, fuzzing, frozen fixtures.
 **Exit:** decimal doubles smaller and faster than every compared format, the other
 distributions unchanged, the corpus extended and not rewritten.
 
+### Stage K — Selective reads · S
+
+**Status:** done 2026-10-06 (current-state.md, "Checkpoint 2026-10-06: plan-c Stage K").
+
+**Do:** `read_rdz(select =)` over the existing directory: a data frame's columns, a list's
+elements; nothing else read. **Exit:** one column read faster than fst's `columns =`.
+
 ## 7. Gates
 
 - **Differential against the oracle.** Every Rust fixture is read to an `identical()`

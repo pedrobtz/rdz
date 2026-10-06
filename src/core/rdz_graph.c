@@ -226,7 +226,14 @@ static int decode_values(uint16_t type, const rdz_block *b, const zb_buf *rec, v
 int rdz_graph_read(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sinks, int threads,
                    rdz_tick_fn tick, void *tick_ctx, rdz_error *e)
 {
-    uint32_t next = 0, object = 0;
+    return rdz_graph_read_some(v, r, sinks, NULL, threads, tick, tick_ctx, e);
+}
+
+int rdz_graph_read_some(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sinks,
+                        const uint8_t *want, int threads, rdz_tick_fn tick, void *tick_ctx,
+                        rdz_error *e)
+{
+    uint32_t next = 0, object = 0, owner = 0;
     size_t filled = 0, entries = 0;
     void *dest = NULL;
     const rdz_names_sink *sink = NULL;
@@ -246,6 +253,18 @@ int rdz_graph_read(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sinks, int 
         const rdz_object *o;
         while (next < r->nblocks && v->pipe.next_submit - v->pipe.next_consume < v->pipe.nslots) {
             int must;
+            if (want) {
+                /* the object owning block `next` (blocks run in object
+                   order); an unwanted one's blocks are skipped whole */
+                while (owner < r->nobjects &&
+                       next >= r->objects[owner].first_block + r->objects[owner].block_count) {
+                    owner++;
+                }
+                if (owner < r->nobjects && !want[owner]) {
+                    next = r->objects[owner].first_block + r->objects[owner].block_count;
+                    continue;
+                }
+            }
             s = rdz_pipeline_next(&v->pipe, &must);
             if (rdz_reader_read_stored(r, next, &s->in, e)) {
                 rdz_pipeline_unget(&v->pipe, s);
