@@ -19,23 +19,27 @@ iterations <- as.integer(Sys.getenv("RDZ_BENCH_ITERATIONS", "7"))
 threads_fst(1L)
 options(rdz.threads = 1L)
 
-set.seed(20261006)
+# Each column is built when it is measured and dropped after: a column kept
+# alive (5e6 unique strings) makes every garbage collection during the
+# other reads scan it, which once inflated a read from 70 ms to 540.
 lgl <- function(p) sample(c(FALSE, TRUE, NA), n, TRUE, prob = p)
 cols <- list(
-  lgl_random = lgl(c(1, 1, 1)),
-  lgl_sparse = lgl(c(0.985, 0.01, 0.005)),
-  lgl_runs = rep(c(FALSE, TRUE, NA), each = ceiling(n / 3))[seq_len(n)],
-  int_seq = seq_len(n),
-  int_small = sample.int(100L, n, TRUE),
-  factor = factor(sample(letters, n, TRUE)),
-  dbl_random = runif(n),
-  dbl_prices = round(runif(n, 1, 1000), 2),
-  dbl_time = as.numeric(as.POSIXct("2026-01-01", tz = "UTC")) + cumsum(rexp(n, 10)),
-  chr_dict = sample(c("north", "south", "east", "west", NA), n, TRUE),
-  chr_unique = sprintf("id%08d", sample.int(n))
+  lgl_random = function() lgl(c(1, 1, 1)),
+  lgl_sparse = function() lgl(c(0.985, 0.01, 0.005)),
+  lgl_runs = function() rep(c(FALSE, TRUE, NA), each = ceiling(n / 3))[seq_len(n)],
+  int_seq = function() seq_len(n),
+  int_small = function() sample.int(100L, n, TRUE),
+  factor = function() factor(sample(letters, n, TRUE)),
+  dbl_random = function() runif(n),
+  dbl_prices = function() round(runif(n, 1, 1000), 2),
+  dbl_time = function() as.numeric(as.POSIXct("2026-01-01", tz = "UTC")) + cumsum(rexp(n, 10)),
+  chr_dict = function() sample(c("north", "south", "east", "west", NA), n, TRUE),
+  chr_unique = function() sprintf("id%08d", sample.int(n))
 )
-cols$mixed <- as.data.frame(cols[c("int_small", "dbl_prices", "chr_dict", "factor",
-                                    "lgl_random", "dbl_time")])
+cols$mixed <- function() {
+  data.frame(lapply(cols[c("int_small", "dbl_prices", "chr_dict", "factor", "lgl_random",
+                           "dbl_time")], function(f) f()))
+}
 
 dir <- tempfile("bench-")
 dir.create(dir)
@@ -50,7 +54,11 @@ for (setting in list(c(0L, 0L), c(1L, 50L))) {
   level <- setting[[1L]]
   fst_level <- setting[[2L]]
   for (name in names(cols)) {
-    df <- if (is.data.frame(cols[[name]])) cols[[name]] else data.frame(x = cols[[name]])
+    set.seed(20261006)
+    value <- cols[[name]]()
+    df <- if (is.data.frame(value)) value else data.frame(x = value)
+    rm(value)
+    gc(FALSE)
     rdz_w <- ms(function() write_rdz(df, p, compress = level))
     rdz_w_nohash <- ms(function() write_rdz(df, p, compress = level, hash = FALSE))
     rdz_r <- ms(function() read_rdz(p))
@@ -63,6 +71,7 @@ for (setting in list(c(0L, 0L), c(1L, 50L))) {
       rdz_read = rdz_r, fst_read = fst_r,
       rdz_mb = round(file.size(p) / 2^20, 2), fst_mb = round(file.size(q) / 2^20, 2)
     )
+    rm(df)
   }
 }
 result <- do.call(rbind, rows)
