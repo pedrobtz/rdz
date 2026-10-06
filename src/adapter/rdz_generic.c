@@ -285,13 +285,12 @@ SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP met
             e = g->e;
         } else if (!rdz_writer_finish(&g->w, NULL, 0, NULL, 0, RAW(synopsis),
                                       (size_t)XLENGTH(synopsis), &e)) {
-            SEXP out = R_NilValue;
-            if (!p) { /* the bytes, copied before the writer (which owns them) goes */
-                out = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)g->w.result.len));
-                if (g->w.result.len) memcpy(RAW(out), g->w.result.data, g->w.result.len);
-            }
+            SEXP out = PROTECT(p ? R_NilValue
+                                 : Rf_allocVector(RAWSXP, (R_xlen_t)g->w.result.len));
+            /* the bytes, copied before the writer (which owns them) goes */
+            if (!p && g->w.result.len) memcpy(RAW(out), g->w.result.data, g->w.result.len);
             rdz_gen_out_finalize(ptr);
-            UNPROTECT(p ? 2 : 3);
+            UNPROTECT(3);
             return out;
         }
     }
