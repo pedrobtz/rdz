@@ -116,6 +116,23 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
                         free(want);
                     }
                 }
+                /* and windows: each object's elements [lo, hi), from the input */
+                {
+                    rdz_window *win = (rdz_window *)calloc(r.nobjects ? r.nobjects : 1, sizeof *win);
+                    uint8_t pick = size > 1 ? data[size - 2] : 0;
+                    if (win) {
+                        for (k = 0; k < r.nobjects; k++) {
+                            uint64_t len = r.objects[k].logical_len;
+                            win[k].on = (pick >> (k % 8)) & 1u;
+                            win[k].lo = len ? (uint64_t)pick * 977u % len : 0;
+                            win[k].hi = win[k].lo + (len - win[k].lo) / 2;
+                        }
+                        rdz_vec_init(&v);
+                        rdz_graph_read_window(&v, &r, &sinks, NULL, win, 2, NULL, NULL, &e);
+                        rdz_vec_free(&v);
+                        free(win);
+                    }
+                }
             }
             free(g.arena);
         }

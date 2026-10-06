@@ -25,6 +25,8 @@ void rdz_vec_init(rdz_vec *v)
     v->content_mem = NULL;
     v->metadata = NULL;
     v->metadata_len = 0;
+    zb_buf_alloc(&v->block_plan, 0, 0); /* empty: allocating nothing, cannot fail */
+    zb_buf_alloc(&v->scratch, 0, 0);
 }
 
 void rdz_vec_free(rdz_vec *v)
@@ -32,6 +34,8 @@ void rdz_vec_free(rdz_vec *v)
     free(v->content_mem);
     v->content_mem = NULL;
     zb_buf_release(&v->w.result);
+    zb_buf_release(&v->block_plan);
+    zb_buf_release(&v->scratch);
     v->content = NULL;
     if (v->have_pipe) rdz_pipeline_free(&v->pipe); /* joins the workers first */
     v->have_pipe = 0;
