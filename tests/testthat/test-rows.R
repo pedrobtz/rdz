@@ -171,3 +171,35 @@ test_that("matrix and data frame columns give their rows, as `[` does", {
   write_rdz(ar, path)
   expect_identical(read_rdz(path, rows = 3:4), rows_ref(ar, 3:4))
 })
+
+test_that("a vector shared with a list column is not cut short by the window", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  v <- seq_len(3000L) + 0.5 # large enough to be written once and shared
+  df <- data.frame(a = v)
+  df$l <- I(rep(list(v), 3000L))
+  write_rdz(df, path)
+  expect_identical(rdz_info(path)$codec, "native_v1")
+  got <- read_rdz(path, rows = 2:3)
+  expect_identical(length(got$l[[1L]]), 3000L)
+  expect_identical(got, rows_ref(df, 2:3))
+  # the shared vector first met inside the list column
+  df <- df[c("l", "a")]
+  write_rdz(df, path)
+  expect_identical(read_rdz(path, rows = 5:6), rows_ref(df, 5:6))
+})
+
+test_that("matrices, time series and one-column matrix columns give their rows", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  m <- matrix(1:20, 10)
+  write_rdz(m, path, mode = "native")
+  expect_identical(read_rdz(path, rows = 3:4), m[3:4])
+  t <- ts(1:10, start = 2000)
+  write_rdz(t, path, mode = "native")
+  expect_identical(read_rdz(path, rows = 3:4), t[3:4])
+  df <- data.frame(id = 1:10)
+  df$m <- matrix(1:10, 10, dimnames = list(letters[1:10], "x"))
+  write_rdz(df, path, mode = "native")
+  expect_identical(read_rdz(path, rows = 9:10), rows_ref(df, 9:10))
+})

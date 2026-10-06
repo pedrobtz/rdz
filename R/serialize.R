@@ -171,14 +171,20 @@ read_rdz <- function(path, select = NULL, rows = NULL) {
     rdz_limit_error = function(e) rdz_rows_refused(path, rows, e),
     rdz_unsupported_error = function(e) rdz_rows_refused(path, rows, e)
   )
+  if (is.null(read)) { # a window the reader refuses: the value whole
+    window <- NULL
+    read <- rdz_check(.Call(rdz_c_read, path, rdz_settings(), index, NULL))
+  }
   value <- read[[1L]]
   if (!read[[2L]] && !is.null(select)) value <- rdz_select_generic(value, select)
-  # a native read starts after row window[1]; a generic file is read whole
-  if (!is.null(rows)) value <- rdz_rows_take(value, rows, if (read[[2L]]) window[[1L]] else 0)
+  # a windowed read starts after row window[1]; a whole one at row 1
+  if (!is.null(rows)) value <- rdz_rows_take(value, rows, if (read[[2L]] && !is.null(window)) window[[1L]] else 0)
   value
 }
 
-# Words the reader's refusal of `rows` for people (the directory says why).
+# Words the reader's refusal of `rows` for people (the directory says why),
+# or, for a root that has rows but a window the reader cannot apply (a
+# matrix, a vector shared with a list column), NULL: read it whole.
 rdz_rows_refused <- function(path, rows, e) {
   if (is.null(rows)) stop(e)
   root <- rdz_directory(path)$objects[1L, ]
@@ -190,6 +196,7 @@ rdz_rows_refused <- function(path, rows, e) {
   if (length(rows) && max(rows) > root$length) {
     stop("`rows` must be at most ", root$length, ".", call. = FALSE)
   }
+  if (inherits(e, "rdz_unsupported_error")) return(NULL)
   stop(e)
 }
 

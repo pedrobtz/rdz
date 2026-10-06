@@ -187,6 +187,7 @@ typedef struct {
     zb_buf pairs;   /* scratch: the attributes of the node being visited */
     zb_buf shared;  /* rdz_shared_slot: large vectors met, by address (open addressing) */
     size_t shared_len;
+    SEXP ptr; /* the plan's external pointer: its tag keeps values the plan made */
 } rdz_plan;
 
 static void rdz_plan_free(rdz_plan *p)
@@ -480,12 +481,23 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
         if (a.names == R_NilValue || TYPEOF(a.names) != STRSXP || XLENGTH(a.names) != ncol) {
             return "a data frame with malformed names";
         }
-        /* compact row names are c(NA_integer_, n) or c(NA_integer_, -n) */
+        /* compact row names are c(NA_integer_, -n), automatic, or
+           c(NA_integer_, n), the stored row names 1:n (as from df[1:n, ]):
+           those are written as 1:n, which R makes compact again */
         compact = TYPEOF(a.row_names) == INTSXP && XLENGTH(a.row_names) == 2 &&
                   INTEGER_RO(a.row_names)[0] == NA_INTEGER;
         if (compact) {
             int m = INTEGER_RO(a.row_names)[1];
             nrow = (uint64_t)(m < 0 ? -(int64_t)m : m);
+            if (m > 0) {
+                SEXP seq = PROTECT(Rf_allocVector(INTSXP, m));
+                int *v = INTEGER(seq), j;
+                for (j = 0; j < m; j++) v[j] = j + 1;
+                R_SetExternalPtrTag(p->ptr, Rf_cons(seq, R_ExternalPtrTag(p->ptr)));
+                UNPROTECT(1);
+                a.row_names = seq;
+                compact = 0;
+            }
         } else if (TYPEOF(a.row_names) == INTSXP || TYPEOF(a.row_names) == STRSXP) {
             nrow = (uint64_t)XLENGTH(a.row_names);
         } else {
@@ -637,26 +649,35 @@ static int rdz_plan_small_parts(rdz_plan *p)
    CHARSXP) is neither checked nor digested again. */
 #define RDZ_STRING_CACHE 65536u /* direct-mapped, by CHARSXP address */
 
-static int rdz_hash_strings(rdz_content *c, const rdz_str_source *src, rdz_error *e)
+/* One cache for every string vector of a hash: its keys are CHARSXPs of the
+   value being hashed, alive until the .Call returns. */
+typedef struct rdz_string_cache {
+    SEXP *key;
+    uint64_t *digest;
+} rdz_string_cache;
+
+static int rdz_hash_strings(rdz_content *c, const rdz_str_source *src, rdz_string_cache *cache,
+                            rdz_error *e)
 {
     size_t k;
     if (src->value == rdz_r_value) {
         SEXP x = (SEXP)src->ctx;
         const SEXP *elt = STRING_PTR_RO(x);
-        /* R_alloc(): reclaimed when the .Call returns */
-        SEXP *key = (SEXP *)(void *)R_alloc(RDZ_STRING_CACHE, sizeof(SEXP));
-        uint64_t *digest = (uint64_t *)(void *)R_alloc(RDZ_STRING_CACHE, sizeof(uint64_t));
-        memset(key, 0, RDZ_STRING_CACHE * sizeof(SEXP));
+        if (!cache->key) { /* R_alloc(): reclaimed when the .Call returns */
+            cache->key = (SEXP *)(void *)R_alloc(RDZ_STRING_CACHE, sizeof(SEXP));
+            cache->digest = (uint64_t *)(void *)R_alloc(RDZ_STRING_CACHE, sizeof(uint64_t));
+            memset(cache->key, 0, RDZ_STRING_CACHE * sizeof(SEXP));
+        }
         for (k = 0; k < src->n; k++) {
             SEXP ch = elt[k];
             size_t slot = ((uintptr_t)ch >> 4) % RDZ_STRING_CACHE;
-            if (key[slot] != ch) {
+            if (cache->key[slot] != ch) {
                 rdz_str s;
                 if (rdz_r_value(x, k, &s, e)) return 1; /* checks it is native */
-                key[slot] = ch;
-                digest[slot] = rdz_string_digest(&s);
+                cache->key[slot] = ch;
+                cache->digest[slot] = rdz_string_digest(&s);
             }
-            rdz_content_digest(c, digest[slot]);
+            rdz_content_digest(c, cache->digest[slot]);
         }
         return 0;
     }
@@ -673,6 +694,7 @@ static int rdz_hash_strings(rdz_content *c, const rdz_str_source *src, rdz_error
 static int rdz_plan_hash(rdz_plan *p, uint8_t out[16], rdz_error *e)
 {
     rdz_content content, *c = &content; /* on the stack: the hasher needs its 64-byte alignment */
+    rdz_string_cache cache = {NULL, NULL};
     uint32_t i, count = rdz_plan_count(p);
     rdz_content_begin(c);
     for (i = 0; i < count; i++) {
@@ -684,7 +706,7 @@ static int rdz_plan_hash(rdz_plan *p, uint8_t out[16], rdz_error *e)
         case RDZ_TYPE_FACTOR: rdz_content_values(c, n->values, (size_t)n->length, 4); break;
         case RDZ_TYPE_DOUBLE: rdz_content_values(c, n->values, (size_t)n->length, 8); break;
         case RDZ_TYPE_CHARACTER:
-            if (rdz_hash_strings(c, n->strings, e)) return 1;
+            if (rdz_hash_strings(c, n->strings, &cache, e)) return 1;
             break;
         default: break;
         }
@@ -758,6 +780,7 @@ static SEXP rdz_plan_start(SEXP x, int strict, rdz_plan **out, const char **why)
     zb_buf_alloc(&p->pairs, 0, 0);
     zb_buf_alloc(&p->shared, 0, 0);
     R_SetExternalPtrAddr(ptr, p);
+    p->ptr = ptr;
     *out = p;
     *why = rdz_plan_build(p, x);
     if (!*why && !strict && rdz_plan_small_parts(p)) *why = "an object of many small parts";
@@ -1083,10 +1106,11 @@ static int rdz_windowable(const rdz_object *o)
     }
 }
 
-static void rdz_window_object(const rdz_reader *r, rdz_window *w, uint32_t id, uint64_t lo,
-                              uint64_t hi)
+static void rdz_window_object(const rdz_reader *r, rdz_window *w, uint8_t *slot, uint32_t id,
+                              uint64_t lo, uint64_t hi)
 {
     const rdz_object *o = &r->objects[id];
+    slot[id] = 1;
     if (o->type_tag == RDZ_TYPE_REFERENCE) { /* a shared column: its target, read once */
         id = o->first_child;
         o = &r->objects[id];
@@ -1097,17 +1121,33 @@ static void rdz_window_object(const rdz_reader *r, rdz_window *w, uint32_t id, u
     w[id].on = 1;
 }
 
+static int rdz_read_attr_name(rdz_reader *r, const rdz_attribute *a, char *out, size_t cap,
+                              rdz_error *e);
+
+/* Whether object `t` is windowed only as the target of a windowed reference
+   (where else it is used, the loop in rdz_window_plan() sees). */
+static int rdz_window_target_of_slot(const rdz_reader *r, const uint8_t *slot, uint32_t t)
+{
+    uint32_t j;
+    for (j = 0; j < r->nobjects; j++) {
+        const rdz_object *o = &r->objects[j];
+        if (slot[j] && o->type_tag == RDZ_TYPE_REFERENCE && o->first_child == t) return 1;
+    }
+    return 0;
+}
+
 /* With a window: the root's rows. A data frame's vector columns and its
    stored row names, or a vector and its names; other columns (lists, data
    frames) are read whole, for R to subset. */
 static int rdz_window_plan(rdz_graph_in *g)
 {
-    const rdz_reader *r = &g->r;
+    rdz_reader *r = &g->r;
     const rdz_object *root = &r->objects[0];
     double lo = REAL(g->window)[0], hi = REAL(g->window)[1];
     uint64_t rows = root->logical_len; /* a data frame's rows, a vector's elements */
     rdz_window *w;
-    uint32_t k, a;
+    uint8_t *slot; /* the objects windowed in place: the root's columns, or the root */
+    uint32_t k, a, j;
     if (root->type_tag == RDZ_TYPE_LIST || root->type_tag == RDZ_TYPE_NULL ||
         root->type_tag == RDZ_TYPE_REFERENCE) {
         return rdz_unsupported(&g->e, "rows of a root that is not a data frame or a vector");
@@ -1116,19 +1156,43 @@ static int rdz_window_plan(rdz_graph_in *g)
     if (zb_put_zeros(&g->windows, (size_t)r->nobjects * sizeof(rdz_window))) {
         return rdz_memory(&g->e, "the row range");
     }
+    slot = (uint8_t *)R_alloc(r->nobjects, 1);
+    memset(slot, 0, r->nobjects);
     w = (rdz_window *)(void *)g->windows.data;
     if (root->type_tag == RDZ_TYPE_DATA_FRAME) {
         for (k = 0; k < root->child_count; k++) {
-            rdz_window_object(r, w, root->first_child + k, (uint64_t)lo, (uint64_t)hi);
+            rdz_window_object(r, w, slot, root->first_child + k, (uint64_t)lo, (uint64_t)hi);
         }
     } else {
-        rdz_window_object(r, w, 0, (uint64_t)lo, (uint64_t)hi);
+        rdz_window_object(r, w, slot, 0, (uint64_t)lo, (uint64_t)hi);
     }
     for (a = 0; a < root->attribute_count; a++) { /* names of a vector, row names of a frame */
         const rdz_attribute *at = &r->attributes[root->first_attribute + a];
         if ((root->type_tag != RDZ_TYPE_DATA_FRAME && at->flags == RDZ_ATTRIBUTE_FLAG_NAMES) ||
             at->flags == RDZ_ATTRIBUTE_FLAG_ROW_NAMES) {
-            rdz_window_object(r, w, at->value_object_id, (uint64_t)lo, (uint64_t)hi);
+            rdz_window_object(r, w, slot, at->value_object_id, (uint64_t)lo, (uint64_t)hi);
+        }
+    }
+    /* a windowed vector shared with a part read whole (a list column, an
+       attribute) would reach that part cut short: refused, so R reads the
+       value whole */
+    for (j = 0; j < r->nobjects; j++) {
+        const rdz_object *o = &r->objects[j];
+        if ((o->type_tag == RDZ_TYPE_REFERENCE && !slot[j] && w[o->first_child].on) ||
+            (w[j].on && !slot[j] && !rdz_window_target_of_slot(r, slot, j))) {
+            return rdz_unsupported(&g->e, "rows of a vector shared with a part read whole");
+        }
+        /* a matrix's or a time series' rows are not its elements' */
+        if (w[j].on) {
+            for (a = 0; a < o->attribute_count; a++) {
+                const rdz_attribute *at = &r->attributes[o->first_attribute + a];
+                char name[10001]; /* R caps a symbol at 10,000 bytes */
+                if (at->flags != RDZ_ATTRIBUTE_FLAG_OTHER) continue;
+                if (rdz_read_attr_name(r, at, name, sizeof name, &g->e)) return 1;
+                if (!strcmp(name, "dim") || !strcmp(name, "dimnames") || !strcmp(name, "tsp")) {
+                    return rdz_unsupported(&g->e, "rows of a matrix, an array or a time series");
+                }
+            }
         }
     }
     return 0;
