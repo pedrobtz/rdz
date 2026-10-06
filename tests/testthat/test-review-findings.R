@@ -1,6 +1,6 @@
-# Regression tests for the defects recorded in review.md.
+# Regression tests for the defects recorded in .agents/history/review-2026-08-08.md.
 
-# review.md finding 2 ---------------------------------------------------------
+# review-2026-08-08.md finding 2 ---------------------------------------------------------
 
 test_that("the synopsis never shortens a name without setting `truncated`", {
   # Regression coverage for the former mismatch between the truncation
@@ -44,7 +44,7 @@ test_that("a name past the synopsis bound is still reported as truncated", {
   expect_lt(nchar(synopsis$class), 1000L)
 })
 
-# review.md finding 6 ---------------------------------------------------------
+# review-2026-08-08.md finding 6 ---------------------------------------------------------
 
 test_that("the synopsis always reports `synopsis_error`", {
   # The field is a stable part of the synopsis schema on both success and
@@ -57,7 +57,7 @@ test_that("the synopsis always reports `synopsis_error`", {
   expect_identical(rdz_info(path)$synopsis$synopsis_error, FALSE)
 })
 
-# review.md finding 8 ---------------------------------------------------------
+# review-2026-08-08.md finding 8 ---------------------------------------------------------
 
 test_that("replacing an rdz file preserves its permissions", {
   # Replacement must retain the existing destination's mode.
@@ -78,7 +78,7 @@ test_that("replacing an rdz file preserves its permissions", {
   expect_identical(file.mode(path), as.octmode("600"))
 })
 
-# review.md finding 1 ---------------------------------------------------------
+# review-2026-08-08.md finding 1 ---------------------------------------------------------
 
 test_that(".Rbuildignore excludes stray build artifacts and agent guidance", {
   build_ignore <- test_path("..", "..", ".Rbuildignore")

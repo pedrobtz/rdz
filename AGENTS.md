@@ -6,26 +6,22 @@
 
 Project design and implementation guidance lives in:
 
-- [Plan C: re-implementing rdz in C](.agents/plan-c.md) (adopted 2026-10-05; the current sequence)
-- [Current implementation assessment](.agents/current-state.md)
-- [Native serializer architecture](.agents/architecture.md)
-- [Pre-0.1 container wire format](.agents/container-format.md)
-- [Performance and parallelism design](.agents/performance.md)
-- [Native serialization roadmap](.agents/roadmap.md)
-- [Validation and benchmarking methodology](.agents/validation.md)
-- [Complete R SEXP coverage matrix](.agents/sexp-coverage.md)
-- [Cross-OS file portability contract](.agents/portability.md)
-- [Metadata and selective attribute access](.agents/metadata-access.md)
-- [Encoding and format research directions](.agents/encoding-research.md)
-- [`qs2`, `qdata`, and `fst` research](.agents/research.md)
+Current, and held to the code:
 
-Treat `current-state.md` as the dated implementation checkpoint,
-`architecture.md` as the target component boundary, `roadmap.md` as the
-implementation sequence, `validation.md` as the completion gate,
-`container-format.md` as the implemented pre-release framing contract,
-`sexp-coverage.md` as the type-handling registry, `portability.md` as the wire
-format portability contract, `metadata-access.md` as the selective inspection
-contract, and `encoding-research.md` as the candidate algorithm register. Update
+- [Architecture](.agents/architecture.md): what rdz is, layer by layer, and the decisions recorded with it
+- [Container format](.agents/container-format.md): the wire contract, frozen as of rdz 0.1.0
+- [Metadata and selective attribute access](.agents/metadata-access.md): the inspection contract
+- [Current state](.agents/current-state.md): dated checkpoints, newest first
+- [Plan C](.agents/plan-c.md): how the C implementation was sequenced, and why
+
+Historical (each says so at its top, and what in it still holds): the Rust-era
+[roadmap](.agents/roadmap.md), [validation](.agents/validation.md),
+[SEXP coverage](.agents/sexp-coverage.md), [portability](.agents/portability.md),
+[performance](.agents/performance.md), [encoding research](.agents/encoding-research.md)
+and [research](.agents/research.md), and the reviews in `.agents/history/`.
+
+The user-facing contracts are in the package: `?rdz` (compatibility),
+`?write_rdz` (what is native, file replacement) and `?rdz-errors`. Update
 the documents when a deliberate design decision changes rather than allowing the
 implementation and guidance to diverge.
 
@@ -77,7 +73,7 @@ native-word-order scalars, pointer widths, addresses, or CPU-specific requiremen
 
 ## C Rules
 
-C99, four-space indentation, `rdz_` for internals and `.Call` entry points, `rdz_test_` for test-only entry points. The core never includes an R header and allocates only through zubin's `zb_buf`. Records are zubin layout specifications (`src/core/rdz_records.h`) checked by `rdz_records_check()`; read and write them with zubin's `zb_rd_`/`zb_wr_` at their offsets, never through a struct. Every count, length and offset from a file is bounds-checked before it sizes an allocation or a read. C never raises an rdz error: a failure returns an `rdz_failure` string that `rdz_check()` raises as a condition inheriting `rdz_error`. Heap state that must survive a longjmp hangs off an external pointer created before the first allocation, with a finalizer that releases it. Only the R thread touches SEXPs or calls R.
+C99, four-space indentation, `rdz_` for internals and `.Call` entry points, `rdz_test_` for test-only entry points. The core never includes an R header; every allocation sized by a file goes through zubin's `zb_buf` (fixed bookkeeping may use `malloc`). Records are zubin layout specifications (`src/core/rdz_records.h`) checked by `rdz_records_check()`; read and write them with zubin's `zb_rd_`/`zb_wr_` at their offsets, never through a struct. Every count, length and offset from a file is bounds-checked before it sizes an allocation or a read. C never raises an rdz error: a failure returns an `rdz_failure` string that `rdz_check()` raises as a condition inheriting `rdz_error`. Heap state that must survive a longjmp hangs off an external pointer created before the first allocation, with a finalizer that releases it. Only the R thread touches SEXPs or calls R.
 
 ## R Style
 

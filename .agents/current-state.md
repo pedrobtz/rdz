@@ -1,5 +1,57 @@
 # RDZ Current-State Assessment
 
+A log of dated checkpoints, newest first. For what the system is, read
+[architecture.md](architecture.md) and [container-format.md](container-format.md);
+a checkpoint records what changed and why, and later checkpoints can
+supersede earlier ones.
+
+## Checkpoint 2026-10-06: the pre-submission review (#27)
+
+The review of `main` at a17f233 (issue #27) found two data bugs in
+`read_rdz(rows =)`, CRAN blockers, an incoherent compatibility promise and
+design documents describing the Rust implementation. One pull request per
+group of findings (#28 to #35, and this one):
+
+- **Data and memory:** rows of generic files and of matrix and data frame
+  columns (A1, A2, C8); hash memory (C5); windows over shared vectors and
+  over matrices (C6, C7); compact row names' sign (C9); nested data frame
+  columns now native (C10).
+- **Reader:** string counts bounded by their bytes (a 26th guard, C1); the
+  pipeline's slot state locked, with a ThreadSanitizer leg (C2); empty
+  numeric blocks (C3); NULs and over-long names as format errors (C13);
+  `rdz_info()` unserializes a synopsis only when it is plain vectors (B3).
+- **Strings:** unmarked non-ASCII strings, which R leaves unmarked in a
+  UTF-8 locale, are stored natively as their UTF-8 when the conversion is
+  lossless; before, any data frame with accented text went generic.
+- **Compatibility (B1, the maintainer's decision):** the version and the
+  writer are 0.1.0, the frozen corpus was written once more by rdz 0.1.0,
+  and `corpus.yaml` fails a change to any fixture a release wrote. `?rdz`
+  states the promise.
+- **API (B5):** documented fields of `rdz_info()` and `rdz_schema()`;
+  `?rdz-errors`, with every R-level error classed; the fallback list,
+  sharing and file replacement in `?write_rdz`; `rows` in
+  `rdz_unserialize()`.
+- **Packaging (A3, A4, D):** test threads capped at two on CRAN, Imports,
+  the full zstd licence, `tools/` reduced to `tools/vendor/`, NEWS, a
+  Windows R-devel leg.
+- **Documents (B4):** architecture.md rewritten to the C implementation;
+  the Rust-era documents marked historical; review.md moved to
+  `.agents/history/`.
+
+Left for the maintainer: `preset =`/`threads =` arguments; one C entry point
+for `select`, `rows` and `object`; the items of #27 section E (test or
+strike); a shuffle-safe test suite (about 20 helpers defined at file scope
+in test files). `Remotes` and the zubin/zufast version floors wait for those
+packages to be on CRAN.
+
+## Checkpoint 2026-10-06: plan-c Stage S
+
+A usage article (`vignettes/articles/rdz.Rmd`, pkgdown only) and the site:
+`_pkgdown.yml`, `pkgdown.yaml`, GitHub Pages from `gh-pages`. The workflow
+removes AGENTS.md, CLAUDE.md and review.md before building, since pkgdown
+renders every root-level markdown file. `rdz_schema()` printed shapes in
+scientific notation; they are whole counts.
+
 ## Checkpoint 2026-10-06: plan-c Stage R
 
 `read_rdz(rows = )` reads a data frame's rows or a vector's elements. Rows
@@ -97,7 +149,9 @@ validates the section: lengths, UTF-8, and distinct, non-empty keys.
 - It is not part of the content hash, but `skip_unchanged` rewrites a file
   whose metadata differs.
 - A 24th mutation-checked guard covers its length check.
-- The frozen corpus gains `metadata_*`; its existing files are untouched.
+- The frozen corpus gains `metadata_*`; its existing files are untouched
+  (that held until the corpus was regenerated before release; see the
+  Stage M checkpoint and the review checkpoint above).
 
 It changes the directory's length equation, which was acceptable only because
 0.1.0 is not released.
@@ -297,11 +351,12 @@ machine's cores.
 The CRAN submission waits for zufast and then zubin to be on CRAN.
 
 After 0.1.0, all additive (no format change):
-- attribute access below the root;
-- selective column reads;
+- attribute access below the root (done, Stage L);
+- selective column reads (done, Stage K);
 - data frame matrix columns (they need a column-length rule, which is a
   format addition);
-- native-encoded non-ASCII strings in UTF-8 sessions (portability.md's call).
+- native-encoded non-ASCII strings in UTF-8 sessions (done before release,
+  in the review: stored as UTF-8 when the conversion is lossless).
 
 ## Checkpoint 2026-10-05: plan-c Stage H
 
@@ -634,9 +689,13 @@ rdz is being re-implemented in C on zubin and zufast (plan-c.md, adopted
   keeps it is decided at Stage E.
 - The Rust tree is tagged `rust-reference-pre-c`.
 
-Stage B (the C skeleton and the R-free container) is next. The assessment
-below describes the Rust implementation as of 2026-08-09 and is kept for its
-evidence.
+Stage B (the C skeleton and the R-free container) is next.
+
+## Historical: the Rust implementation, assessed 2026-08-09
+
+Everything from here to the end describes the Rust implementation retired at
+plan-c Stage I. It is kept for its evidence (measurements, decisions and the
+reasons for them); none of it describes rdz as it is.
 
 Assessment date: 2026-08-09
 

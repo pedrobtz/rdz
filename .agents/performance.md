@@ -1,5 +1,7 @@
 # RDZ Performance Design
 
+> **Historical.** This document records performance design and measurements from the Rust implementation (crc32fast, its block sizes and presets). The presets now differ only in the zstd level (`speed`: none, `balanced`: 1, `compact`: 6), and `speed` never writes the decimal double encoding. Current measurements are in `tools/benchmark.R` (see `.github/CONTRIBUTING.md`). Where it disagrees with the code, the code and [architecture.md](architecture.md) are right.
+
 ## Performance objective
 
 RDZ covers every object handled by base R serialization while targeting much

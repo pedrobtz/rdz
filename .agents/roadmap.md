@@ -1,5 +1,7 @@
 # RDZ Native Serialization Roadmap
 
+> **Historical.** This document records the Rust implementation's phases. The C port's sequence is [plan-c.md](plan-c.md) and what was built is in [architecture.md](architecture.md). Its two pre-0.1.0 gates are settled in architecture.md ("Decisions recorded here"). Where it disagrees with the code, the code and [architecture.md](architecture.md) are right.
+
 > Since 2026-10-05 the sequence is [plan-c.md](plan-c.md), the re-implementation
 > in C. Its stages map onto the phases below: the container and generic codec
 > (Phase 0B, the streaming bridge of Phase 8) are Stages B and C; compression
