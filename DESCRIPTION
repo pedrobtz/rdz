@@ -12,6 +12,8 @@ Description: Writes and reads R objects using a versioned, block-structured
     adding explicit format identification, length validation, and integrity
     checking.
 License: MIT + file LICENSE
+URL: https://pedrobtz.github.io/rdz/, https://github.com/pedrobtz/rdz
+BugReports: https://github.com/pedrobtz/rdz/issues
 Copyright: The authors and copyright holders of the bundled Zstandard
     library are listed in file inst/COPYRIGHTS.
 Encoding: UTF-8
@@ -33,3 +35,4 @@ Remotes:
     pedrobtz/zubin,
     pedrobtz/zufast
 Config/roxygen2/version: 8.1.0
+Config/Needs/website: rmarkdown

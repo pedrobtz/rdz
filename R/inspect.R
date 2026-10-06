@@ -214,9 +214,12 @@ rdz_schema_objects <- function(path, recursive) {
   shape <- vapply(seq_along(keep), function(k) {
     i <- src[k]
     if (objects$type_name[i] == "data.frame") {
-      return(paste(objects$length[i], "x", objects$child_count[i]))
+      return(paste(format(objects$length[i], scientific = FALSE), "x", objects$child_count[i]))
     }
-    if (!is.na(dim_at[k])) return(paste(read[[as.character(dim_at[k])]], collapse = " x "))
+    if (!is.na(dim_at[k])) {
+      return(paste(format(read[[as.character(dim_at[k])]], scientific = FALSE, trim = TRUE),
+                   collapse = " x "))
+    }
     format(if (objects$type_name[i] == "list") objects$child_count[i] else objects$length[i],
            scientific = FALSE)
   }, character(1L))
