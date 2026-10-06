@@ -1,5 +1,7 @@
 # Serialization Research: `qs2` and `fst`
 
+> **Historical.** This document records background research from before the C port. It informs; it decides nothing. Where it disagrees with the code, the code and [architecture.md](architecture.md) are right.
+
 ## Scope and source versions
 
 This review covers `qs2` 0.2.3 at commit

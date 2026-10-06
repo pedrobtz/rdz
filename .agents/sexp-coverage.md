@@ -1,5 +1,7 @@
 # R SEXP Coverage Matrix
 
+> **Historical.** This document records the type registry as the Rust implementation saw it. What is native and what goes generic is now stated in `?write_rdz` ("Native and generic") and enforced by the planner in `src/adapter/rdz_native_r.c`; ALTREP vectors are materialised and written natively, not only under an explicit policy; rdz takes no refhook. Where it disagrees with the code, the code and [architecture.md](architecture.md) are right.
+
 ## Purpose and policy
 
 This is the normative registry for how RDZ handles every R `SEXPTYPE`. The type

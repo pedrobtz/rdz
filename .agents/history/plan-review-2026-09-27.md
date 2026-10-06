@@ -1,12 +1,14 @@
 # Plan and Roadmap Review — 2026-09-27
 
+> **Historical.** This document records a review of the plans as they stood on 2026-09-27, before the C port was adopted. Where it disagrees with the code, the code and [architecture.md](../architecture.md) are right.
+
 Goal restated: the fastest, most complete serializer in the R ecosystem, in
 Rust. Beat `qs2`/`qdata` on general objects and `fst` on data frames, while
 covering every object base R can serialize.
 
 This review assesses whether the current plan gets there, what to change, and
 how to run investigation, testing, and benchmarking from here on. It is a
-proposal; [roadmap.md](roadmap.md) and the other guidance documents should be
+proposal; [roadmap.md](../roadmap.md) and the other guidance documents should be
 rewritten once its decisions are accepted.
 
 ## 1. Verdict

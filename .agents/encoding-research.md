@@ -1,5 +1,7 @@
 # Encoding and Format Research Directions
 
+> **Historical.** This document records the research that chose the block encodings. Every encoding it lists as an experiment and that [container-format.md](container-format.md) defines (logical 3 to 7, character 8 and 9, integer 11 to 14, double 21 to 23) is shipped and frozen as of rdz 0.1.0; the format document, not this one, is their definition. Where it disagrees with the code, the code and [architecture.md](architecture.md) are right.
+
 ## Purpose
 
 This document is the candidate register for algorithms and layout techniques that

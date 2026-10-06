@@ -1,7 +1,8 @@
 # RDZ Plan C: re-implementing rdz in C
 
-**Status:** adopted, 2026-10-05: the maintainer decided to re-implement rdz in C on this plan
-(§10). The stages are under way from Stage A; nothing below Stage A is implemented yet. It is written against zubin 0.1.0 (implemented, release branch prepared,
+**Status:** adopted 2026-10-05 (§10) and carried out: Stages A to S are implemented, and
+the review of #27 followed (current-state.md). What rdz is now is in
+[architecture.md](architecture.md); this plan is kept for its reasoning and sequence. It is written against zubin 0.1.0 (implemented, release branch prepared,
 waiting for zufast on CRAN), zufast 0.1.0 (tagged, CRAN pending) and the rdz tree at
 `a80264f` plus the in-flight character dictionary work (encodings 8 and 9).
 

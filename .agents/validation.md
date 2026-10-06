@@ -1,5 +1,7 @@
 # RDZ Validation and Benchmarking
 
+> **Historical.** This document records how the Rust implementation was validated (CRC32, the Rust oracle, Savvy). The gates that run now are in AGENTS.md: the C harness under ASan, UBSan and ThreadSanitizer, the mutation check, fuzzing, the frozen corpus and its `corpus.yaml` gate, the cross-OS exchange, and R CMD check across platforms. refhook tests are not planned: rdz takes no refhook. Where it disagrees with the code, the code and [architecture.md](architecture.md) are right.
+
 ## Validation layers
 
 Use three complementary layers:

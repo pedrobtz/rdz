@@ -8,7 +8,6 @@
 ^cran-comments\.md$
 ^src/Makevars [0-9]+$
 ^src/Makevars\.win [0-9]+$
-^review\.md$
 ^fuzz$
 ^\.git$
 ^tools/experiments$

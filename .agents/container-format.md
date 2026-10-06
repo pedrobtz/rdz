@@ -37,8 +37,8 @@ whole-root generic codec.
 | Block encoding | 5 | Sparse logical patches |
 | Block encoding | 6 | Logical run ends |
 | Block encoding | 7 | Short periodic logical pattern |
-| Block encoding | 8 | Character dictionary entries (experimental) |
-| Block encoding | 9 | Character dictionary indices (experimental) |
+| Block encoding | 8 | Character dictionary entries |
+| Block encoding | 9 | Character dictionary indices |
 | Block encoding | 10 | Integer raw (`i32` LE) |
 | Block encoding | 11 | Integer shuffled raw (4 byte planes) |
 | Block encoding | 12 | Integer frame of reference, bit-packed |
@@ -216,10 +216,14 @@ The 48-byte object entry contains, in order: `object_id:u32`, `parent_id:u32`,
 fields for child start/count, attribute start/count, and block start/count.
 Root `parent_id` is `0xffffffff`. The 32-byte attribute entry contains
 `owner_id:u32`, `name_object_id:u32`, `value_object_id:u32`, `ordinal:u32`,
-`flags:u32`, one reserved `u32`, and one reserved `u64`. Rust models and
-byte-round-trip tests enforce these layouts. Roles are `0=root`,
-`1=attribute-name`, and `2=attribute-value`; the only Phase 1 attribute flag is
-bit 0 for `names`. All other role, object, and attribute flags are rejected.
+`flags:u32`, one reserved `u32`, and one reserved `u64`; `src/core/rdz_records.h`
+defines these layouts and the harness round-trips them. Roles are `0=root`,
+`1=attribute-name`, `2=attribute-value`, `3=levels` (a factor's one child) and
+`4=child` (a list element or a data frame column). An attribute entry's flags
+name its kind: `1` names, `2` a data frame's explicit row names, `4` a class,
+`8` any other attribute; the one object flag is `1`, an ordered factor. A
+reader rejects an unknown role, and an unknown bit in a flags word's low half
+("Compatibility and extension").
 
 ### Shared objects (since plan-c Stage O)
 
@@ -329,7 +333,8 @@ Encoding 7 represents exact repetition with a `u16` period from 2 through 64,
 six reserved zero bytes, and the period's values in the encoding-1 two-bit
 layout (`00=FALSE`, `01=TRUE`, `10=NA`; `11` invalid). It is considered only for
 high-transition blocks and requires at least four repetitions. Encoding 1
-remains a decoder/reference path but is no longer emitted by the native writer.
+is read, for the files the Rust reference wrote, and never written: it stays
+a valid encoding that readers must decode.
 
 The selector obtains exact counts and transition statistics during
 classification, compares exact record sizes, and emits constant, dense, sparse,
@@ -465,7 +470,7 @@ Since Stage H every block, logical ones included, is compressed under the
 writer's preset (raw when that is not smaller): the `speed` preset writes
 the Phase 1 bytes the Rust reference wrote.
 
-### Character dictionary blocks (experimental)
+### Character dictionary blocks
 
 The `names` value object may mix encoding 2 with dictionary blocks. Encoding 8
 holds dictionary entries in exactly the encoding-2 record layout; its logical
@@ -492,8 +497,8 @@ writes the remainder of a vector as encoding 2 once its dictionary would
 exceed 2^22 entries, so one object may contain dictionary blocks followed by
 plain blocks. Deduplication uses CHARSXP addresses, which R's global string
 cache makes unique per bytes and encoding; addresses are never written. The
-experimental `RDZ_STRING_DICT` environment variable selects the policy; the
-default is `auto` (since plan-c Stage G).
+`RDZ_STRING_DICT` environment variable selects the policy, for tests and
+benchmarks; the default is `auto` (since plan-c Stage G).
 
 ## Generic synopsis
 
@@ -535,10 +540,9 @@ distinguished outcome; `native` surfaces it; `r` bypasses the attempt and forces
 `R_SERIAL_V3`. Since plan-c Stage I the native codecs take logical, integer,
 double and character vectors (ALTREP ones from their materialised data),
 factors, lists and data frames, nested, each with any attributes whose names
-are ASCII and whose values are native in turn. S4 objects, other types
-anywhere (environments, calls, complex, raw), row names off a data frame, a
-data frame column longer than its rows, and a non-ASCII native-encoded string
-produce the distinguished whole-root fallback. Automatic mode also leaves to
+are ASCII and whose values are native in turn. Everything else produces the
+distinguished whole-root fallback; `?write_rdz` ("Native and generic") lists
+it, and `src/adapter/rdz_native_r.c` is its definition. Automatic mode also leaves to
 the generic codec an object of at least 1,024 parts with data averaging under
 1 KiB each: every part costs about 160 bytes of directory and headers and a
 compression frame of its own (a list of 500,000 pairs is 88 MB native, 1 MB

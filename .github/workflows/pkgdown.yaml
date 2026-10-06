@@ -37,7 +37,7 @@ jobs:
       # pkgdown renders every root-level *.md as a page; these are for
       # contributors and agents, not the site
       - name: Leave internal pages out
-        run: rm -f AGENTS.md CLAUDE.md review.md
+        run: rm -f AGENTS.md CLAUDE.md
 
       - name: Build site
         run: pkgdown::build_site_github_pages(new_process = FALSE, install = FALSE)

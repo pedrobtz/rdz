@@ -1,5 +1,7 @@
 # RDZ Cross-OS Portability
 
+> **Historical.** This document records portability decisions taken for the Rust implementation. Still current: byte order, paths, file replacement and locale principles. Superseded: strings in the session encoding are stored as UTF-8 when the conversion is lossless (not left generic, not transcoded on read), and a data.table's `.internal.selfref` is restored as a NULL external pointer (not omitted); see [architecture.md](architecture.md). Where it disagrees with the code, the code and [architecture.md](architecture.md) are right.
+
 ## Portability contract
 
 An `.rdz` file written on a supported Windows, macOS, or Linux system must be
