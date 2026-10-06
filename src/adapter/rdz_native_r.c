@@ -34,6 +34,7 @@
 #include <Rversion.h>
 
 #include <zubin/rw.h>
+#include <zufast/utf8.h>
 
 #include "../core/rdz_content.h"
 #include "../core/rdz_graph.h"
@@ -140,7 +141,25 @@ static int rdz_r_value(void *ctx, size_t i, rdz_str *out, rdz_error *e)
     switch (Rf_getCharCE(c)) {
     case CE_NATIVE:
         if (!rdz_ascii(c)) {
-            return rdz_unsupported(e, "a logical vector with non-ASCII native-encoded names");
+            /* in the session's encoding, which a UTF-8 locale (R's default)
+               does not mark: stored as its UTF-8, which every reader can
+               mark; R_alloc()ed only when the locale is not UTF-8 */
+            const char *u = Rf_translateCharUTF8(c);
+            size_t n = strlen(u);
+            /* a conversion that loses nothing converts back: in a locale
+               that cannot represent the bytes (the C locale), R writes
+               escapes such as <e9> instead */
+            if (!zuf_utf8_valid(u, n) ||
+                (u != CHAR(c) && strcmp(Rf_reEnc(u, CE_UTF8, CE_NATIVE, 0), CHAR(c)) != 0)) {
+                return rdz_unsupported(e, "a string that is not valid in the session's encoding");
+            }
+            if (n + RDZ_STRING_RECORD_HEADER > RDZ_BLOCK_SIZE) {
+                return rdz_unsupported(e, "a string larger than one block (1 MiB)");
+            }
+            out->tag = RDZ_STR_UTF8;
+            out->bytes = (const uint8_t *)u;
+            out->len = n;
+            return 0;
         }
         out->tag = RDZ_STR_NATIVE;
         break;

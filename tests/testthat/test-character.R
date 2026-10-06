@@ -54,16 +54,39 @@ test_that("long and many strings span blocks", {
   expect_identical(roundtrip_native(y), y)
 })
 
-test_that("native-encoded non-ASCII strings are left to the generic codec", {
-  skip_if(l10n_info()$`UTF-8` == FALSE && l10n_info()$`Latin-1` == FALSE,
-          "no native encoding to test")
-  x <- enc2native("é")
-  skip_if(Encoding(x) != "unknown", "this locale marks the string")
+test_that("native-encoded non-ASCII strings are stored natively, as UTF-8", {
+  skip_if_not(isTRUE(l10n_info()$`UTF-8`), "not a UTF-8 locale")
+  x <- c("a", "caf\u00e9", NA)
+  Encoding(x) <- "unknown" # as R leaves typed and imported strings in a UTF-8 locale
+  expect_identical(Encoding(x[[2L]]), "unknown")
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  write_rdz(c("a", x), path)
+  write_rdz(x, path, mode = "native")
+  expect_identical(rdz_info(path)$codec, "native_v1")
+  got <- read_rdz(path)
+  expect_identical(got, x)
+  expect_identical(Encoding(got[[2L]]), "UTF-8")
+  expect_identical(rdz_info(path)$content_hash, rdz_hash(x))
+  # the same string marked UTF-8 is the same value
+  expect_identical(rdz_hash(x), rdz_hash(enc2utf8(x)))
+  df <- data.frame(city = x, stringsAsFactors = TRUE)
+  write_rdz(df, path)
+  expect_identical(rdz_info(path)$codec, "native_v1")
+  expect_identical(read_rdz(path), df)
+})
+
+test_that("a native string the session cannot convert losslessly goes generic", {
+  skip_on_os("windows")
+  old <- Sys.getlocale("LC_CTYPE")
+  skip_if(!nzchar(suppressWarnings(Sys.setlocale("LC_CTYPE", "C"))), "no C locale")
+  on.exit(Sys.setlocale("LC_CTYPE", old), add = TRUE)
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  x <- rawToChar(as.raw(c(0x63, 0x61, 0x66, 0xe9))) # unmarked, not ASCII
+  write_rdz(x, path)
   expect_identical(rdz_info(path)$codec, "r_serial_v3")
-  expect_error(write_rdz(c("a", x), path, mode = "native"), class = "rdz_unsupported_error")
+  expect_identical(read_rdz(path), x)
+  expect_error(write_rdz(x, path, mode = "native"), class = "rdz_unsupported_error")
 })
 
 test_that("a file's strings read the same in another locale", {
