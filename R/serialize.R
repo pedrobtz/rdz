@@ -64,6 +64,11 @@
 #'   distinct non-empty names and 64 KiB in all, such as a source, a code
 #'   version or a cache key's inputs. [rdz_info()] reads it back, as
 #'   `metadata`, without reading `x`; it is not part of the content hash.
+#' @param hash Whether to record the content hash ([rdz_hash()]), from
+#'   `options(rdz.hash)`, `TRUE` by default. Computing it reads the value once
+#'   more (about a tenth of a write's time); without it the file is just as
+#'   valid and as readable, but `skip_unchanged`, `rdz_verify(content = TRUE)`
+#'   and `rdz_info()$content_hash` (then `NA`) have nothing to use.
 #' @returns `path`, invisibly.
 #' @examples
 #' path <- tempfile(fileext = ".rdz")
@@ -72,12 +77,17 @@
 #' unlink(path)
 #' @export
 write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged = FALSE,
-                      metadata = NULL) {
+                      metadata = NULL, hash = getOption("rdz.hash", TRUE)) {
   path <- validate_rdz_path(path)
   mode <- match.arg(mode)
   section <- rdz_metadata_section(metadata)
   if (!is.logical(skip_unchanged) || length(skip_unchanged) != 1L || is.na(skip_unchanged)) {
     rdz_stop("`skip_unchanged` must be TRUE or FALSE.", call. = FALSE)
+  }
+  hash <- rdz_hash_flag(hash)
+  if (skip_unchanged && !hash) {
+    rdz_stop("`skip_unchanged = TRUE` needs `hash = TRUE`: it compares content hashes.",
+             call. = FALSE)
   }
   if (skip_unchanged && file.exists(path) && !dir.exists(path)) {
     stored <- tryCatch(rdz_info(path), error = function(e) NULL)
@@ -95,17 +105,25 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged =
     rdz_stop("`path` must not refer to a directory.", call. = FALSE)
   }
 
-  rdz_write_to(x, path, mode, section)
+  rdz_write_to(x, path, mode, section, hash)
   invisible(path)
+}
+
+rdz_hash_flag <- function(hash) {
+  if (!is.logical(hash) || length(hash) != 1L || is.na(hash)) {
+    rdz_stop("`hash` (or `options(rdz.hash)`) must be TRUE or FALSE.", call. = FALSE)
+  }
+  hash
 }
 
 # Writes x to path, or with a NULL path into a raw vector, which it returns:
 # natively when it can (and mode allows), else through R serialization.
-rdz_write_to <- function(x, path, mode, section) {
+rdz_write_to <- function(x, path, mode, section, hash = TRUE) {
+  settings <- c(rdz_settings(), as.integer(hash))
   if (!identical(mode, "r")) {
     native <- rdz_check(.Call(
       rdz_c_try_write_native, x, path, identical(mode, "native"), rdz_dictionary_policy(),
-      rdz_settings(), section
+      settings, section
     ))
     if (is.raw(native)) return(native)
     if (isTRUE(native)) return(invisible(NULL))
@@ -117,7 +135,7 @@ rdz_write_to <- function(x, path, mode, section) {
     xdr = TRUE,
     version = 3L
   )
-  rdz_check(.Call(rdz_c_write_generic, x, synopsis, path, rdz_settings(), section))
+  rdz_check(.Call(rdz_c_write_generic, x, synopsis, path, settings, section))
 }
 
 #' Serialize an R Object to a Raw Vector
@@ -137,9 +155,10 @@ rdz_write_to <- function(x, path, mode, section) {
 #' identical(rdz_unserialize(bytes), mtcars)
 #' rdz_unserialize(bytes, select = "mpg", rows = 1:3)
 #' @export
-rdz_serialize <- function(x, mode = c("auto", "native", "r"), metadata = NULL) {
+rdz_serialize <- function(x, mode = c("auto", "native", "r"), metadata = NULL,
+                          hash = getOption("rdz.hash", TRUE)) {
   mode <- match.arg(mode)
-  rdz_write_to(x, NULL, mode, rdz_metadata_section(metadata))
+  rdz_write_to(x, NULL, mode, rdz_metadata_section(metadata), rdz_hash_flag(hash))
 }
 
 #' @rdname rdz_serialize

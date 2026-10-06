@@ -142,3 +142,30 @@ test_that("hashing many character vectors needs no memory per vector", {
   peak <- gc()["Vcells", "max used"]
   expect_lt((peak - base) * 8, 64 * 2^20) # one string cache, not one per vector
 })
+
+test_that("hash = FALSE writes a file without a content hash, as readable", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  for (x in list(data.frame(a = 1:5, b = letters[1:5]), new.env(parent = emptyenv()))) {
+    write_rdz(x, path, hash = FALSE)
+    expect_true(is.na(rdz_info(path)$content_hash))
+    got <- read_rdz(path)
+    if (is.environment(x)) expect_true(is.environment(got)) else expect_identical(got, x)
+    expect_identical(rdz_verify(path), path)
+    expect_error(rdz_verify(path, content = TRUE), "no content hash")
+  }
+  # the option, and the raw-vector and archive writers
+  old <- options(rdz.hash = FALSE)
+  write_rdz(1:3, path)
+  expect_true(is.na(rdz_info(path)$content_hash))
+  expect_true(is.na(rdz_info(rdz_serialize(1:3))$content_hash))
+  a <- 1:3
+  rdz_save(a, file = path)
+  expect_true(is.na(rdz_info(path)$content_hash))
+  options(old)
+  expect_identical(rdz_info(rdz_serialize(1:3))$content_hash, rdz_hash(1:3))
+  # skip_unchanged compares hashes, so it needs them
+  expect_error(write_rdz(1:3, path, skip_unchanged = TRUE, hash = FALSE),
+               class = "rdz_argument_error")
+  expect_error(write_rdz(1:3, path, hash = NA), class = "rdz_argument_error")
+})

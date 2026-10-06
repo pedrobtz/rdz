@@ -864,13 +864,13 @@ SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy, SEXP se
     SEXP ptr, cont;
     rdz_write_call call;
     const char *why;
-    if (TYPEOF(settings) != INTSXP || XLENGTH(settings) != 3) {
-        Rf_error("`settings` must be an integer vector of length 3.");
+    if (TYPEOF(settings) != INTSXP || XLENGTH(settings) < 3 || XLENGTH(settings) > 4) {
+        Rf_error("`settings` must be an integer vector of length 3 or 4.");
     }
     ptr = PROTECT(rdz_plan_start(x, Rf_asLogical(strict), &call.p, &why));
     cont = PROTECT(R_MakeUnwindCont());
-    /* the writer computes the content hash as it goes */
-    call.p->v.hash_content = 1;
+    /* the writer computes the content hash as it goes, unless asked not to */
+    call.p->v.hash_content = XLENGTH(settings) == 4 ? INTEGER(settings)[3] != 0 : 1;
     if (TYPEOF(metadata) == RAWSXP) { /* held by the caller for the whole call */
         call.p->v.metadata = RAW(metadata);
         call.p->v.metadata_len = (uint32_t)XLENGTH(metadata);
