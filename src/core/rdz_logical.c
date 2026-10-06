@@ -507,7 +507,7 @@ int rdz_logical_encode(const int32_t *values, size_t n, zb_buf *out, uint16_t *e
                        zb_buf *scratch, rdz_error *e)
 {
     rdz_planes p;
-    uint8_t def = FALSE_STATE, states[2];
+    uint8_t def = FALSE_STATE, states[2] = {FALSE_STATE, FALSE_STATE};
     int nstates = 0, s;
     size_t dense_len, sparse_len, run_len, period = 0, exceptions;
     if (n > RDZ_LOGICAL_BLOCK_VALUES) return rdz_limit(e, "logical block");
@@ -557,6 +557,36 @@ static int32_t value_of(uint8_t state)
     return state == TRUE_STATE ? 1 : state == NA_STATE ? RDZ_LOGICAL_NA : 0;
 }
 
+/* n copies of a value: zero bytes for FALSE, else 16 values per iteration
+   in vector stores (gcc at -O2 leaves a plain loop scalar). */
+static void fill_value(int32_t *out, size_t n, int32_t dv)
+{
+    size_t i = 0;
+    if (dv == 0) {
+        if (n) memset(out, 0, n * sizeof *out);
+        return;
+    }
+#if defined(RDZ_HAVE_NEON_KERNEL) || defined(RDZ_HAVE_SSE2_KERNEL)
+    {
+#ifdef RDZ_HAVE_NEON_KERNEL
+        const int32x4_t v4 = vdupq_n_s32(dv);
+#define RDZ_FILL4(p) vst1q_s32((p), v4)
+#else
+        const __m128i v4 = _mm_set1_epi32(dv);
+#define RDZ_FILL4(p) _mm_storeu_si128((__m128i *)(void *)(p), v4)
+#endif
+        for (; i + 16 <= n; i += 16) {
+            RDZ_FILL4(out + i);
+            RDZ_FILL4(out + i + 4);
+            RDZ_FILL4(out + i + 8);
+            RDZ_FILL4(out + i + 12);
+        }
+#undef RDZ_FILL4
+    }
+#endif
+    for (; i < n; i++) out[i] = dv;
+}
+
 static int decode_2bit(const uint8_t *enc, size_t len, size_t n, int32_t *out, rdz_error *e)
 {
     size_t i, full = n / 4, used = n % 4;
@@ -583,13 +613,10 @@ static int decode_2bit(const uint8_t *enc, size_t len, size_t n, int32_t *out, r
 
 static int decode_constant(const uint8_t *enc, size_t len, size_t n, int32_t *out, rdz_error *e)
 {
-    size_t i;
-    int32_t v;
     if (n == 0 || len != CONSTANT_HEADER || enc[0] > NA_STATE || enc[1] || enc[2] || enc[3]) {
         return rdz_invalid(e, "invalid logical constant block");
     }
-    v = value_of(enc[0]);
-    for (i = 0; i < n; i++) out[i] = v;
+    fill_value(out, n, value_of(enc[0]));
     return 0;
 }
 
@@ -697,7 +724,7 @@ static int decode_dense(const uint8_t *enc, size_t len, size_t n, int32_t *out, 
 static int decode_sparse(const uint8_t *enc, size_t len, size_t n, int32_t *out, rdz_error *e)
 {
     uint8_t def, s1, s2;
-    size_t c1, c2, at = SPARSE_HEADER, i, pass;
+    size_t c1, c2, at = SPARSE_HEADER, pass;
     int32_t dv;
     if (len < SPARSE_HEADER || n == 0 || n > 65536 || enc[3] || zb_rd_u32le(enc + 12)) {
         return rdz_invalid(e, "invalid logical sparse header");
@@ -716,7 +743,8 @@ static int decode_sparse(const uint8_t *enc, size_t len, size_t n, int32_t *out,
         return rdz_invalid(e, "logical sparse block length mismatch");
     }
     dv = value_of(def);
-    for (i = 0; i < n; i++) out[i] = dv;
+    /* the default everywhere first: FALSE (the usual one) is zero bytes */
+    fill_value(out, n, dv);
     for (pass = 0; pass < 2; pass++) {
         size_t count = pass ? c2 : c1, k;
         int32_t v = value_of(pass ? s2 : s1);
@@ -734,7 +762,7 @@ static int decode_sparse(const uint8_t *enc, size_t len, size_t n, int32_t *out,
 
 static int decode_runs(const uint8_t *enc, size_t len, size_t n, int32_t *out, rdz_error *e)
 {
-    size_t runs, r, start = 0, i;
+    size_t runs, r, start = 0;
     int prev = -1;
     if (len < RUN_HEADER || n == 0 || zb_rd_u32le(enc + 4)) {
         return rdz_invalid(e, "invalid logical run header");
@@ -753,7 +781,7 @@ static int decode_runs(const uint8_t *enc, size_t len, size_t n, int32_t *out, r
             return rdz_invalid(e, "invalid logical run record");
         }
         v = value_of(s);
-        for (i = start; i < end; i++) out[i] = v;
+        fill_value(out + start, end - start, v);
         start = end;
         prev = s;
     }
