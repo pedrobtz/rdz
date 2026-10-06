@@ -86,3 +86,18 @@ test_that("compact row names keep their sign", {
   write_rdz(auto, path)
   expect_identical(.row_names_info(read_rdz(path), 0L), c(NA, -3L))
 })
+
+test_that("a data frame column that is a data frame is stored natively", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  df <- data.frame(id = 1:5)
+  df$sub <- data.frame(b = 1:5, c = letters[1:5]) # two columns, five rows
+  write_rdz(df, path, mode = "native")
+  expect_identical(read_rdz(path), df)
+  expect_identical(read_rdz(path, rows = 4:5), rows_ref(df, 4:5))
+  # as many columns as rows: still compared by its rows
+  sq <- data.frame(id = 1:2)
+  sq$s <- data.frame(p = 1:2, q = 3:4)
+  write_rdz(sq, path, mode = "native")
+  expect_identical(read_rdz(path), sq)
+})

@@ -106,3 +106,32 @@ test_that("files record the writer, which matches the package version", {
   bytes <- readBin(path, "raw", 24L)[21:24]
   expect_identical(bytes[[1L]] & as.raw(0x7f), as.raw(1L))
 })
+
+test_that("a NUL inside a string or in metadata is a format error, not R's", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  old <- options(rdz.preset = "speed")
+  on.exit(options(old), add = TRUE)
+  find <- function(bytes, s) {
+    p <- charToRaw(s)
+    at <- which(vapply(seq_len(length(bytes) - length(p) + 1L) - 1L,
+                       function(i) identical(bytes[i + seq_along(p)], p), TRUE))
+    at[[1L]] - 1L
+  }
+  # a string record "aQc" whose middle byte becomes NUL
+  write_rdz("aQc", path)
+  bytes <- readBin(path, "raw", file.size(path))
+  at <- find(bytes, "aQc")
+  bytes[at + 2L] <- as.raw(0L)
+  n <- length(bytes)
+  dir <- le_u64(bytes, n - 32L)
+  first <- dir + dir_header_len(bytes, dir) + 48 # one object, no attributes
+  writeBin(reseal_block(bytes, le_u64(bytes, first + 16)), path)
+  expect_error(read_rdz(path), "NUL", class = "rdz_format_error")
+  # a metadata value "vQv" whose middle byte becomes NUL
+  write_rdz(1L, path, metadata = c(k = "vQv"))
+  bytes <- readBin(path, "raw", file.size(path))
+  bytes[find(bytes, "vQv") + 2L] <- as.raw(0L)
+  writeBin(reseal_block(bytes, -1), path) # the directory's checksum only
+  expect_error(rdz_info(path), "NUL", class = "rdz_format_error")
+})

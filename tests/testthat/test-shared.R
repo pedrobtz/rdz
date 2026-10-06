@@ -62,3 +62,15 @@ test_that("sharing is part of the value rdz stores and hashes", {
   expect_identical(rdz_hash(read_rdz(path)), rdz_info(path)$content_hash)
   expect_false(identical(rdz_hash(shared), rdz_hash(copied)))
 })
+
+test_that("a root attribute shared with another reads alone", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  v <- seq_len(5000L) + 0.5
+  df <- data.frame(x = 1:3)
+  attr(df, "a") <- v
+  attr(df, "b") <- v # stored as a reference to "a"
+  write_rdz(df, path)
+  expect_identical(rdz:::rdz_check(.Call(rdz:::rdz_c_read_native_attribute, path, "b")), v)
+  expect_identical(rdz_attributes(path, names = "b"), list(b = v))
+})

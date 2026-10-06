@@ -67,8 +67,8 @@ and raw vectors, environments, functions, calls, S4 objects);
 convert to UTF-8 losslessly (unmarked strings in the C locale);
 \item a non-ASCII attribute name, or names, row names or a class carrying
 attributes of their own;
-\item a factor with names, a data frame column of another length than its rows
-(a matrix of two or more columns) or that is itself a data frame;
+\item a factor with names, or a data frame column of another length than its
+rows (a matrix of two or more columns);
 \item nesting deeper than 1,000 levels, or more than 1,000,000 parts.
 }
 

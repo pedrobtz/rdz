@@ -317,7 +317,7 @@ int rdz_outfile_open(rdz_outfile *f, const char *path, rdz_error *e)
     if (exists < 0) return rdz_io_errno(e, errno);
     if (exists && is_dir) return rdz_invalid(e, "destination is a directory");
     f->have_mode = exists;
-    f->mode = mode & 07777u;
+    f->mode = mode & 0777u; /* not setuid, setgid or sticky */
     f->destination = (char *)malloc(n + 1);
     if (!f->destination) return rdz_memory(e, "the output path");
     memcpy(f->destination, path, n + 1);
