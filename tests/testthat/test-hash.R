@@ -131,3 +131,14 @@ test_that("rdz_verify() checks every block and, on request, the content hash", {
   expect_identical(rdz_verify(path), path)
   expect_error(rdz_verify(path, content = TRUE), "no content hash")
 })
+
+test_that("hashing many character vectors needs no memory per vector", {
+  skip_on_cran()
+  x <- lapply(1:1000, function(i) sprintf("s%04d_%d", 1:200, i))
+  invisible(gc(reset = TRUE))
+  base <- gc()["Vcells", "max used"]
+  invisible(gc(reset = TRUE))
+  rdz_hash(x)
+  peak <- gc()["Vcells", "max used"]
+  expect_lt((peak - base) * 8, 64 * 2^20) # one string cache, not one per vector
+})
