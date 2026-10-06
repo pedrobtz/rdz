@@ -1,0 +1,26 @@
+# The frozen 0.1.0 corpus only grows: a fixture a release wrote is never
+# rewritten or removed (tools/check-frozen-corpus.R). The tests check each
+# file against its manifest row; this checks the rows against the base.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+name: corpus
+
+permissions: read-all
+
+jobs:
+  frozen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - name: Compare with the base
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: Rscript tools/check-frozen-corpus.R "$BASE"
