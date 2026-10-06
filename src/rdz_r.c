@@ -56,7 +56,7 @@ const char *rdz_path(SEXP path)
 #endif
 }
 
-static void rdz_reader_finalize(SEXP ptr)
+void rdz_reader_finalize(SEXP ptr)
 {
     rdz_reader *r = (rdz_reader *)R_ExternalPtrAddr(ptr);
     if (r) {
@@ -67,7 +67,7 @@ static void rdz_reader_finalize(SEXP ptr)
 }
 
 /* An external pointer owning a closed reader, protected by the caller. */
-static SEXP rdz_reader_handle(rdz_reader **out)
+SEXP rdz_reader_handle(rdz_reader **out)
 {
     SEXP ptr = PROTECT(R_MakeExternalPtr(NULL, R_NilValue, R_NilValue));
     rdz_reader *r;

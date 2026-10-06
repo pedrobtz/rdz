@@ -720,11 +720,30 @@ typedef struct {
     zb_buf sinks; /* rdz_r_names per object */
     SEXP select;  /* R_NilValue, or the root's children to read (0-based
                      integers; held by the caller) */
+    SEXP targets; /* R_NilValue, or objects to read alone (0-based ids; held
+                     by the caller): the result is the list of them */
     zb_buf want;  /* with a selection: a byte per object, set to read it */
     int threads;
     rdz_error e;
     int failed;
 } rdz_graph_in;
+
+/* Marks, from object `from` on, everything below a marked object: its
+   children, levels and attribute objects, which all come after it. */
+static void rdz_mark_below(const rdz_reader *r, uint8_t *want, uint32_t from)
+{
+    uint32_t i, c, a;
+    for (i = from; i < r->nobjects; i++) {
+        const rdz_object *o = &r->objects[i];
+        if (!want[i]) continue;
+        for (c = 0; c < o->child_count; c++) want[o->first_child + c] = 1;
+        for (a = 0; a < o->attribute_count; a++) {
+            const rdz_attribute *at = &r->attributes[o->first_attribute + a];
+            want[at->name_object_id] = 1;
+            want[at->value_object_id] = 1;
+        }
+    }
+}
 
 /* With a selection, marks what to read: the root; its names, row names and
    class (a selection keeps no other root attribute, which may describe the
@@ -737,7 +756,7 @@ static int rdz_select_mask(rdz_graph_in *g)
     const rdz_object *root = &r->objects[0];
     const int *sel = INTEGER(g->select);
     R_xlen_t j, k = XLENGTH(g->select);
-    uint32_t i, a, c;
+    uint32_t a;
     uint8_t *want;
     if (root->type_tag != RDZ_TYPE_LIST && root->type_tag != RDZ_TYPE_DATA_FRAME) {
         return rdz_unsupported(&g->e, "selecting from a root that is not a list or a data frame");
@@ -757,16 +776,24 @@ static int rdz_select_mask(rdz_graph_in *g)
         }
         want[root->first_child + (uint32_t)sel[j]] = 1;
     }
-    for (i = 1; i < r->nobjects; i++) {
-        const rdz_object *o = &r->objects[i];
-        if (!want[i]) continue;
-        for (c = 0; c < o->child_count; c++) want[o->first_child + c] = 1;
-        for (a = 0; a < o->attribute_count; a++) {
-            const rdz_attribute *at = &r->attributes[o->first_attribute + a];
-            want[at->name_object_id] = 1;
-            want[at->value_object_id] = 1;
+    rdz_mark_below(r, want, 1); /* below the selected children, not the root */
+    return 0;
+}
+
+/* With targets: each target and everything below it. */
+static int rdz_target_mask(rdz_graph_in *g)
+{
+    const rdz_reader *r = &g->r;
+    const int *id = INTEGER(g->targets);
+    R_xlen_t j, k = XLENGTH(g->targets);
+    if (zb_put_zeros(&g->want, r->nobjects)) return rdz_memory(&g->e, "the selection");
+    for (j = 0; j < k; j++) {
+        if (id[j] == NA_INTEGER || id[j] < 0 || (uint32_t)id[j] >= r->nobjects) {
+            return rdz_limit(&g->e, "object id");
         }
+        g->want.data[id[j]] = 1;
     }
+    rdz_mark_below(r, g->want.data, 0);
     return 0;
 }
 
@@ -823,10 +850,13 @@ static SEXP rdz_graph_body(void *data)
     rdz_graph_sinks sinks;
     rdz_r_names *names;
     const uint8_t *want = NULL;
-    int selecting = g->select != R_NilValue;
+    int selecting = g->select != R_NilValue, targeting = g->targets != R_NilValue;
     g->failed = 1;
     if (selecting) {
         if (rdz_select_mask(g)) return R_NilValue;
+        want = g->want.data;
+    } else if (targeting) {
+        if (rdz_target_mask(g)) return R_NilValue;
         want = g->want.data;
     }
     for (i = 0; i < n; i++) {
@@ -991,6 +1021,15 @@ static SEXP rdz_graph_body(void *data)
         }
     }
     g->failed = 0;
+    if (targeting) {
+        /* no allocation follows: the caller protects the list */
+        SEXP out = Rf_allocVector(VECSXP, XLENGTH(g->targets));
+        R_xlen_t j;
+        for (j = 0; j < XLENGTH(g->targets); j++) {
+            SET_VECTOR_ELT(out, j, VECTOR_ELT(g->holder, INTEGER(g->targets)[j]));
+        }
+        return out;
+    }
     return VECTOR_ELT(g->holder, 0);
 }
 
@@ -1015,7 +1054,16 @@ static void rdz_graph_in_cleanup(void *data, Rboolean jump)
 /* The value of a native file, given its open reader, which this takes over
    (its buffers and file) and closes; with `select` (0-based integers, or
    R_NilValue for all), only those children of a list or data frame root. */
+static SEXP rdz_native_read_in(rdz_reader *opened, int threads, SEXP select, SEXP targets,
+                               rdz_error *e, int *failed);
+
 SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, rdz_error *e, int *failed)
+{
+    return rdz_native_read_in(opened, threads, select, R_NilValue, e, failed);
+}
+
+static SEXP rdz_native_read_in(rdz_reader *opened, int threads, SEXP select, SEXP targets,
+                               rdz_error *e, int *failed)
 {
     SEXP ptr, cont, out, holder;
     rdz_graph_in *g;
@@ -1032,6 +1080,7 @@ SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, rdz_error *
     rdz_reader_init(opened);
     rdz_vec_init(&g->v);
     g->select = select;
+    g->targets = targets;
     g->threads = threads;
     R_SetExternalPtrAddr(ptr, g);
     holder = Rf_allocVector(VECSXP, 2 * (R_xlen_t)g->r.nobjects);
@@ -1211,4 +1260,142 @@ SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
     UNPROTECT(1);
     if (failed) return rdz_failure(&e);
     return out;
+}
+
+/* ---- the directory, and objects read alone ---------------------------------------- */
+
+static void rdz_col(SEXP list, SEXP names, int i, const char *name, SEXP value)
+{
+    SET_VECTOR_ELT(list, i, value);
+    SET_STRING_ELT(names, i, Rf_mkChar(name));
+}
+
+/* A native file's directory as two tables (lists of columns): objects (id,
+   parent, role, type, flags, length, children, attributes, blocks, stored
+   and decoded bytes) and attributes (owner, kind, name, name and value
+   objects). General attributes' names come from their one-block name
+   objects; nothing else is read. */
+SEXP rdz_c_directory(SEXP path)
+{
+    const char *p = rdz_path(path);
+    rdz_reader *rp;
+    rdz_error e;
+    SEXP ptr = PROTECT(rdz_reader_handle(&rp));
+    uint32_t i, n, na;
+    SEXP out, outn, obj, objn, att, attn, col;
+    int *id, *parent, *role, *type, *flags, *fc, *cc, *fa, *ac, *fb, *bc;
+    double *len, *stored, *decoded;
+    if (rdz_reader_open(rp, p, &e)) {
+        rdz_reader_finalize(ptr);
+        UNPROTECT(1);
+        return rdz_failure(&e);
+    }
+    if (rp->codec_id != RDZ_CODEC_NATIVE_V1) {
+        rdz_codec_error(&e, rp->codec_id, rp->codec_version);
+        rdz_reader_finalize(ptr);
+        UNPROTECT(1);
+        return rdz_failure(&e);
+    }
+    n = rp->nobjects;
+    na = rp->nattributes;
+    /* the reader belongs to `ptr`: an R error anywhere frees it */
+    out = PROTECT(Rf_allocVector(VECSXP, 2));
+    outn = PROTECT(Rf_allocVector(STRSXP, 2));
+    obj = Rf_allocVector(VECSXP, 14);
+    rdz_col(out, outn, 0, "objects", obj);
+    objn = Rf_allocVector(STRSXP, 14);
+    Rf_setAttrib(obj, R_NamesSymbol, objn);
+#define RDZ_ICOL(k, nm, ptr) col = Rf_allocVector(INTSXP, n); rdz_col(obj, objn, k, nm, col); ptr = INTEGER(col)
+#define RDZ_DCOL(k, nm, ptr) col = Rf_allocVector(REALSXP, n); rdz_col(obj, objn, k, nm, col); ptr = REAL(col)
+    RDZ_ICOL(0, "id", id);
+    RDZ_ICOL(1, "parent", parent);
+    RDZ_ICOL(2, "role", role);
+    RDZ_ICOL(3, "type", type);
+    RDZ_ICOL(4, "flags", flags);
+    RDZ_DCOL(5, "length", len);
+    RDZ_ICOL(6, "first_child", fc);
+    RDZ_ICOL(7, "child_count", cc);
+    RDZ_ICOL(8, "first_attribute", fa);
+    RDZ_ICOL(9, "attribute_count", ac);
+    RDZ_ICOL(10, "first_block", fb);
+    RDZ_ICOL(11, "block_count", bc);
+    RDZ_DCOL(12, "stored_bytes", stored);
+    RDZ_DCOL(13, "decoded_bytes", decoded);
+#undef RDZ_ICOL
+#undef RDZ_DCOL
+    for (i = 0; i < n; i++) {
+        const rdz_object *o = &rp->objects[i];
+        uint32_t b;
+        id[i] = (int)i;
+        parent[i] = o->parent_id == RDZ_ROOT_PARENT_ID ? NA_INTEGER : (int)o->parent_id;
+        role[i] = o->role;
+        type[i] = o->type_tag;
+        flags[i] = (int)o->flags;
+        len[i] = (double)o->logical_len;
+        fc[i] = (int)o->first_child;
+        cc[i] = (int)o->child_count;
+        fa[i] = (int)o->first_attribute;
+        ac[i] = (int)o->attribute_count;
+        fb[i] = (int)o->first_block;
+        bc[i] = (int)o->block_count;
+        stored[i] = decoded[i] = 0;
+        for (b = o->first_block; b < o->first_block + o->block_count; b++) {
+            stored[i] += rp->blocks[b].stored_len;
+            decoded[i] += (double)rp->blocks[b].decoded_len;
+        }
+    }
+    att = Rf_allocVector(VECSXP, 5);
+    rdz_col(out, outn, 1, "attributes", att);
+    attn = Rf_allocVector(STRSXP, 5);
+    Rf_setAttrib(att, R_NamesSymbol, attn);
+    {
+        SEXP owner = Rf_allocVector(INTSXP, na), kind, name, nobj, vobj;
+        rdz_col(att, attn, 0, "owner", owner);
+        kind = Rf_allocVector(INTSXP, na);
+        rdz_col(att, attn, 1, "kind", kind);
+        name = Rf_allocVector(STRSXP, na);
+        rdz_col(att, attn, 2, "name", name);
+        nobj = Rf_allocVector(INTSXP, na);
+        rdz_col(att, attn, 3, "name_object", nobj);
+        vobj = Rf_allocVector(INTSXP, na);
+        rdz_col(att, attn, 4, "value_object", vobj);
+        for (i = 0; i < na; i++) {
+            const rdz_attribute *a = &rp->attributes[i];
+            char nm[10001]; /* R caps a symbol at 10,000 bytes */
+            INTEGER(owner)[i] = (int)a->owner_id;
+            INTEGER(kind)[i] = (int)a->flags;
+            INTEGER(nobj)[i] = (int)a->name_object_id;
+            INTEGER(vobj)[i] = (int)a->value_object_id;
+            if (rdz_read_attr_name(rp, a, nm, sizeof nm, &e)) {
+                rdz_reader_finalize(ptr);
+                UNPROTECT(3);
+                return rdz_failure(&e);
+            }
+            SET_STRING_ELT(name, i, Rf_mkChar(nm));
+        }
+    }
+    rdz_reader_finalize(ptr);
+    Rf_setAttrib(out, R_NamesSymbol, outn);
+    UNPROTECT(3);
+    return out;
+}
+
+/* Objects of a native file (0-based ids) and everything below each, read
+   alone: the list of them. */
+SEXP rdz_c_read_objects(SEXP path, SEXP ids, SEXP settings)
+{
+    const char *p = rdz_path(path);
+    rdz_reader r;
+    rdz_error e;
+    int failed, threads = INTEGER(settings)[1] < 1 ? 1 : INTEGER(settings)[1];
+    SEXP out;
+    if (rdz_reader_open(&r, p, &e)) return rdz_failure(&e);
+    if (r.codec_id != RDZ_CODEC_NATIVE_V1) {
+        rdz_codec_error(&e, r.codec_id, r.codec_version);
+        rdz_reader_close(&r);
+        return rdz_failure(&e);
+    }
+    out = PROTECT(rdz_native_read_in(&r, threads, R_NilValue, ids, &e, &failed)); /* closes r */
+    UNPROTECT(1);
+    return failed ? rdz_failure(&e) : out;
 }
