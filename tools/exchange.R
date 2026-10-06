@@ -36,6 +36,8 @@ if (args[[1L]] == "write") {
 
 dirs <- args[-1L]
 failures <- 0L
+manifest <- utils::read.delim(file.path(corpus, "manifest.tsv"), colClasses = "character",
+                              quote = "")
 fail <- function(...) {
   cat("FAIL:", ..., "\n")
   failures <<- failures + 1L
@@ -55,6 +57,11 @@ for (spec in specs) {
     }
     bytes[[d]] <- but_writer(path)
   }
+  # the content hash names the value: the same on every platform, and the
+  # corpus's
+  hashes <- vapply(dirs, function(d) rdz::rdz_info(file.path(d, file))$content_hash, "")
+  want <- manifest$content_hash[manifest$name == spec$name]
+  if (!all(hashes == want)) fail(file, "content hash differs:", paste(unique(hashes), collapse = " "))
   same <- all(vapply(bytes, identical, logical(1L), bytes[[1L]]))
   if (identical(spec$preset, "speed") && identical(spec$codec, "native_v1")) {
     if (!same) fail(file, "differs between platforms")

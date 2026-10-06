@@ -27,6 +27,10 @@ typedef struct {
     rdz_writer w;
     rdz_pipeline pipe;
     int have_pipe;
+    int hash_content;         /* rdz_graph_write() computes and records the content hash */
+    struct rdz_content_s *content; /* its accumulator while writing: 64-byte aligned
+                                      within content_mem (freed by rdz_vec_free) */
+    void *content_mem;
 } rdz_vec;
 
 void rdz_vec_init(rdz_vec *v);

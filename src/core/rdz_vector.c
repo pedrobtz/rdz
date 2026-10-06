@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <string.h>
 
 #include "rdz_logical.h"
@@ -19,10 +20,16 @@ void rdz_vec_init(rdz_vec *v)
     rdz_writer_init(&v->w);
     memset(&v->pipe, 0, sizeof v->pipe);
     v->have_pipe = 0;
+    v->hash_content = 0;
+    v->content = NULL;
+    v->content_mem = NULL;
 }
 
 void rdz_vec_free(rdz_vec *v)
 {
+    free(v->content_mem);
+    v->content_mem = NULL;
+    v->content = NULL;
     if (v->have_pipe) rdz_pipeline_free(&v->pipe); /* joins the workers first */
     v->have_pipe = 0;
     rdz_writer_discard(&v->w);

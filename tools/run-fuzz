@@ -27,7 +27,7 @@ ZUFAST=${ZUFAST_INCLUDE:-$(Rscript -e 'cat(system.file("include", package = "zuf
 
 SRCS="src/core/rdz_container.c src/core/rdz_records.c src/core/rdz_io.c src/core/rdz_error.c
       src/core/rdz_codec.c src/core/rdz_logical.c src/core/rdz_native.c src/core/rdz_string.c
-      src/core/rdz_pipeline.c src/core/rdz_numeric.c src/core/rdz_alp.c src/core/rdz_vector.c src/core/rdz_graph.c
+      src/core/rdz_pipeline.c src/core/rdz_numeric.c src/core/rdz_alp.c src/core/rdz_content.c src/core/rdz_vector.c src/core/rdz_graph.c
       src/vendor/zstd/zstd.c"
 FLAGS="-std=c99 -g -O1 -pthread -fno-omit-frame-pointer -fno-sanitize-recover=undefined -UNDEBUG
        -DRDZ_STANDALONE -DRDZ_FUZZ_SKIP_CHECKSUMS -DZSTDLIB_VISIBLE= -DZSTDERRORLIB_VISIBLE= -Isrc/core -I$ZUBIN -I$ZUFAST"

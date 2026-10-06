@@ -1,9 +1,11 @@
 #' Write an R Object to an rdz File
 #'
 #' `write_rdz()` writes an object through the versioned `rdz` block container.
-#' Plain logical vectors and logical vectors with a supported `names` attribute
-#' use the native two-bit codec. Other objects use a whole-root, portable R XDR
-#' stream in automatic mode, written in blocks of 1 MiB.
+#' Logical, integer, double and character vectors, factors, lists and data
+#' frames, nested and with their attributes, are stored natively; anything
+#' else (in automatic mode) goes whole through R serialization, streamed in
+#' blocks of 1 MiB. Every file records the object's content hash
+#' ([rdz_hash()]).
 #'
 #' Two options control how blocks are stored and how many threads do the
 #' work. `options(rdz.preset = )` is `"balanced"` (the default; each block is
@@ -19,6 +21,10 @@
 #' @param mode Codec selection. `"auto"` uses a native codec only when the
 #'   complete value is supported and otherwise uses whole-root R serialization;
 #'   `"native"` rejects unsupported values; `"r"` forces R serialization.
+#' @param skip_unchanged Whether to leave an existing file untouched (its
+#'   bytes and modification time) when it already holds `x`: when its stored
+#'   content hash equals [rdz_hash()] of `x` under the same `mode`. For caches
+#'   and build tools that key on files.
 #' @returns `path`, invisibly.
 #' @examples
 #' path <- tempfile(fileext = ".rdz")
@@ -26,9 +32,18 @@
 #' read_rdz(path)
 #' unlink(path)
 #' @export
-write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
+write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged = FALSE) {
   path <- validate_rdz_path(path)
   mode <- match.arg(mode)
+  if (!is.logical(skip_unchanged) || length(skip_unchanged) != 1L || is.na(skip_unchanged)) {
+    stop("`skip_unchanged` must be TRUE or FALSE.", call. = FALSE)
+  }
+  if (skip_unchanged && file.exists(path) && !dir.exists(path)) {
+    stored <- tryCatch(rdz_info(path)$content_hash, error = function(e) NA_character_)
+    if (!is.na(stored) && identical(stored, rdz_hash(x, mode = mode))) {
+      return(invisible(path))
+    }
+  }
   directory <- dirname(path)
   if (!dir.exists(directory)) {
     stop("The destination directory does not exist: ", directory, call. = FALSE)

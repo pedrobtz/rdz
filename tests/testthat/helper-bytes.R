@@ -4,6 +4,10 @@
 
 le_u64 <- function(bytes, at) sum(as.numeric(bytes[at + 1:8]) * 256^(0:7))
 
+# The directory header's length (40, or 64 with a content hash): where the
+# object entries begin, after the directory's offset.
+dir_header_len <- function(bytes, dir) sum(as.numeric(bytes[dir + 7:8]) * 256^(0:1))
+
 xxh3_le <- function(r) {
   testthat::skip_if_not_installed("zufast")
   h <- zufast::fast_hash(r)
@@ -19,7 +23,7 @@ reseal_block <- function(bytes, payload) {
   nobj <- sum(as.numeric(bytes[dir + 17:20]) * 256^(0:3))
   natt <- sum(as.numeric(bytes[dir + 21:24]) * 256^(0:3))
   nblk <- sum(as.numeric(bytes[dir + 25:28]) * 256^(0:3))
-  entries <- dir + 40 + 48 * nobj + 32 * natt
+  entries <- dir + dir_header_len(bytes, dir) + 48 * nobj + 32 * natt
   for (k in seq_len(nblk) - 1L) {
     e <- entries + 64 * k
     if (le_u64(bytes, e + 16) != payload) next
@@ -29,5 +33,27 @@ reseal_block <- function(bytes, payload) {
     bytes[payload - 48 + 41:48] <- h
   }
   bytes[n - 16 + 1:8] <- xxh3_le(bytes[dir + seq_len(dir_len)])
+  bytes
+}
+
+# A file's bytes as a writer without content hashes writes them: the
+# directory header's hash extension (bytes 40 to 63 of a 64-byte header)
+# removed, the lengths and checksums that cover it resealed, and the
+# header's writer field and checksum zeroed (bytes_but_writer()).
+bytes_without_hash <- function(path) {
+  bytes <- readBin(path, "raw", file.size(path))
+  n <- length(bytes)
+  dir <- le_u64(bytes, n - 32L)
+  header_len <- sum(as.numeric(bytes[dir + 7:8]) * 256^(0:1))
+  if (header_len == 64) {
+    bytes <- bytes[-(dir + 41:64)]
+    n <- length(bytes)
+    bytes[dir + 7:8] <- as.raw(c(40L, 0L))
+    bytes[dir + 33:40] <- xxh3_le(bytes[dir + 1:32])
+    dir_len <- le_u64(bytes, n - 24L) - 24
+    bytes[n - 24 + 1:8] <- as.raw((dir_len %/% 256^(0:7)) %% 256)
+    bytes[n - 16 + 1:8] <- xxh3_le(bytes[dir + seq_len(dir_len)])
+  }
+  bytes[21:32] <- as.raw(0L)
   bytes
 }

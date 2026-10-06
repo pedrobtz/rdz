@@ -38,7 +38,9 @@ test_that("rdz_info() reports what the Rust build reported for every fixture", {
     info <- unclass(rdz_info(path))
     # the Rust reference recorded no writer, and its build had no such field
     expect_identical(info$writer, "", label = spec$name)
+    expect_identical(info$content_hash, NA_character_, label = spec$name)
     info$writer <- NULL
+    info$content_hash <- NULL
     expect_identical(info, infos[[spec$name]], label = spec$name)
   }
 })
@@ -65,8 +67,8 @@ test_that("the C writer reproduces every generic fixture byte for byte", {
     copy <- file.path(dir, basename(path))
     rdz:::rdz_check(.Call(rdz:::rdz_test_write_generic, payload, synopsis, copy))
     expect_identical(
-      bytes_but_writer(copy),
-      bytes_but_writer(path),
+      bytes_without_hash(copy),
+      bytes_without_hash(path),
       label = spec$name
     )
   }

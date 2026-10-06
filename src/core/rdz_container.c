@@ -494,6 +494,14 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
     if (zb_rd_u16le(d + RDZ_DH_FLAGS) & RDZ_FLAGS16_REQUIRED) {
         return rdz_invalid(e, "unsupported directory flags");
     }
+    /* the content hash, when the header is long enough and its scheme known
+       (len >= header_len is checked below with the rest of the lengths) */
+    r->hash_scheme = 0;
+    if (header_len >= RDZ_DIRECTORY_HEADER_HASHED_LEN && len >= header_len &&
+        zb_rd_u16le(d + RDZ_DH_CONTENT_HASH_SCHEME) == RDZ_CONTENT_HASH_V1) {
+        r->hash_scheme = RDZ_CONTENT_HASH_V1;
+        memcpy(r->content_hash, d + RDZ_DH_CONTENT_HASH, 16);
+    }
     nobj = zb_rd_u32le(d + RDZ_DH_OBJECTS);
     natt = zb_rd_u32le(d + RDZ_DH_ATTRIBUTES);
     nblk = zb_rd_u32le(d + RDZ_DH_BLOCKS);
@@ -768,6 +776,8 @@ void rdz_writer_init(rdz_writer *w)
     zb_buf_init(&w->entries);
     w->nblocks = 0;
     w->block_size = RDZ_BLOCK_SIZE;
+    w->hash_scheme = 0;
+    memset(w->content_hash, 0, sizeof w->content_hash);
     w->open = 0;
 }
 
@@ -856,23 +866,24 @@ int rdz_writer_finish(rdz_writer *w, const rdz_object *objects, uint32_t nobject
     uint8_t t[RDZ_TRAILER_LEN];
     uint8_t *p;
     uint64_t directory_offset = w->out.position;
-    size_t len;
+    size_t len, header_len;
     uint32_t i;
     int failed;
 
     if (synopsis_len > RDZ_MAX_SYNOPSIS_LEN) return rdz_limit(e, "generic synopsis");
     if (nobjects > RDZ_MAX_OBJECTS) return rdz_limit(e, "object count");
     if (nattributes > RDZ_MAX_ATTRIBUTES) return rdz_limit(e, "attribute count");
-    len = RDZ_DIRECTORY_HEADER_LEN + (size_t)nobjects * RDZ_OBJECT_ENTRY_LEN +
+    header_len = w->hash_scheme ? RDZ_DIRECTORY_HEADER_HASHED_LEN : RDZ_DIRECTORY_HEADER_LEN;
+    len = header_len + (size_t)nobjects * RDZ_OBJECT_ENTRY_LEN +
           (size_t)nattributes * RDZ_ATTRIBUTE_ENTRY_LEN + w->entries.len + synopsis_len;
     if (zb_buf_alloc(&dir, len, 0) || !(p = zb_put_raw(&dir, len))) {
         zb_buf_release(&dir);
         return rdz_memory(e, "the directory");
     }
-    memset(p, 0, RDZ_DIRECTORY_HEADER_LEN);
+    memset(p, 0, header_len);
     memcpy(p + RDZ_DH_MAGIC, RDZ_DIRECTORY_MAGIC, 4);
     zb_wr_u16le(p + RDZ_DH_VERSION, (uint16_t)RDZ_DIRECTORY_VERSION);
-    zb_wr_u16le(p + RDZ_DH_HEADER_LEN, (uint16_t)RDZ_DIRECTORY_HEADER_LEN);
+    zb_wr_u16le(p + RDZ_DH_HEADER_LEN, (uint16_t)header_len);
     zb_wr_u16le(p + RDZ_DH_OBJECT_WIDTH, (uint16_t)RDZ_OBJECT_ENTRY_LEN);
     zb_wr_u16le(p + RDZ_DH_ATTRIBUTE_WIDTH, (uint16_t)RDZ_ATTRIBUTE_ENTRY_LEN);
     zb_wr_u16le(p + RDZ_DH_BLOCK_WIDTH, (uint16_t)RDZ_BLOCK_ENTRY_LEN);
@@ -881,7 +892,12 @@ int rdz_writer_finish(rdz_writer *w, const rdz_object *objects, uint32_t nobject
     zb_wr_u32le(p + RDZ_DH_BLOCKS, w->nblocks);
     zb_wr_u32le(p + RDZ_DH_SYNOPSIS_LEN, (uint32_t)synopsis_len);
     zb_wr_u64le(p + RDZ_DH_CHECKSUM, rdz_hash(p, RDZ_DH_CHECKSUM));
-    p += RDZ_DIRECTORY_HEADER_LEN;
+    if (w->hash_scheme) {
+        /* covered by the trailer's checksum of the whole directory */
+        memcpy(p + RDZ_DH_CONTENT_HASH, w->content_hash, 16);
+        zb_wr_u16le(p + RDZ_DH_CONTENT_HASH_SCHEME, w->hash_scheme);
+    }
+    p += header_len;
     for (i = 0; i < nobjects; i++, p += RDZ_OBJECT_ENTRY_LEN) rdz_object_encode(p, &objects[i]);
     for (i = 0; i < nattributes; i++, p += RDZ_ATTRIBUTE_ENTRY_LEN) {
         rdz_attribute_encode(p, &attributes[i]);

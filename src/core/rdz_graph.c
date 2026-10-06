@@ -1,5 +1,7 @@
+#include <stdlib.h>
 #include <string.h>
 
+#include "rdz_content.h"
 #include "rdz_graph.h"
 #include "rdz_logical.h"
 #include "rdz_numeric.h"
@@ -90,6 +92,7 @@ static int write_values(rdz_vec *v, const rdz_node *node, rdz_tick_fn tick, void
         s->vtype = vt;
         s->logical_count = take;
         rdz_pipeline_submit(&v->pipe, s, e);
+        if (v->content) rdz_content_values(v->content, src + at * size, take, size);
         at += take;
         if (drain(v, 0, e)) return 1;
         if (tick && at < n) tick(tick_ctx);
@@ -123,6 +126,19 @@ int rdz_graph_write(rdz_vec *v, const char *path, const rdz_node *nodes, uint32_
                         e)) {
         goto done;
     }
+    if (v->hash_content) {
+        if (!v->content) {
+            /* malloc() aligns to 16 at most; the hasher needs 64 */
+            v->content_mem = malloc(sizeof(rdz_content) + 63);
+            if (!v->content_mem) {
+                rdz_memory(e, "the content hash");
+                goto done;
+            }
+            v->content = (rdz_content *)(void *)(((uintptr_t)v->content_mem + 63) &
+                                                 ~(uintptr_t)63);
+        }
+        rdz_content_begin(v->content);
+    }
     emit.v = v;
     emit.tick = tick;
     emit.tick_ctx = tick_ctx;
@@ -143,6 +159,7 @@ int rdz_graph_write(rdz_vec *v, const char *path, const rdz_node *nodes, uint32_
            numbered by the pipeline's submission count: no wait between
            objects, and every column is in flight together */
         o[i].first_block = (uint32_t)v->pipe.next_submit;
+        if (v->content) rdz_content_node(v->content, n);
         switch (n->type) {
         case RDZ_TYPE_LOGICAL:
         case RDZ_TYPE_INTEGER:
@@ -152,9 +169,10 @@ int rdz_graph_write(rdz_vec *v, const char *path, const rdz_node *nodes, uint32_
             break;
         case RDZ_TYPE_CHARACTER:
             /* an attribute's name is one plain record (the validator's rule) */
-            if (rdz_string_encode(n->strings,
-                                  n->role == RDZ_ROLE_ATTRIBUTE_NAME ? RDZ_DICT_PLAIN : policy,
-                                  emit_strings, &emit, e)) {
+            if (rdz_string_encode_hashed(n->strings,
+                                         n->role == RDZ_ROLE_ATTRIBUTE_NAME ? RDZ_DICT_PLAIN
+                                                                            : policy,
+                                         emit_strings, &emit, v->content, e)) {
                 goto done;
             }
             break;
@@ -166,6 +184,11 @@ int rdz_graph_write(rdz_vec *v, const char *path, const rdz_node *nodes, uint32_
     if (drain(v, 1, e)) goto done;
     rdz_pipeline_free(&v->pipe);
     v->have_pipe = 0;
+    if (v->content) {
+        rdz_content_attributes(v->content, attributes, nattributes);
+        rdz_content_end(v->content, v->w.content_hash);
+        v->w.hash_scheme = RDZ_CONTENT_HASH_V1;
+    }
     failed = rdz_writer_finish(&v->w, o, nnodes, attributes, nattributes, NULL, 0, e);
 done:
     zb_buf_release(&objects);

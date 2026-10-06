@@ -34,8 +34,8 @@ test_that("every native fixture is reproduced byte for byte, with every kernel",
       fixture <- file.path(rust_fixture_dir(), paste0(spec$name, ".rdz"))
       with_dictionary_policy(spec$policy, write_rdz(spec$value(), copy, mode = "native"))
       expect_identical(
-        bytes_but_writer(copy),
-        bytes_but_writer(fixture),
+        bytes_without_hash(copy),
+        bytes_without_hash(fixture),
         label = paste(spec$name, kernel)
       )
     }

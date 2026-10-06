@@ -30,6 +30,8 @@ typedef struct {
     uint16_t container_version, codec_id, codec_version;
     uint32_t block_size;
     uint8_t writer[4];       /* the header's writer field, as stored */
+    uint16_t hash_scheme;    /* the content hash's scheme; 0: none (or unknown) */
+    uint8_t content_hash[16]; /* XXH3-128, low then high u64, little-endian */
     uint32_t nobjects, nattributes, nblocks;
     uint64_t payload_bytes, file_bytes, directory_offset;
     const rdz_object *objects;
@@ -70,6 +72,8 @@ typedef struct {
     zb_buf entries; /* encoded block entries */
     uint32_t nblocks;
     uint32_t block_size; /* the largest decoded block, recorded in the header */
+    uint16_t hash_scheme;      /* set before rdz_writer_finish(): 0, no hash */
+    uint8_t content_hash[16];
     int open;
 } rdz_writer;
 

@@ -87,6 +87,8 @@ Use two-space indentation, `<-`, and `snake_case` in R.
 
 Name files `test-*.R`, helpers `helper-*.R`, and use descriptive `test_that()` labels. R-side tests are authoritative; the C harness and the fuzz targets cover the R-free core.
 
+Build a double whose bits matter (`-0`, NaN payloads) from its bytes in any function a test calls more than once: R's byte compiler folds the literal `-0` to `+0`, so the value changes once the JIT compiles the function, and `identical()` cannot tell (the content hash can).
+
 Every API or format change needs round-trip tests. Use `expect_identical()` for
 ordinary values; use semantic graph/behavior assertions for reference objects
 that base R reconstructs rather than preserving by original identity, and for

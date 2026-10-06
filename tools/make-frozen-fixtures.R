@@ -20,7 +20,7 @@ encodings <- function(path) {
   bytes <- readBin(path, "raw", file.size(path))
   le <- function(at, w) sum(as.numeric(bytes[at + seq_len(w)]) * 256^(seq_len(w) - 1L))
   dir <- le(length(bytes) - 40L + 8L, 8L)
-  first <- dir + 40L + 48L * le(dir + 16L, 4L) + 32L * le(dir + 20L, 4L)
+  first <- dir + le(dir + 6L, 2L) + 48L * le(dir + 16L, 4L) + 32L * le(dir + 20L, 4L)
   n <- le(dir + 24L, 4L)
   e <- vapply(seq_len(n) - 1L, function(k) le(first + 64L * k + 48L, 2L), numeric(1L))
   c <- vapply(seq_len(n) - 1L, function(k) le(first + 64L * k + 50L, 2L), numeric(1L))
@@ -39,7 +39,8 @@ rows <- lapply(frozen_fixture_specs(), function(spec) {
   e <- encodings(path)
   data.frame(name = spec$name, preset = spec$preset, codec = info$codec,
              bytes = as.character(file.size(path)), sha256 = unname(tools::sha256sum(path)),
-             encodings = e[[1L]], compressions = e[[2L]], writer = info$writer)
+             encodings = e[[1L]], compressions = e[[2L]], writer = info$writer,
+             content_hash = info$content_hash)
 })
 manifest <- do.call(rbind, rows)
 utils::write.table(manifest, file.path(dir, "manifest.tsv"), sep = "\t", quote = FALSE,

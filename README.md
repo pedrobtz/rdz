@@ -23,6 +23,11 @@ through R's own serializer, streamed through the same blocks.
 - **Inspectable:** `rdz_schema()` shows a native file's tree (each part's
   type, class, shape, attributes and size), and `rdz_attributes(path, object =
   c("sales", "date"))` reads any part's attributes, without decoding its data.
+- **Content-addressed:** every file records a 128-bit hash of the value
+  (`rdz_info(path)$content_hash`, read without the data), and `rdz_hash(x)`
+  gives the same hash for an object, whatever preset, threads or platform.
+  `write_rdz(skip_unchanged = TRUE)` leaves a file holding the value as it
+  is, and `rdz_verify()` checks a file's integrity without building it.
 - **Tables as written:** data.tables come back usable in place, nested or not,
   and tibbles as tibbles.
 - **Checked:** every header, directory and block carries an XXH3-64 checksum,
