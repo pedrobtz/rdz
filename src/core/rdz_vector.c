@@ -23,6 +23,8 @@ void rdz_vec_init(rdz_vec *v)
     v->hash_content = 0;
     v->content = NULL;
     v->content_mem = NULL;
+    v->metadata = NULL;
+    v->metadata_len = 0;
 }
 
 void rdz_vec_free(rdz_vec *v)

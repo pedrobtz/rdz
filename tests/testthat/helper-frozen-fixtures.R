@@ -122,6 +122,9 @@ frozen_fixture_specs <- function() {
       )
     })
   )
+  # user metadata (Stage N), native and generic
+  native[[length(native) + 1L]] <- list(name = "metadata", value = function() 1:3,
+                                        metadata = c(source = "frozen", "cl\u00e9" = "\u2713"))
   generic <- list(
     list(name = "gen_rare", value = function() {
       list(complex = complex(real = 1, imaginary = -2), raw = as.raw(c(0, 255)),
@@ -136,7 +139,8 @@ frozen_fixture_specs <- function() {
   for (s in native) {
     for (preset in c("speed", "balanced")) {
       specs[[length(specs) + 1L]] <- list(name = paste0(s$name, "_", preset), preset = preset,
-                                          codec = "native_v1", value = s$value)
+                                          codec = "native_v1", value = s$value,
+                                          metadata = s$metadata)
     }
   }
   for (s in generic) {
@@ -154,5 +158,5 @@ write_frozen_fixture <- function(spec, path) {
   old <- options(rdz.preset = spec$preset, rdz.threads = 1L)
   on.exit(options(old), add = TRUE)
   mode <- if (identical(spec$codec, "native_v1")) "native" else "r"
-  rdz::write_rdz(spec$value(), path, mode = mode)
+  rdz::write_rdz(spec$value(), path, mode = mode, metadata = spec$metadata)
 }

@@ -92,6 +92,13 @@
 #define RDZ_DH_CONTENT_HASH             40u
 #define RDZ_DH_CONTENT_HASH_SCHEME      56u
 #define RDZ_CONTENT_HASH_V1             1u
+/* User metadata (Stage N): in a header of at least 64 bytes, bytes 60 to 63
+   give the length of a metadata section that follows the synopsis: a u32
+   count, then per entry a u32 length and UTF-8 key, a u32 length and UTF-8
+   value; keys not empty and distinct. */
+#define RDZ_DH_METADATA_LEN      60u
+#define RDZ_MAX_METADATA_LEN     ((uint32_t)64 * 1024)
+#define RDZ_MAX_METADATA_ENTRIES 1024u
 
 /* Directory entries may be wider than these, never narrower; readers skip
    the extra bytes. */

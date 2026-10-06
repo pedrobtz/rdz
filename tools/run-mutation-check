@@ -57,6 +57,7 @@ string-record-length|invalid rdz file: truncated character bytes
 dict-index-range|invalid rdz file: dictionary index refers to an undefined entry
 zstd-length|invalid rdz file: block 0 does not decompress to its decoded length
 alp-exception-position|invalid rdz file: invalid decimal double exception position
+metadata-length|invalid rdz file: truncated metadata
 '
 
 mkdir "$WORK/out" "$WORK/src"

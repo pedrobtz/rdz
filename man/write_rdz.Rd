@@ -4,7 +4,13 @@
 \alias{write_rdz}
 \title{Write an R Object to an rdz File}
 \usage{
-write_rdz(x, path, mode = c("auto", "native", "r"), skip_unchanged = FALSE)
+write_rdz(
+  x,
+  path,
+  mode = c("auto", "native", "r"),
+  skip_unchanged = FALSE,
+  metadata = NULL
+)
 }
 \arguments{
 \item{x}{An R object to serialize.}
@@ -16,9 +22,15 @@ complete value is supported and otherwise uses whole-root R serialization;
 \code{"native"} rejects unsupported values; \code{"r"} forces R serialization.}
 
 \item{skip_unchanged}{Whether to leave an existing file untouched (its
-bytes and modification time) when it already holds \code{x}: when its stored
-content hash equals \code{\link[=rdz_hash]{rdz_hash()}} of \code{x} under the same \code{mode}. For caches
-and build tools that key on files.}
+bytes and modification time) when it already holds \code{x} with the same
+\code{metadata}: when its stored content hash equals \code{\link[=rdz_hash]{rdz_hash()}} of \code{x} under
+the same \code{mode}. For caches and build tools that key on files.}
+
+\item{metadata}{\code{NULL}, or user metadata to record with \code{x}: a named
+character vector (or a named list of single strings), up to 1,024
+distinct non-empty names and 64 KiB in all, such as a source, a code
+version or a cache key's inputs. \code{\link[=rdz_info]{rdz_info()}} reads it back, as
+\code{metadata}, without reading \code{x}; it is not part of the content hash.}
 }
 \value{
 \code{path}, invisibly.

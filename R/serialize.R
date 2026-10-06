@@ -22,9 +22,14 @@
 #'   complete value is supported and otherwise uses whole-root R serialization;
 #'   `"native"` rejects unsupported values; `"r"` forces R serialization.
 #' @param skip_unchanged Whether to leave an existing file untouched (its
-#'   bytes and modification time) when it already holds `x`: when its stored
-#'   content hash equals [rdz_hash()] of `x` under the same `mode`. For caches
-#'   and build tools that key on files.
+#'   bytes and modification time) when it already holds `x` with the same
+#'   `metadata`: when its stored content hash equals [rdz_hash()] of `x` under
+#'   the same `mode`. For caches and build tools that key on files.
+#' @param metadata `NULL`, or user metadata to record with `x`: a named
+#'   character vector (or a named list of single strings), up to 1,024
+#'   distinct non-empty names and 64 KiB in all, such as a source, a code
+#'   version or a cache key's inputs. [rdz_info()] reads it back, as
+#'   `metadata`, without reading `x`; it is not part of the content hash.
 #' @returns `path`, invisibly.
 #' @examples
 #' path <- tempfile(fileext = ".rdz")
@@ -32,15 +37,19 @@
 #' read_rdz(path)
 #' unlink(path)
 #' @export
-write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged = FALSE) {
+write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged = FALSE,
+                      metadata = NULL) {
   path <- validate_rdz_path(path)
   mode <- match.arg(mode)
+  section <- rdz_metadata_section(metadata)
   if (!is.logical(skip_unchanged) || length(skip_unchanged) != 1L || is.na(skip_unchanged)) {
     stop("`skip_unchanged` must be TRUE or FALSE.", call. = FALSE)
   }
   if (skip_unchanged && file.exists(path) && !dir.exists(path)) {
-    stored <- tryCatch(rdz_info(path)$content_hash, error = function(e) NA_character_)
-    if (!is.na(stored) && identical(stored, rdz_hash(x, mode = mode))) {
+    stored <- tryCatch(rdz_info(path), error = function(e) NULL)
+    if (!is.null(stored) && !is.na(stored$content_hash) &&
+        identical(stored$metadata, rdz_metadata_vector(metadata)) &&
+        identical(stored$content_hash, rdz_hash(x, mode = mode))) {
       return(invisible(path))
     }
   }
@@ -55,7 +64,7 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged =
   if (!identical(mode, "r")) {
     native_written <- rdz_check(.Call(
       rdz_c_try_write_native, x, path, identical(mode, "native"), rdz_dictionary_policy(),
-      rdz_settings()
+      rdz_settings(), section
     ))
     if (isTRUE(native_written)) {
       return(invisible(path))
@@ -69,7 +78,7 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged =
     xdr = TRUE,
     version = 3L
   )
-  rdz_check(.Call(rdz_c_write_generic, x, synopsis, path, rdz_settings()))
+  rdz_check(.Call(rdz_c_write_generic, x, synopsis, path, rdz_settings(), section))
   invisible(path)
 }
 
@@ -118,6 +127,40 @@ read_rdz <- function(path, select = NULL) {
   value <- read[[1L]]
   if (!read[[2L]] && !is.null(select)) value <- rdz_select_generic(value, select)
   value
+}
+
+# User metadata as rdz_info() returns it: a named UTF-8 character vector
+# (empty when there is none).
+rdz_metadata_vector <- function(metadata) {
+  if (is.null(metadata) || !length(metadata)) {
+    return(stats::setNames(character(), character()))
+  }
+  ok <- (is.character(metadata) || is.list(metadata)) && !is.null(names(metadata)) &&
+    all(vapply(metadata, function(v) is.character(v) && length(v) == 1L && !is.na(v), TRUE))
+  if (!ok) {
+    stop("`metadata` must be NULL or a named character vector (or a named list of single ",
+         "strings), without NA.", call. = FALSE)
+  }
+  keys <- enc2utf8(names(metadata))
+  if (anyNA(keys) || any(!nzchar(keys)) || anyDuplicated(keys)) {
+    stop("`metadata` names must be distinct and non-empty.", call. = FALSE)
+  }
+  values <- enc2utf8(vapply(metadata, identity, ""))
+  out <- stats::setNames(values, keys)
+  Encoding(out) <- "UTF-8"
+  out
+}
+
+# The metadata section the writer records: a u32 count, then each key and
+# value as a u32 length and UTF-8 bytes (container-format.md); NULL for none.
+rdz_metadata_section <- function(metadata) {
+  v <- rdz_metadata_vector(metadata)
+  if (!length(v)) return(NULL)
+  u32 <- function(n) writeBin(as.integer(n), raw(), size = 4L, endian = "little")
+  str <- function(s) { b <- charToRaw(s); c(u32(length(b)), b) }
+  out <- c(u32(length(v)), unlist(lapply(seq_along(v), function(i) c(str(names(v)[i]), str(v[[i]])))))
+  if (length(out) > 64 * 1024) stop("`metadata` exceeds 64 KiB.", call. = FALSE)
+  out
 }
 
 # The 0-based children `select` names in a native file's list or data frame

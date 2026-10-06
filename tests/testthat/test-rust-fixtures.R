@@ -39,8 +39,10 @@ test_that("rdz_info() reports what the Rust build reported for every fixture", {
     # the Rust reference recorded no writer, and its build had no such field
     expect_identical(info$writer, "", label = spec$name)
     expect_identical(info$content_hash, NA_character_, label = spec$name)
+    expect_length(info$metadata, 0L)
     info$writer <- NULL
     info$content_hash <- NULL
+    info$metadata <- NULL
     expect_identical(info, infos[[spec$name]], label = spec$name)
   }
 })
