@@ -1314,14 +1314,24 @@ SEXP rdz_c_directory(SEXP path)
     n = rp->nobjects;
     na = rp->nattributes;
     /* the reader belongs to `ptr`: an R error anywhere frees it */
+    /* every list and column protected while it is filled (rchk cannot see
+       through a list) */
     out = PROTECT(Rf_allocVector(VECSXP, 2));
     outn = PROTECT(Rf_allocVector(STRSXP, 2));
-    obj = Rf_allocVector(VECSXP, 14);
+    obj = PROTECT(Rf_allocVector(VECSXP, 14));
+    objn = PROTECT(Rf_allocVector(STRSXP, 14));
     rdz_col(out, outn, 0, "objects", obj);
-    objn = Rf_allocVector(STRSXP, 14);
     Rf_setAttrib(obj, R_NamesSymbol, objn);
-#define RDZ_ICOL(k, nm, ptr) col = Rf_allocVector(INTSXP, n); rdz_col(obj, objn, k, nm, col); ptr = INTEGER(col)
-#define RDZ_DCOL(k, nm, ptr) col = Rf_allocVector(REALSXP, n); rdz_col(obj, objn, k, nm, col); ptr = REAL(col)
+#define RDZ_ICOL(k, nm, ptr)                                                  \
+    col = PROTECT(Rf_allocVector(INTSXP, n));                                 \
+    ptr = INTEGER(col);                                                       \
+    rdz_col(obj, objn, k, nm, col);                                           \
+    UNPROTECT(1)
+#define RDZ_DCOL(k, nm, ptr)                                                  \
+    col = PROTECT(Rf_allocVector(REALSXP, n));                                \
+    ptr = REAL(col);                                                          \
+    rdz_col(obj, objn, k, nm, col);                                           \
+    UNPROTECT(1)
     RDZ_ICOL(0, "id", id);
     RDZ_ICOL(1, "parent", parent);
     RDZ_ICOL(2, "role", role);
@@ -1359,20 +1369,20 @@ SEXP rdz_c_directory(SEXP path)
             decoded[i] += (double)rp->blocks[b].decoded_len;
         }
     }
-    att = Rf_allocVector(VECSXP, 5);
+    att = PROTECT(Rf_allocVector(VECSXP, 5));
+    attn = PROTECT(Rf_allocVector(STRSXP, 5));
     rdz_col(out, outn, 1, "attributes", att);
-    attn = Rf_allocVector(STRSXP, 5);
     Rf_setAttrib(att, R_NamesSymbol, attn);
     {
-        SEXP owner = Rf_allocVector(INTSXP, na), kind, name, nobj, vobj;
+        SEXP owner = PROTECT(Rf_allocVector(INTSXP, na)), kind, name, nobj, vobj;
         rdz_col(att, attn, 0, "owner", owner);
-        kind = Rf_allocVector(INTSXP, na);
+        kind = PROTECT(Rf_allocVector(INTSXP, na));
         rdz_col(att, attn, 1, "kind", kind);
-        name = Rf_allocVector(STRSXP, na);
+        name = PROTECT(Rf_allocVector(STRSXP, na));
         rdz_col(att, attn, 2, "name", name);
-        nobj = Rf_allocVector(INTSXP, na);
+        nobj = PROTECT(Rf_allocVector(INTSXP, na));
         rdz_col(att, attn, 3, "name_object", nobj);
-        vobj = Rf_allocVector(INTSXP, na);
+        vobj = PROTECT(Rf_allocVector(INTSXP, na));
         rdz_col(att, attn, 4, "value_object", vobj);
         for (i = 0; i < na; i++) {
             const rdz_attribute *a = &rp->attributes[i];
@@ -1383,15 +1393,16 @@ SEXP rdz_c_directory(SEXP path)
             INTEGER(vobj)[i] = (int)a->value_object_id;
             if (rdz_read_attr_name(rp, a, nm, sizeof nm, &e)) {
                 rdz_reader_finalize(ptr);
-                UNPROTECT(3);
+                UNPROTECT(12);
                 return rdz_failure(&e);
             }
             SET_STRING_ELT(name, i, Rf_mkChar(nm));
         }
+        UNPROTECT(5);
     }
     rdz_reader_finalize(ptr);
     Rf_setAttrib(out, R_NamesSymbol, outn);
-    UNPROTECT(3);
+    UNPROTECT(7);
     return out;
 }
 
