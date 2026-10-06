@@ -186,3 +186,24 @@ test_that("a write's R allocation does not grow with the object", {
   allocated <- bench::mark(write_rdz(x, path, mode = "r"), iterations = 1L)$mem_alloc
   expect_lt(as.numeric(allocated), 1024^2)
 })
+
+test_that("rdz_info() refuses a synopsis that is more than plain vectors", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  hostile <- list(
+    namespace = serialize(list(root_type = "list", ns = asNamespace("stats")), NULL),
+    closure = serialize(list(root_type = "list", f = as.function(alist(1), globalenv())), NULL),
+    environment = serialize(new.env(parent = emptyenv()), NULL),
+    truncated = serialize(list(root_type = "list"), NULL)[1:20],
+    wrong_shape = serialize(list(root_type = 1:2), NULL)
+  )
+  for (name in names(hostile)) {
+    rdz:::rdz_check(.Call(rdz:::rdz_test_write_generic, as.raw(1), hostile[[name]], path))
+    expect_error(rdz_info(path), "root synopsis", class = "rdz_format_error", label = name)
+  }
+  # what write_rdz() records is accepted, for every root type it describes
+  for (x in list(new.env(), quote(f(x)), structure(1:4, dim = c(2L, 2L)), list(a = 1i))) {
+    write_rdz(x, path, mode = "r")
+    expect_identical(rdz_info(path)$synopsis$root_type, typeof(x))
+  }
+})

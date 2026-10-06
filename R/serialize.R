@@ -358,16 +358,7 @@ rdz_select_generic <- function(value, select) {
 rdz_info <- function(path) {
   path <- validate_existing_rdz_path(path)
   info <- rdz_c_file_info(path)
-  synopsis <- if (length(info$synopsis) == 0L) {
-    NULL
-  } else {
-    tryCatch(
-      unserialize(info$synopsis),
-      error = function(error) {
-        stop("The rdz root synopsis is invalid: ", conditionMessage(error), call. = FALSE)
-      }
-    )
-  }
+  synopsis <- if (length(info$synopsis) == 0L) NULL else rdz_synopsis_read(info$synopsis)
   info$synopsis <- synopsis
   native <- identical(info$codec, "native_v1")
   info$authoritative <- native
@@ -433,6 +424,102 @@ validate_existing_rdz_path <- function(path) {
     stop("The file does not exist: ", path, call. = FALSE)
   }
   path
+}
+
+# A generic file's synopsis, read without trusting it: the stream must hold
+# only what build_rdz_synopsis() writes (vectors, strings, symbols, pairlists
+# of attributes, NULL), which unserialize() builds without loading a
+# namespace or running a hook, and the result must have the synopsis' shape.
+# Anything else is a format error.
+rdz_synopsis_read <- function(bytes) {
+  invalid <- function(why) {
+    rdz_check(structure(paste("invalid rdz file: the root synopsis", why),
+                        class = "rdz_failure", kind = "format"))
+  }
+  if (!rdz_synopsis_plain(bytes)) invalid("holds more than plain vectors")
+  value <- tryCatch(unserialize(bytes), error = function(e) NULL)
+  ok <- is.list(value) && !is.object(value) &&
+    is.character(value$root_type) && length(value$root_type) == 1L &&
+    (is.null(value$length) || (is.numeric(value$length) && length(value$length) == 1L)) &&
+    is.character(value$attribute_names) && is.character(value$class)
+  if (!ok) invalid("is not a synopsis")
+  value
+}
+
+# Whether an R serialization stream (XDR, version 2 or 3) holds only NULL,
+# logical, integer, double, character and list vectors, their strings, and
+# attribute pairlists with symbol tags (repeated symbols as references).
+rdz_synopsis_plain <- function(bytes) {
+  n <- length(bytes)
+  at <- 0
+  int <- function() {
+    if (at + 4 > n) stop("short")
+    v <- readBin(bytes[at + 1:4], "integer", size = 4L, endian = "big")
+    at <<- at + 4
+    v
+  }
+  skip <- function(k) {
+    if (k < 0 || at + k > n) stop("short")
+    at <<- at + k
+  }
+  symbols <- 0
+  item <- function(depth) {
+    if (depth > 64L) stop("deep")
+    flags <- int()
+    type <- bitwAnd(flags, 0xFF)
+    has_attr <- bitwAnd(flags, 0x200) != 0
+    has_tag <- bitwAnd(flags, 0x400) != 0
+    if (type == 254L) return(invisible()) # NULL
+    if (type == 255L) { # a reference: only to a symbol already read
+      ref <- bitwShiftR(flags, 8L)
+      if (ref == 0L) ref <- int()
+      if (ref < 1L || ref > symbols) stop("reference")
+      return(invisible())
+    }
+    if (type == 1L) { # a symbol: its name, a string
+      symbols <<- symbols + 1
+      item(depth + 1L)
+      return(invisible())
+    }
+    if (type == 2L) { # a pairlist, iteratively along its tail
+      repeat {
+        if (has_attr) item(depth + 1L)
+        if (has_tag) item(depth + 1L)
+        item(depth + 1L)
+        flags <- int()
+        type <- bitwAnd(flags, 0xFF)
+        if (type == 254L) return(invisible())
+        if (type != 2L) stop("type")
+        has_attr <- bitwAnd(flags, 0x200) != 0
+        has_tag <- bitwAnd(flags, 0x400) != 0
+      }
+    }
+    if (type == 9L) { # a string
+      len <- int()
+      if (len != -1L) skip(len)
+      return(invisible())
+    }
+    if (!type %in% c(10L, 13L, 14L, 16L, 19L)) stop("type")
+    len <- int()
+    if (len == -1L) stop("long") # a synopsis is never a long vector
+    if (len < 0L) stop("length")
+    if (type == 10L || type == 13L) skip(4 * len)
+    else if (type == 14L) skip(8 * len)
+    else for (k in seq_len(len)) item(depth + 1L)
+    if (has_attr) item(depth + 1L)
+    invisible()
+  }
+  tryCatch({
+    if (n < 14 || !identical(bytes[1:2], charToRaw("X\n"))) stop("header")
+    at <- 2
+    version <- int()
+    int()
+    int()
+    if (version == 3L) skip(int()) # the native encoding's name
+    else if (version != 2L) stop("version")
+    item(0L)
+    at == n
+  }, error = function(e) FALSE)
 }
 
 build_rdz_synopsis <- function(x) {

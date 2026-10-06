@@ -82,7 +82,16 @@ add to the format without locking 0.1.0 readers out of every new file:
 - **Directory records may grow.** The directory header's length and each entry
   width may exceed the widths below (up to 256 bytes each); readers read the
   fields they know at their offsets and skip the rest. Fields are only ever
-  appended.
+  appended. A 0.1.0 reader understands a directory header of 64 bytes, the
+  minimum a 0.1.0 writer writes: its `metadata_len` (bytes 60 to 63) changes
+  where the directory ends, so a reader that knew only 40 bytes would reject
+  a file with metadata. A later field that changes the directory's length
+  would need a new directory version; one that does not may be appended
+  past byte 64.
+- **The fixed records are frozen.** The file header (32 bytes), the block
+  header (48 bytes) and the closing trailer (40 bytes) have exactly these
+  lengths; readers reject any other. They change only with a new container
+  version.
 - **Block sizes are the writer's policy.** A block holds from 1 value to its
   type's maximum (65,536 logicals, which the `u16` sparse positions require;
   262,144 integers; 131,072 doubles); only an empty object has one block of 0.
@@ -100,11 +109,12 @@ add to the format without locking 0.1.0 readers out of every new file:
 ```text
 [32-byte file header]
 [48-byte block header | stored block bytes] ...
-[40-byte directory header]
+[64-byte directory header (40 in files without a content hash)]
 [48-byte object entries] ...
 [32-byte attribute entries] ...
 [64-byte block entries] ...
 [bounded generic synopsis]
+[user metadata section, metadata_len bytes (0: none)]
 [40-byte closing trailer]
 ```
 
@@ -190,6 +200,12 @@ unused high bits in the final byte must be zero.
 | 24 | 4 | Block entry count |
 | 28 | 4 | Synopsis byte length |
 | 32 | 8 | XXH3-64 of bytes 0 through 31 |
+| 40 | 16 | Content hash, low then high `u64` (64-byte header; "Content hash") |
+| 56 | 2 | Content hash scheme |
+| 58 | 2 | Zero |
+| 60 | 4 | User metadata section length ("User metadata") |
+
+The 0.1.0 writer writes a 64-byte header; the Rust reference wrote 40.
 
 Generic files set object and attribute counts to zero. Native logical files have
 one root object and either no attributes or one `names` attribute represented by
@@ -225,9 +241,10 @@ a value read back keeps its sharing and its hash.
 
 A directory header of at least 64 bytes holds, after its 40 known bytes, the
 file's content hash: XXH3-128 (seed 0) as a low then a high `u64`, a
-`scheme:u16`, two zero bytes and `metadata_len:u32` (below). Scheme 1 is defined below; readers ignore a
-hash whose scheme they do not know, and a file without one (the Rust
-reference's, any 40-byte header) is as valid as before. `rdz_info()` reports
+`scheme:u16`, two zero bytes and `metadata_len:u32` (below). Scheme 1 is
+defined below; readers ignore a hash whose scheme they do not know, and a
+file without one (the Rust reference's, any 40-byte header, which has no
+metadata either) is as valid as before. `rdz_info()` reports
 the hash as `content_hash`, 32 hexadecimal digits, high `u64` first (the
 canonical XXH128 text).
 
