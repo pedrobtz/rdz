@@ -87,7 +87,7 @@ test_that("the bytes do not depend on the number of threads", {
   set.seed(7)
   x <- list(sample.int(1000L, 1e6, TRUE), cumsum(runif(5e5)))
   for (value in x) {
-    paths <- vapply(c(1L, 8L), function(threads) {
+    paths <- vapply(test_threads(c(1L, 8L)), function(threads) {
       p <- tempfile(fileext = ".rdz")
       old <- options(rdz.threads = threads)
       on.exit(options(old))
@@ -95,7 +95,7 @@ test_that("the bytes do not depend on the number of threads", {
       p
     }, character(1L))
     expect_identical(readBin(paths[[1L]], "raw", 1e8), readBin(paths[[2L]], "raw", 1e8))
-    old <- options(rdz.threads = 8L)
+    old <- options(rdz.threads = test_threads(8L))
     expect_identical(read_rdz(paths[[1L]]), value)
     options(old)
     unlink(paths)

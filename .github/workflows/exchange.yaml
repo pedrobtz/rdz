@@ -35,7 +35,6 @@ jobs:
         with:
           dependencies: '"hard"'
           extra-packages: local::.
-          needs: exchange
       - name: Write this platform's files
         run: Rscript tools/exchange.R write exchange/${{ matrix.os }}
       - uses: actions/upload-artifact@v4
@@ -60,7 +59,6 @@ jobs:
         with:
           dependencies: '"hard"'
           extra-packages: local::.
-          needs: exchange
       - uses: actions/download-artifact@v4
         with:
           pattern: exchange-*

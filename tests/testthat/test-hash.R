@@ -24,7 +24,7 @@ test_that("the stored hash is rdz_hash() of the value, whatever the settings", {
     want <- rdz_hash(x)
     expect_match(want, "^[0-9a-f]{32}$")
     for (preset in c("speed", "balanced", "compact")) {
-      for (threads in c(1L, 4L)) {
+      for (threads in test_threads(c(1L, 4L))) {
         old <- options(rdz.preset = preset, rdz.threads = threads)
         write_rdz(x, path)
         options(old)

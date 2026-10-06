@@ -84,7 +84,7 @@ test_that("data frames round-trip in every supported shape", {
   }
   big <- data.frame(x = runif(5e5), y = sample.int(100L, 5e5, TRUE),
                     z = sample(letters, 5e5, TRUE), stringsAsFactors = FALSE)
-  old <- options(rdz.threads = 4L)
+  old <- options(rdz.threads = test_threads(4L))
   on.exit(options(old), add = TRUE)
   expect_identical(roundtrip_native(big), big)
   expect_identical(.row_names_info(roundtrip_native(big)), .row_names_info(big))

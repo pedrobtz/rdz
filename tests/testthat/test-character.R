@@ -38,7 +38,7 @@ test_that("character vectors keep bytes, encoding tags and NA under every policy
 test_that("long and many strings span blocks", {
   long <- strrep("x", 1e6) # nearly a block on its own
   x <- c("a", long, NA, sprintf("id-%07d", 1:300000))
-  expect_identical(roundtrip_native(x, rdz.threads = 4L), x)
+  expect_identical(roundtrip_native(x, rdz.threads = test_threads(4L)), x)
   # A string larger than a block is not a native record: the root goes
   # generic in automatic mode, which streams it.
   path <- tempfile(fileext = ".rdz")
