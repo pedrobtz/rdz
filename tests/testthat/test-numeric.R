@@ -19,7 +19,7 @@ double_bits <- function(x) writeBin(x, raw(), endian = "little")
 test_that("integers round-trip at every block boundary", {
   per <- 262144L
   for (n in c(0L, 1L, per - 1L, per, per + 1L, 3L * per + 5L)) {
-    x <- as.integer((seq_len(n) * 7919L) %% 1000003L)
+    x <- as.integer((seq_len(n) * 7919) %% 1000003) # in double: no overflow
     x[seq_len(n) %% 97L == 1L] <- NA_integer_
     expect_identical(native_roundtrip(x), x, label = n)
   }
