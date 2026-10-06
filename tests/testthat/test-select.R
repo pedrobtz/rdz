@@ -70,7 +70,7 @@ test_that("a data.table selection is a usable data.table without its key", {
 test_that("only the selected parts are read", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  old <- options(rdz.preset = "speed")
+  old <- options(rdz.compress = 0)
   on.exit(options(old), add = TRUE)
   df <- data.frame(a = seq_len(50000L), b = seq_len(50000L) * 3L)
   write_rdz(df, path)

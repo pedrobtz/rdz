@@ -7,7 +7,7 @@
 #' `rdz_hash()` is the 128-bit hash of `x` as [write_rdz()] would store it,
 #' and every file it writes records that hash in its directory, where
 #' [rdz_info()] reads it as `content_hash` without touching the data. A value
-#' gives the same hash on every platform and R version, whatever the preset,
+#' gives the same hash on every platform and R version, whatever the level,
 #' threads, block sizes or encodings chosen, and whether its vectors are
 #' ALTREP or not; so a cache can key files by it, and compare an object with
 #' a file without reading the file.

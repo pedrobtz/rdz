@@ -18,7 +18,7 @@ test_that("rdz carries the zstd release its vendor manifest pins", {
   expect_identical(rdz:::rdz_zstd_version(), "1.5.7")
 })
 
-test_that("the default preset compresses blocks and reads them back", {
+test_that("the default level compresses blocks and reads them back", {
   x <- rep_len(c(1.5, 2.5, NA), 1e6)
   path <- write_with(x)
   on.exit(unlink(path), add = TRUE)
@@ -40,18 +40,19 @@ test_that("an incompressible block is stored raw beside compressed ones", {
   expect_identical(read_rdz(path), x)
 })
 
-test_that("each preset reads back, and speed stores every block raw", {
+test_that("each level reads back, and level 0 stores every block raw", {
   x <- rep_len(letters, 3e5)
   sizes <- c()
-  for (preset in c("speed", "balanced", "compact")) {
-    path <- write_with(x, rdz.preset = preset)
-    sizes[[preset]] <- file.size(path)
-    if (preset == "speed") expect_true(all(rdz_block_encodings(path)$compression == 0))
-    expect_identical(read_rdz(path), x, label = preset)
+  for (level in c("0", "1", "6", "19")) {
+    path <- write_with(x, rdz.compress = as.integer(level))
+    sizes[[level]] <- file.size(path)
+    if (level == "0") expect_true(all(rdz_block_encodings(path)$compression == 0))
+    expect_identical(read_rdz(path), x, label = level)
     unlink(path)
   }
-  expect_lt(sizes[["balanced"]], sizes[["speed"]])
-  expect_lte(sizes[["compact"]], sizes[["balanced"]])
+  expect_lt(sizes[["1"]], sizes[["0"]])
+  expect_lte(sizes[["6"]], sizes[["1"]])
+  expect_lte(sizes[["19"]], sizes[["6"]])
 })
 
 test_that("the bytes do not depend on the number of threads", {
@@ -101,7 +102,26 @@ test_that("a corrupt compressed block is a classed error with any thread count",
 })
 
 test_that("the options are validated", {
-  expect_error(with_rdz_options(rdz:::rdz_settings(), rdz.preset = "fast"), "rdz.preset")
+  expect_error(with_rdz_options(rdz:::rdz_settings(), rdz.compress = "fast"), "rdz.compress")
+  expect_error(with_rdz_options(rdz:::rdz_settings(), rdz.compress = 20), "rdz.compress")
+  expect_error(with_rdz_options(rdz:::rdz_settings(), rdz.compress = 1.5), "rdz.compress")
+  expect_error(write_rdz(1, tempfile(), compress = -1), class = "rdz_argument_error")
   expect_error(with_rdz_options(rdz:::rdz_settings(), rdz.threads = 0), "rdz.threads")
   expect_error(with_rdz_options(rdz:::rdz_settings(), rdz.threads = 1.5), "rdz.threads")
+})
+
+test_that("compress = is the level, as options(rdz.compress) is", {
+  x <- rep_len(letters, 3e5)
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  write_rdz(x, path, compress = 0)
+  expect_true(all(rdz_block_encodings(path)$compression == 0))
+  raw_size <- file.size(path)
+  write_rdz(x, path, compress = 3)
+  expect_lt(file.size(path), raw_size)
+  expect_identical(read_rdz(path), x)
+  old <- options(rdz.compress = 0)
+  on.exit(options(old), add = TRUE)
+  expect_identical(file.size(write_rdz(x, path)), raw_size)
+  expect_identical(length(rdz_serialize(x, compress = 0)), as.integer(raw_size))
 })

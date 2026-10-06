@@ -1,4 +1,4 @@
-# Data frames (plan-c Stage H): rdz at each preset against qdata, qs2 and
+# Data frames (plan-c Stage H): rdz at levels 0, 1 and 6 against qdata, qs2 and
 # fst, one thread and eight; full reads and writes, and fst's one-column
 # read reported apart (rdz reads whole objects). Median of
 # RDZ_BENCH_ITERATIONS (default 5) elapsed times after a gc().
@@ -40,14 +40,14 @@ add <- function(format, threads, write, read, path, one_column = NA) {
   )
 }
 for (threads in c(1L, 8L)) {
-  for (preset in c("speed", "balanced", "compact")) {
+  for (level in c(0L, 1L, 6L)) {
     p <- file.path(dir, "x.rdz")
-    old <- options(rdz.preset = preset, rdz.threads = threads)
+    old <- options(rdz.compress = level, rdz.threads = threads)
     w <- ms(function() write_rdz(df, p))
     r <- ms(function() read_rdz(p))
     stopifnot(identical(read_rdz(p), df))
     options(old)
-    add(paste0("rdz ", preset), threads, w, r, p)
+    add(paste0("rdz level ", level), threads, w, r, p)
   }
   p <- file.path(dir, "x.qd")
   add("qdata", threads, ms(function() qs2::qd_save(df, p, nthreads = threads)),

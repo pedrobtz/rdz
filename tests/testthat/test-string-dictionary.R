@@ -43,7 +43,7 @@ test_that("reading does not depend on the writer's dictionary policy", {
   x <- rep(TRUE, 200000L)
   names(x) <- sprintf("id-%06d", sample.int(50000L, length(x), replace = TRUE))
   # records alone: compression would make the plain records small too
-  old <- options(rdz.preset = "speed")
+  old <- options(rdz.compress = 0)
   on.exit(options(old), add = TRUE)
   paths <- vapply(dictionary_policies, function(policy) {
     path <- tempfile(fileext = ".rdz")

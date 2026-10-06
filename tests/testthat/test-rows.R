@@ -28,13 +28,13 @@ test_that("rows across every type's block boundaries match `[`", {
     dictionary_chunk = 65536:65537, scattered = c(500000L, 7L, 300000L, 7L),
     one = 424242L, none = integer(), wide = seq(1L, 600000L, by = 997L)
   )
-  for (preset in c("speed", "balanced")) {
-    old <- options(rdz.preset = preset)
+  for (level in c(0L, 1L)) {
+    old <- options(rdz.compress = level)
     write_rdz(df, path)
     options(old)
     for (name in names(sets)) {
       expect_identical(read_rdz(path, rows = sets[[name]]), rows_ref(df, sets[[name]]),
-                       label = paste(preset, name))
+                       label = paste(level, name))
     }
   }
   expect_identical(read_rdz(path, rows = 262140:262150, select = c("fct", "int")),
@@ -88,7 +88,7 @@ test_that("row names, classes and other columns follow the rows", {
 test_that("only the blocks covering the rows are read", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  old <- options(rdz.preset = "speed")
+  old <- options(rdz.compress = 0)
   on.exit(options(old), add = TRUE)
   x <- seq_len(600000L) # three integer blocks
   write_rdz(x, path)

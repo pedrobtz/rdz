@@ -3,7 +3,7 @@
  *
  * A block is stored zstd-compressed (compression 1, one zstd frame) only when
  * that saves at least an eighth of its decoded bytes (any saving at level 6
- * and up, the compact preset); otherwise it is
+ * and up); otherwise it is
  * stored raw (compression 0), so a block that barely compresses (random
  * logicals, random doubles) costs nothing to decompress on every read. This
  * is writer policy: readers accept any compressed block that is smaller. Blocks

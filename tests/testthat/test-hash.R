@@ -1,5 +1,5 @@
 # Content hashes (container-format.md, "Content hash"): rdz_hash(x) is what
-# write_rdz() records, whatever the preset, threads, block sizes, encodings or
+# write_rdz() records, whatever the level, threads, block sizes, encodings or
 # ALTREP; any change to the value changes it.
 
 hash_cases <- function() {
@@ -23,12 +23,12 @@ test_that("the stored hash is rdz_hash() of the value, whatever the settings", {
     x <- hash_cases()[[name]]
     want <- rdz_hash(x)
     expect_match(want, "^[0-9a-f]{32}$")
-    for (preset in c("speed", "balanced", "compact")) {
+    for (level in c(0L, 1L, 6L)) {
       for (threads in test_threads(c(1L, 4L))) {
-        old <- options(rdz.preset = preset, rdz.threads = threads)
+        old <- options(rdz.compress = level, rdz.threads = threads)
         write_rdz(x, path)
         options(old)
-        expect_identical(rdz_info(path)$content_hash, want, label = paste(name, preset, threads))
+        expect_identical(rdz_info(path)$content_hash, want, label = paste(name, level, threads))
       }
     }
   }
@@ -102,7 +102,7 @@ test_that("skip_unchanged leaves a file holding the value untouched", {
 test_that("rdz_verify() checks every block and, on request, the content hash", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  old <- options(rdz.preset = "speed")
+  old <- options(rdz.compress = 0)
   on.exit(options(old), add = TRUE)
   x <- list(a = seq_len(40000L), b = letters)
   write_rdz(x, path)

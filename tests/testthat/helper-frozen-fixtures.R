@@ -76,7 +76,7 @@ frozen_fixture_specs <- function() {
     list(name = "dbl_kinds", value = function() {
       c(frozen_doubles(), rep(2.5, 131072L), frozen_hash(3000L, 1000L) / 7)
     }),
-    # decimals (encoding 23, Stage J) under the compressing presets: prices in
+    # decimals (encoding 23, Stage J) at the compressing levels: prices in
     # cents, millisecond times, one-decimal readings with NA and -0
     list(name = "dbl_decimal", value = function() {
       c(round(100 + cumsum(c(0, (frozen_hash(9999L, 41L) - 20L) / 100)), 2),
@@ -160,10 +160,14 @@ frozen_fixture_specs <- function() {
   specs
 }
 
-# Writes a spec's value under its preset, natively or (generic specs)
-# through the generic codec, with the default dictionary policy.
+# Writes a spec's value at its preset's level (the corpus names its files by
+# the presets of their time: "speed" is level 0, "balanced" level 1),
+# natively or (generic specs) through the generic codec, with the default
+# dictionary policy.
+frozen_level <- function(preset) c(speed = 0L, balanced = 1L)[[preset]]
+
 write_frozen_fixture <- function(spec, path) {
-  old <- options(rdz.preset = spec$preset, rdz.threads = 1L)
+  old <- options(rdz.compress = frozen_level(spec$preset), rdz.threads = 1L)
   on.exit(options(old), add = TRUE)
   mode <- if (identical(spec$codec, "native_v1")) "native" else "r"
   rdz::write_rdz(spec$value(), path, mode = mode, metadata = spec$metadata)

@@ -1,5 +1,5 @@
 # The block pipeline (plan-c Stage D): equal-budget thread scaling against
-# qs2 on large vectors, the presets, and small objects. Run against an
+# qs2 on large vectors, the compression levels, and small objects. Run against an
 # installed rdz:
 #
 #   Rscript tools/bench-pipeline.R
@@ -24,9 +24,9 @@ median_ms <- function(expr_fn) {
   round(stats::median(times) * 1000, 1)
 }
 
-rdz_case <- function(x, threads, preset = "balanced") {
+rdz_case <- function(x, threads, level = 1L) {
   p <- file.path(dir, "x.rdz")
-  old <- options(rdz.threads = threads, rdz.preset = preset)
+  old <- options(rdz.threads = threads, rdz.compress = level)
   on.exit(options(old), add = TRUE)
   w <- median_ms(function() write_rdz(x, p, mode = "r"))
   r <- median_ms(function() read_rdz(p))
@@ -56,22 +56,22 @@ for (name in names(large)) {
                                    qs2_case(large[[name]], threads))
   }
 }
-cat("Equal-budget scaling (balanced preset):\n")
+cat("Equal-budget scaling (level 1):\n")
 print(as.data.frame(do.call(rbind, rows)), row.names = FALSE)
 
 rows <- list()
-for (preset in c("speed", "balanced", "compact")) {
-  rows[[length(rows) + 1L]] <- c(preset = preset, rdz_case(large$doubles, 1L, preset))
+for (level in c(0L, 1L, 6L)) {
+  rows[[length(rows) + 1L]] <- c(level = level, rdz_case(large$doubles, 1L, level))
 }
-cat("\nPresets, one thread, the doubles:\n")
+cat("\nLevels, one thread, the doubles:\n")
 print(as.data.frame(do.call(rbind, rows)), row.names = FALSE)
 
 small <- list(n1e3 = runif(1e3), n1e5 = runif(1e5), list = as.list(1:100))
 rows <- list()
 for (name in names(small)) {
-  for (setting in list(c("speed", 1L), c("balanced", 1L), c("balanced", 8L))) {
-    rows[[length(rows) + 1L]] <- c(data = name, preset = setting[[1L]], threads = setting[[2L]],
-                                   rdz_case(small[[name]], as.integer(setting[[2L]]), setting[[1L]]))
+  for (setting in list(c(0L, 1L), c(1L, 1L), c(1L, 8L))) {
+    rows[[length(rows) + 1L]] <- c(data = name, level = setting[[1L]], threads = setting[[2L]],
+                                   rdz_case(small[[name]], setting[[2L]], setting[[1L]]))
   }
 }
 cat("\nSmall objects:\n")

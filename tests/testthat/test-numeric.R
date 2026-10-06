@@ -44,7 +44,7 @@ test_that("each integer record is chosen where it pays and reads back", {
   set.seed(5)
   # the full range: 32 bits, so no frame of reference beats raw
   noise <- as.integer(floor(stats::runif(n, -2^31 + 1, 2^31 - 1)))
-  expect_identical(native_roundtrip(noise, rdz.preset = "speed", expect_encodings = 10L), noise)
+  expect_identical(native_roundtrip(noise, rdz.compress = 0, expect_encodings = 10L), noise)
   expect_identical(native_roundtrip(noise, expect_encodings = 11L), noise)
 })
 
@@ -67,7 +67,7 @@ test_that("each double record reads back", {
   expect_identical(native_roundtrip(rep(NA_real_, n), expect_encodings = 22L), rep(NA_real_, n))
   x <- runif(n)
   expect_identical(native_roundtrip(x, expect_encodings = 21L), x)
-  expect_identical(native_roundtrip(x, rdz.preset = "speed", expect_encodings = 20L), x)
+  expect_identical(native_roundtrip(x, rdz.compress = 0, expect_encodings = 20L), x)
 })
 
 test_that("integer and double vectors keep their names", {
@@ -127,7 +127,7 @@ test_that("ALTREP vectors are written natively from their data", {
 test_that("a corrupt numeric record is a classed error", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  old <- options(rdz.preset = "speed")
+  old <- options(rdz.compress = 0)
   on.exit(options(old), add = TRUE)
   write_rdz(seq_len(1000L) * 2L, path) # one delta block
   expect_identical(rdz_block_encodings(path)$encoding[[1L]], 13)

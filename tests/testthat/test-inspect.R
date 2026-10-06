@@ -48,7 +48,7 @@ test_that("an object path that leads nowhere is an error", {
 test_that("attributes and the schema are read without the parts' data", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  old <- options(rdz.preset = "speed")
+  old <- options(rdz.compress = 0)
   on.exit(options(old), add = TRUE)
   x <- list(big = structure(seq_len(100000L), note = "kept"), small = 1L)
   write_rdz(x, path)

@@ -79,7 +79,7 @@ test_that("attributes that are not native send the whole root to the generic cod
 test_that("an attribute R refuses is a format error, not R's", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  old <- options(rdz.preset = "speed") # every block raw
+  old <- options(rdz.compress = 0) # every block raw
   on.exit(options(old), add = TRUE)
   # "dix" becomes "dim", whose value c(4L, 4L) does not fit six values
   write_rdz(structure(1:6, dix = c(4L, 4L)), path, mode = "native")

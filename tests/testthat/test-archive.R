@@ -25,7 +25,7 @@ test_that("objects are saved and loaded, all or by name", {
 test_that("loading some reads only theirs", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  old <- options(rdz.preset = "speed")
+  old <- options(rdz.compress = 0)
   on.exit(options(old), add = TRUE)
   small <- 1:3
   big <- seq_len(100000L) * 2L

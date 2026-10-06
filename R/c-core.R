@@ -69,25 +69,30 @@ rdz_c_file_info <- function(path) {
 # The settings the C writer and reader take: c(zstd level, threads, block
 # size). Options, documented in ?write_rdz:
 #
-#   rdz.preset   "balanced" (default): zstd level 1 on each block;
-#                "compact": zstd level 6; "speed": blocks stored raw
-#   rdz.threads  worker threads for compression and decompression (default 1)
+#   rdz.compress  the zstd level of each block, 0 (none) to 19; default 1
+#   rdz.threads   worker threads for compression and decompression (default 1)
 #
 # rdz.block_size (bytes, default 1 MiB) exists for tests that need many small
 # blocks; it is not part of the interface.
-rdz_settings <- function() {
-  preset <- getOption("rdz.preset", "balanced")
-  levels <- c(speed = 0L, balanced = 1L, compact = 6L)
-  if (!is.character(preset) || length(preset) != 1L || !preset %in% names(levels)) {
-    rdz_stop('`options(rdz.preset)` must be "speed", "balanced" or "compact".', call. = FALSE)
-  }
+rdz_settings <- function(compress = getOption("rdz.compress", 1L)) {
+  compress <- rdz_compress_level(compress)
   threads <- getOption("rdz.threads", 1L)
   if (!is.numeric(threads) || length(threads) != 1L || is.na(threads) ||
         threads < 1 || threads > 256 || threads != floor(threads)) {
     rdz_stop("`options(rdz.threads)` must be a whole number from 1 to 256.", call. = FALSE)
   }
   block_size <- getOption("rdz.block_size", 0L)
-  c(levels[[preset]], as.integer(threads), as.integer(block_size))
+  c(compress, as.integer(threads), as.integer(block_size))
+}
+
+# A zstd level, 0 to 19 (20 to 22 need hundreds of MB a thread).
+rdz_compress_level <- function(compress) {
+  if (!is.numeric(compress) || length(compress) != 1L || is.na(compress) ||
+        compress < 0 || compress > 19 || compress != floor(compress)) {
+    rdz_stop("`compress` (or `options(rdz.compress)`) must be a whole number from 0 to 19.",
+             call. = FALSE)
+  }
+  as.integer(compress)
 }
 
 # zstd's version as compiled into rdz.

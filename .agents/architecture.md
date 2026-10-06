@@ -134,7 +134,7 @@ write_rdz(x, path)
   -> rename over path (or the bytes, for rdz_serialize())
 ```
 
-The bytes depend only on the value, the preset and the block size, never on
+The bytes depend only on the value, the compression level and the block size, never on
 the number of threads (tested). The content hash is fed in the same pass as
 the encoding; `hash = FALSE` (`options(rdz.hash)`) skips it and writes
 scheme 0, which costs a tenth of a write's time less. For a generic file the
@@ -194,9 +194,14 @@ stated.
 - **Named factors** are written generically.
 - **Encoding 1** (the Rust reference's dense two-bit logical record) is
   read, never written; its decoder stays for the files that reference wrote.
-- **Presets** differ only in the zstd level (`speed`: none; `balanced`: 1;
-  `compact`: 6). The decimal double encoding (23) is chosen only for a block
-  that will be compressed, so `speed` never writes it.
+- **Compression** is one number, the zstd level of every block: `compress`
+  (or `options(rdz.compress)`), 0 (none) to 19, default 1; levels 20 to 22,
+  which need hundreds of MB a thread, are refused. Below level 6 a block is
+  compressed only when that saves an eighth. The decimal double encoding
+  (23) is chosen only for a block that will be compressed, so level 0 never
+  writes it. (Named presets, `speed`/`balanced`/`compact` for levels 0, 1 and
+  6, were replaced by the level before release; the frozen corpus keeps
+  them in its file names.)
 - **Pre-0.1.0 gates.** AArch64 byte-equivalence is met: the frozen corpus's
   speed files are rewritten byte for byte on macOS arm64 in CI, and the C
   harness compares the NEON and scalar logical kernels. The logical
