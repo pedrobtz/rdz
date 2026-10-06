@@ -221,8 +221,10 @@ static int decode_strings(rdz_reader *r, const rdz_block *b, const zb_buf *rec,
             return sink->entries(sink->ctx, (const rdz_str *)(const void *)r->records.data, count,
                                  e);
         }
-        return sink->plain(sink->ctx, (const rdz_str *)(const void *)r->records.data + from, take,
-                           e);
+        /* an empty block leaves the buffer NULL, and NULL + 0 is undefined */
+        return sink->plain(sink->ctx,
+                           take ? (const rdz_str *)(const void *)r->records.data + from : NULL,
+                           take, e);
     case RDZ_ENCODING_STRING_DICT_INDICES:
         if (zb_size_mul(count, sizeof(uint32_t), &bytes)) return rdz_limit(e, "dictionary indices");
         zb_buf_reset(&r->ids);
@@ -231,7 +233,9 @@ static int decode_strings(rdz_reader *r, const rdz_block *b, const zb_buf *rec,
                                       (uint32_t *)(void *)r->ids.data, e)) {
             return 1;
         }
-        return sink->indices(sink->ctx, (const uint32_t *)(const void *)r->ids.data + from, take, e);
+        return sink->indices(sink->ctx,
+                             take ? (const uint32_t *)(const void *)r->ids.data + from : NULL,
+                             take, e);
     default:
         return rdz_invalid(e, "unexpected character block encoding");
     }
