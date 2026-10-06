@@ -8,6 +8,15 @@
 \description{
 Writes and reads R objects using a versioned, block-structured container format. The format preserves R serialization semantics while adding explicit format identification, length validation, and integrity checking.
 }
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://pedrobtz.github.io/rdz/}
+  \item \url{https://github.com/pedrobtz/rdz}
+  \item Report bugs at \url{https://github.com/pedrobtz/rdz/issues}
+}
+
+}
 \author{
 \strong{Maintainer}: Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]
 

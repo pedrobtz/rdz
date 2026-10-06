@@ -17,16 +17,20 @@ BugReports: https://github.com/pedrobtz/rdz/issues
 Copyright: The authors and copyright holders of the bundled Zstandard
     library are listed in file inst/COPYRIGHTS.
 Encoding: UTF-8
+Language: en-US
 Roxygen: list(markdown = TRUE)
 Depends:
     R (>= 4.1)
+Imports:
+    stats,
+    utils
 Suggests:
     bench,
     data.table,
-    devtools,
     fst,
     testthat (>= 3.0.0),
-    tibble
+    tibble,
+    zufast
 LinkingTo:
     zubin,
     zufast

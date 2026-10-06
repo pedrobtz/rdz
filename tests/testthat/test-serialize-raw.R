@@ -11,7 +11,7 @@ test_that("a raw vector holds the bytes a file would", {
     empty = list()
   )
   for (name in names(values)) {
-    for (threads in c(1L, 4L)) {
+    for (threads in test_threads(c(1L, 4L))) {
       old <- options(rdz.threads = threads)
       bytes <- rdz_serialize(values[[name]])
       write_rdz(values[[name]], path)
