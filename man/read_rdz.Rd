@@ -17,7 +17,9 @@ positions.}
 vector to read: positive positions, in any order. From a natively
 written file only the blocks covering \code{range(rows)} are read; each column
 is then taken with \code{[}, so a Date or factor column keeps its class. Stored
-row names are taken too; automatic ones stay automatic (\code{1:length(rows)}).}
+row names are taken too; automatic ones stay automatic (\code{1:length(rows)}).
+A matrix, array or time series root is read whole and gives its
+elements (\code{x[rows]}), as for any vector.}
 }
 \value{
 The R object stored in \code{path}, or its selected part.

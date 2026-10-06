@@ -90,6 +90,7 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged =
     rdz_stop("`skip_unchanged` must be TRUE or FALSE.", call. = FALSE)
   }
   hash <- rdz_hash_flag(hash)
+  if (missing(compress)) compress <- rdz_legacy_compress(compress)
   compress <- rdz_compress_level(compress)
   if (skip_unchanged && !hash) {
     rdz_stop("`skip_unchanged = TRUE` needs `hash = TRUE`: it compares content hashes.",
@@ -135,13 +136,14 @@ rdz_write_to <- function(x, path, mode, section, hash = TRUE,
     if (is.raw(native)) return(native)
     if (isTRUE(native)) return(invisible(NULL))
   }
-  synopsis <- serialize(
-    build_rdz_synopsis(x),
-    connection = NULL,
-    ascii = FALSE,
-    xdr = TRUE,
-    version = 3L
-  )
+  synopsis <- serialize(build_rdz_synopsis(x), connection = NULL, ascii = FALSE, xdr = TRUE,
+                        version = 3L)
+  # what rdz_info() will accept: if a field were ever ALTREP or other than a
+  # plain vector, the minimal synopsis instead of a file its reader refuses
+  if (!rdz_synopsis_plain(synopsis)) {
+    synopsis <- serialize(rdz_minimal_synopsis(x), connection = NULL, ascii = FALSE,
+                          xdr = TRUE, version = 3L)
+  }
   rdz_check(.Call(rdz_c_write_generic, x, synopsis, path, settings, section))
 }
 
@@ -166,6 +168,7 @@ rdz_serialize <- function(x, mode = c("auto", "native", "r"), metadata = NULL,
                           compress = getOption("rdz.compress", 1L),
                           hash = getOption("rdz.hash", TRUE)) {
   mode <- match.arg(mode)
+  if (missing(compress)) compress <- rdz_legacy_compress(compress)
   rdz_write_to(x, NULL, mode, rdz_metadata_section(metadata), rdz_hash_flag(hash),
                rdz_compress_level(compress))
 }
@@ -205,6 +208,8 @@ rdz_unserialize <- function(bytes, select = NULL, rows = NULL) {
 #'   written file only the blocks covering `range(rows)` are read; each column
 #'   is then taken with `[`, so a Date or factor column keeps its class. Stored
 #'   row names are taken too; automatic ones stay automatic (`1:length(rows)`).
+#'   A matrix, array or time series root is read whole and gives its
+#'   elements (`x[rows]`), as for any vector.
 #' @returns The R object stored in `path`, or its selected part.
 #' @examples
 #' path <- tempfile(fileext = ".rdz")
@@ -611,22 +616,21 @@ rdz_synopsis_plain <- function(bytes) {
 }
 
 build_rdz_synopsis <- function(x) {
-  tryCatch(
-    build_rdz_synopsis_impl(x),
-    error = function(error) {
-      list(
-        synopsis_version = 1L,
-        authoritative = FALSE,
-        root_type = typeof(x),
-        class = character(),
-        length = NULL,
-        dimensions = NULL,
-        attribute_names = character(),
-        truncated = TRUE,
-        synopsis_error = TRUE,
-        exact_attributes_require_full_read = TRUE
-      )
-    }
+  tryCatch(build_rdz_synopsis_impl(x), error = function(error) rdz_minimal_synopsis(x))
+}
+
+rdz_minimal_synopsis <- function(x) {
+  list(
+    synopsis_version = 1L,
+    authoritative = FALSE,
+    root_type = typeof(x),
+    class = character(),
+    length = NULL,
+    dimensions = NULL,
+    attribute_names = character(),
+    truncated = TRUE,
+    synopsis_error = TRUE,
+    exact_attributes_require_full_read = TRUE
   )
 }
 

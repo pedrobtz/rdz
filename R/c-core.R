@@ -85,6 +85,32 @@ rdz_settings <- function(compress = getOption("rdz.compress", 1L)) {
   c(compress, as.integer(threads), as.integer(block_size))
 }
 
+# The level a call that does not give `compress` uses when the session set
+# the option that #44 replaced, options(rdz.preset): its preset's level, with
+# a deprecation warning once a session (rdz.compress, when set, wins).
+rdz_state <- new.env(parent = emptyenv())
+
+rdz_legacy_compress <- function(compress) {
+  preset <- getOption("rdz.preset")
+  if (is.null(preset) || !is.null(getOption("rdz.compress"))) return(compress)
+  levels <- c(speed = 0L, balanced = 1L, compact = 6L)
+  if (!is.character(preset) || length(preset) != 1L || !preset %in% names(levels)) {
+    rdz_stop('`options(rdz.preset)` is replaced by `options(rdz.compress)`, a level from ',
+             '0 to 19 (it was "speed", "balanced" or "compact").', call. = FALSE)
+  }
+  if (!isTRUE(rdz_state$preset_warned)) {
+    rdz_state$preset_warned <- TRUE
+    warning(structure(
+      class = c("rdz_deprecated_warning", "deprecatedWarning", "warning", "condition"),
+      list(message = sprintf(paste0("`options(rdz.preset = \"%s\")` is deprecated: use ",
+                                    "`options(rdz.compress = %d)` or `compress = %d`."),
+                             preset, levels[[preset]], levels[[preset]]),
+           call = NULL)
+    ))
+  }
+  levels[[preset]]
+}
+
 # A zstd level, 0 to 19 (20 to 22 need hundreds of MB a thread).
 rdz_compress_level <- function(compress) {
   if (!is.numeric(compress) || length(compress) != 1L || is.na(compress) ||

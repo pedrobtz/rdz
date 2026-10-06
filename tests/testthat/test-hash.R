@@ -169,3 +169,15 @@ test_that("hash = FALSE writes a file without a content hash, as readable", {
                class = "rdz_argument_error")
   expect_error(write_rdz(1:3, path, hash = NA), class = "rdz_argument_error")
 })
+
+test_that("a file without a hash still has the 64-byte directory header", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  for (x in list(1:3, new.env(parent = emptyenv()))) {
+    write_rdz(x, path, hash = FALSE)
+    bytes <- readBin(path, "raw", file.size(path))
+    dir <- le_u64(bytes, length(bytes) - 32L)
+    expect_identical(dir_header_len(bytes, dir), 64)
+    expect_true(all(bytes[dir + 41:64] == as.raw(0L))) # no hash, scheme 0, no metadata
+  }
+})

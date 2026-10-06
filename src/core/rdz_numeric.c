@@ -476,7 +476,7 @@ static uint32_t *codes_after(zb_buf *out, size_t len, size_t n, rdz_error *e)
 {
     size_t at = (len + 3) & ~(size_t)3;
     if (!reserve(out, len, e)) return NULL;
-    if (zb_buf_reserve(out, at + 4 * (n ? n : 1))) {
+    if (zb_buf_reserve(out, at - len + 4 * (n ? n : 1))) { /* room past len */
         rdz_memory(e, "a numeric block");
         return NULL;
     }

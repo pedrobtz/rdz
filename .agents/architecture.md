@@ -137,7 +137,8 @@ write_rdz(x, path)
 The bytes depend only on the value, the compression level and the block size, never on
 the number of threads (tested). The content hash is fed in the same pass as
 the encoding; `hash = FALSE` (`options(rdz.hash)`) skips it and writes
-scheme 0, which costs a tenth of a write's time less. For a generic file the
+scheme 0 (the 64-byte directory header with its hash fields zero), which
+costs a tenth of a write's time less. For a generic file the
 hash is a separate R serialization pass, so skipping it saves more.
 
 ## Reading
@@ -190,7 +191,8 @@ stated.
 - **Writing through a symbolic link** replaces the file it names, and keeps
   the link (POSIX; on Windows the path itself is replaced).
 - **Read-ahead** holds at most two blocks a thread and at most 1 GiB of
-  blocks of the file's declared size.
+  blocks of the file's declared size, counting each slot's input and
+  output.
 - **Named factors** are written generically.
 - **Encoding 1** (the Rust reference's dense two-bit logical record) is
   read, never written; its decoder stays for the files that reference wrote.

@@ -559,9 +559,9 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
             return "a data frame with malformed row names";
         }
         for (k = 0; k < ncol; k++) {
-            if (rdz_column_rows(VECTOR_ELT(x, k)) != nrow) {
-                return "a data frame whose columns differ in length";
-            }
+            uint64_t rows = rdz_column_rows(VECTOR_ELT(x, k));
+            if (rows == UINT64_MAX) return "a data frame column that is a data frame with malformed row names";
+            if (rows != nrow) return "a data frame whose columns differ in length";
         }
         n->type = RDZ_TYPE_DATA_FRAME;
         n->length = nrow;

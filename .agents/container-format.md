@@ -7,7 +7,9 @@ reads every file rdz 0.1.0 or later wrote, under the rules of "Compatibility
 and extension". Files written by development builds before 0.1.0 (writer
 `rdz 0.0.0 (development)`, or none) have no guarantee. The corpus in
 `tests/testthat/fixtures/v0.1.0/` was written by rdz 0.1.0 and only grows
-(`tools/check-frozen-corpus.R`). The current
+(`tools/check-frozen-corpus.R`). Its last rewrite (commit 1598ba9) changed
+only bytes 20 to 31 of each file, the writer field and the header checksum,
+when the writer became 0.1.0; sizes and content hashes are as before. The current
 container version is 3 (2026-10-05, plan-c.md §3): every checksum is an
 eight-byte XXH3-64 with seed 0, bit-identical to the reference xxHash and to
 zufast's `zuf_hash64()`, in place of version 2's four-byte IEEE CRC32. Readers
@@ -110,7 +112,7 @@ add to the format without locking 0.1.0 readers out of every new file:
 ```text
 [32-byte file header]
 [48-byte block header | stored block bytes] ...
-[64-byte directory header (40 in files without a content hash)]
+[64-byte directory header (40 in the Rust reference's files)]
 [48-byte object entries] ...
 [32-byte attribute entries] ...
 [64-byte block entries] ...
@@ -187,7 +189,7 @@ An empty object stream is represented by one zero-length block. Packed logical
 elements are numbered from the least-significant unused bits of each byte;
 unused high bits in the final byte must be zero.
 
-## Directory header: 40 bytes
+## Directory header: 64 bytes
 
 | Offset | Width | Field |
 |---:|---:|---|
@@ -208,7 +210,9 @@ unused high bits in the final byte must be zero.
 | 58 | 2 | Zero |
 | 60 | 4 | User metadata section length ("User metadata") |
 
-The 0.1.0 writer writes a 64-byte header; the Rust reference wrote 40.
+The 0.1.0 writer always writes the 64-byte header, its hash fields zero
+(scheme 0) without a content hash and its metadata length zero without
+metadata; the Rust reference wrote 40, which readers still accept.
 
 Generic files set object and attribute counts to zero. Native logical files have
 one root object and either no attributes or one `names` attribute represented by
@@ -311,8 +315,9 @@ gaps, overlap, aliases, and unindexed bytes.
 ## Native logical representation
 
 The root object uses type tag 1 and independently selected physical encodings in
-blocks of at most 65,536 values. Runtime-dispatched scalar, AVX2, and AArch64
-NEON classifiers produce the same canonical TRUE and NA bitplanes; SIMD changes
+blocks of at most 65,536 values. Scalar, SSE2 (every x86-64), AVX2 (chosen at
+run time) and AArch64 NEON classifiers produce the same canonical TRUE and NA
+bitplanes; SIMD changes
 execution only, never file bytes. `FALSE` is implied where neither plane is set,
 and overlapping TRUE/NA bits are invalid.
 

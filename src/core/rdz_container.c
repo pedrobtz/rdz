@@ -984,8 +984,9 @@ int rdz_writer_finish(rdz_writer *w, const rdz_object *objects, uint32_t nobject
         if (w->metadata_len > RDZ_MAX_METADATA_LEN) return rdz_limit(e, "metadata");
         if (rdz_metadata_check(w->metadata, w->metadata_len, &count, e)) return 1;
     }
-    header_len = w->hash_scheme || w->metadata_len ? RDZ_DIRECTORY_HEADER_HASHED_LEN
-                                                    : RDZ_DIRECTORY_HEADER_LEN;
+    /* every 0.1.0 file has the 64-byte header, with or without a hash
+       (scheme 0) or metadata (length 0); 40-byte headers are only read */
+    header_len = RDZ_DIRECTORY_HEADER_HASHED_LEN;
     len = header_len + (size_t)nobjects * RDZ_OBJECT_ENTRY_LEN +
           (size_t)nattributes * RDZ_ATTRIBUTE_ENTRY_LEN + w->entries.len + synopsis_len +
           w->metadata_len;

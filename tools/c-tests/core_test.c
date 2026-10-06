@@ -94,6 +94,33 @@ static int read_all(const uint8_t *data, size_t n, rdz_error *e)
 
 /* The same bytes but the header's writer field and so its checksum
    (bytes 20 to 31): the Rust reference recorded no writer. */
+/* A 0.1.0 file with the 64-byte directory header narrowed in place to the
+   40-byte one the Rust reference wrote, when its extension (hash, scheme,
+   metadata length) is all zero: so the rest can be compared byte for byte.
+   As helper-bytes.R's bytes_without_hash(). */
+static void narrow_directory(uint8_t *data, size_t *n)
+{
+    size_t dir, dir_len, k;
+    if (!data || *n < RDZ_HEADER_LEN + RDZ_TRAILER_LEN) return;
+    dir = (size_t)zb_rd_u64le(data + *n - 32);
+    if (dir + RDZ_DIRECTORY_HEADER_HASHED_LEN > *n ||
+        zb_rd_u16le(data + dir + 6) != RDZ_DIRECTORY_HEADER_HASHED_LEN) {
+        return;
+    }
+    for (k = RDZ_DIRECTORY_HEADER_LEN; k < RDZ_DIRECTORY_HEADER_HASHED_LEN; k++) {
+        if (data[dir + k]) return;
+    }
+    memmove(data + dir + RDZ_DIRECTORY_HEADER_LEN, data + dir + RDZ_DIRECTORY_HEADER_HASHED_LEN,
+            *n - dir - RDZ_DIRECTORY_HEADER_HASHED_LEN);
+    *n -= RDZ_DIRECTORY_HEADER_HASHED_LEN - RDZ_DIRECTORY_HEADER_LEN;
+    zb_wr_u16le(data + dir + 6, (uint16_t)RDZ_DIRECTORY_HEADER_LEN);
+    zb_wr_u64le(data + dir + 32, rdz_hash(data + dir, 32));
+    dir_len = (size_t)zb_rd_u64le(data + *n - 24) -
+              (RDZ_DIRECTORY_HEADER_HASHED_LEN - RDZ_DIRECTORY_HEADER_LEN);
+    zb_wr_u64le(data + *n - 24, (uint64_t)dir_len);
+    zb_wr_u64le(data + *n - 16, rdz_hash(data + dir, dir_len));
+}
+
 static int same_but_writer(const uint8_t *a, size_t n, const uint8_t *b, size_t m)
 {
     return a && b && n == m && n >= RDZ_HEADER_LEN && memcmp(a, b, 20) == 0 &&
@@ -163,6 +190,7 @@ static void test_fixture(const char *name, const char *codec, unsigned long bloc
         } else {
             original = slurp(path, &n);
             rewritten = slurp(copy, &m);
+            narrow_directory(rewritten, &m);
             CHECK(same_but_writer(original, n, rewritten, m),
                   "%s: the C writer's bytes differ from the Rust writer's", name);
             free(original);
@@ -491,6 +519,7 @@ static void test_native_fixture(const char *name, const char *policy, const char
     } else {
         original = slurp(path, &a);
         rewritten = slurp(copy, &b2);
+        narrow_directory(rewritten, &b2);
         CHECK(same_but_writer(original, a, rewritten, b2),
               "%s: the C writer's native bytes differ from the Rust writer's", name);
         free(original);
@@ -1130,13 +1159,13 @@ static void test_pipeline(const char *tmpdir)
     char path[512];
     int threads[] = {1, 2, 8};
     int k;
-    /* read-ahead is bounded in bytes: 256 threads of 64 MiB blocks get 16
-       slots (1 GiB), of 1 MiB blocks their 512 */
+    /* read-ahead is bounded in bytes (a slot holds a block in and out): 256
+       threads of 64 MiB blocks get 8 slots (1 GiB), of 1 MiB blocks their 512 */
     {
         rdz_pipeline p;
         rdz_error e;
         CHECK(!rdz_pipeline_init(&p, 256, rdz_job_decode, (size_t)RDZ_MAX_BLOCK_SIZE,
-                                 (size_t)RDZ_MAX_BLOCK_SIZE, &e) && p.nslots == 16,
+                                 (size_t)RDZ_MAX_BLOCK_SIZE, &e) && p.nslots == 8,
               "64 MiB blocks: %u slots", (unsigned)p.nslots);
         rdz_pipeline_free(&p);
         CHECK(!rdz_pipeline_init(&p, 256, rdz_job_decode, (size_t)RDZ_MAX_BLOCK_SIZE,
@@ -1228,7 +1257,13 @@ static uint8_t *ext_file(const char *path, const uint32_t *sizes, uint32_t nsize
         rdz_writer_discard(&w);
         return NULL;
     }
-    return slurp(path, n);
+    {
+        /* the 40-byte directory header these cases patch at fixed offsets
+           (readers take both lengths) */
+        uint8_t *data = slurp(path, n);
+        narrow_directory(data, n);
+        return data;
+    }
 }
 
 /* An empty logical root in one block of `encoding` holding `bytes`: only

@@ -8,8 +8,9 @@
  * smallest of five records: constant (3), modal-default bitplanes (4), sparse
  * patches (5), run ends (6) or a short period (7). Encoding 1, the two-bit
  * reference, is read but never written. The classifier has a scalar
- * reference and AVX2 and NEON kernels chosen at run time; they produce the
- * same planes, so the bytes never depend on the CPU.
+ * reference and SSE2 (every x86-64), AVX2 (when the CPU has it) and NEON
+ * (little-endian arm64) kernels; they produce the same planes, so the bytes
+ * never depend on the CPU.
  *
  * Values are R's logical representation: 0, 1 and NA (INT32_MIN); any other
  * int is an error. Threads: pure functions of their arguments.

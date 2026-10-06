@@ -12,7 +12,9 @@
 #define RDZ_HAVE_SSE2_KERNEL 1 /* every x86-64 CPU has SSE2 */
 #include <emmintrin.h>
 #endif
-#if defined(__aarch64__) && defined(__ARM_NEON)
+/* neon_bits64() reads lanes as a little-endian word */
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__BYTE_ORDER__) && \
+    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #define RDZ_HAVE_NEON_KERNEL 1
 #include <arm_neon.h>
 #endif

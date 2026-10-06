@@ -34,6 +34,7 @@
 rdz_save <- function(..., list = character(), file, envir = parent.frame(),
                      mode = c("auto", "native", "r"), skip_unchanged = FALSE, metadata = NULL,
                      compress = getOption("rdz.compress", 1L), hash = getOption("rdz.hash", TRUE)) {
+  if (missing(compress)) compress <- rdz_legacy_compress(compress)
   dots <- as.list(substitute(list(...)))[-1L]
   named <- vapply(dots, function(d) {
     if (is.symbol(d)) return(as.character(d))
