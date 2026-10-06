@@ -7,13 +7,31 @@
 rdz_schema(path, recursive = TRUE)
 }
 \arguments{
-\item{path}{A single, non-missing path to inspect.}
+\item{path}{A path, or a raw vector holding an rdz file (\code{\link[=rdz_serialize]{rdz_serialize()}}).}
 
 \item{recursive}{Whether \code{objects} describes every level (\code{TRUE}) or the
 root and its own parts.}
 }
 \value{
-A named schema list.
+A list of class \code{rdz_schema}: \code{codec}, \code{authoritative},
+\code{exact_attributes}, \code{root_type}, \code{length} and \code{attribute_names} as in
+\code{\link[=rdz_info]{rdz_info()}}; \code{data_blocks_read}, always \code{FALSE}; and \code{objects}, for a
+native file a data frame with a row per part, depth first (\code{NULL} for a
+generic file):
+\itemize{
+\item \code{path}: the part's place, such as \code{"$sales$day"} or \code{"$models[[2]]"}
+(\code{""} for the root).
+\item \code{depth}: 0 for the root.
+\item \code{type}: its native type; \code{class}: its classes, joined by \code{/}.
+\item \code{length}: elements (a list's parts, a data frame's rows); \code{columns}:
+a data frame's columns, else \code{NA}; \code{shape}: its dimensions as text.
+\item \code{attributes}: its attributes' names, joined by \verb{, }.
+\item \code{stored_bytes}: the bytes its blocks take in the file, its parts'
+included.
+\item \code{shared_with}: for a part stored once and met again (a shared large
+vector), the path of its first occurrence, else \code{NA}.
+\item \code{id}: its object ID in the directory.
+}
 }
 \description{
 \code{rdz_schema()} reads the bounded directory without reading object data

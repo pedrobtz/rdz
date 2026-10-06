@@ -10,14 +10,40 @@ rdz_info(path)
 \method{print}{rdz_info}(x, ...)
 }
 \arguments{
-\item{path}{A single, non-missing path to inspect.}
+\item{path}{A path, or a raw vector holding an rdz file (\code{\link[=rdz_serialize]{rdz_serialize()}}).}
 
 \item{x}{An \code{rdz_info} object.}
 
 \item{...}{Additional arguments, currently unused.}
 }
 \value{
-A named list of container information and a bounded root synopsis.
+A list of class \code{rdz_info}:
+\itemize{
+\item \code{container_version}, \code{codec} (\code{"native_v1"} or \code{"r_serial_v3"}),
+\code{codec_id}, \code{codec_version}: the file's format versions and payload
+codec.
+\item \code{block_size} (the largest decoded block, in bytes), \code{block_count},
+\code{object_count}, \code{attribute_count}: the directory's counts.
+\item \code{payload_bytes} (stored block bytes) and \code{file_bytes}.
+\item \code{root_type}, \code{root_length}, \code{attribute_names}: the root's type (a native
+type such as \code{"data.frame"}, or for a generic file R's \code{\link[=typeof]{typeof()}}), its
+length (a data frame's number of columns) and its attributes' names.
+\item \code{writer}: the implementation and version that wrote the file, such as
+\code{"rdz 0.1.0"}, or \code{""} when the file does not record one.
+\item \code{content_hash}: the value's hash (\code{\link[=rdz_hash]{rdz_hash()}}), 32 hexadecimal digits,
+or \code{NA} when the file records none.
+\item \code{metadata}: the user metadata \code{\link[=write_rdz]{write_rdz()}} recorded, a named character
+vector (empty when there is none).
+\item \code{synopsis}: for a generic file, the bounded description of the root
+recorded when it was written (\code{NULL} for a native file).
+\item \code{authoritative}, \code{exact_attributes}: whether the directory describes
+the value exactly (native files) rather than through the synopsis;
+\code{full_read_required_for_attributes} is their opposite.
+\item \code{schema}: \code{root_type}, \code{length} and \code{attribute_names} as one list.
+\item \code{integrity_checks}: the checks \code{rdz_info()} makes: the header's and the
+directory's checksums and every offset and length in the directory.
+Block checksums are checked by \code{\link[=read_rdz]{read_rdz()}} and \code{\link[=rdz_verify]{rdz_verify()}}.
+}
 
 \code{x}, invisibly.
 }

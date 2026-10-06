@@ -23,6 +23,12 @@
 #' same value written with `mode = "r"` hash differently. XXH3-128 is not a
 #' cryptographic hash.
 #'
+#' The hash also records sharing: a vector of 4 KiB or more that appears
+#' twice in `x` as one object is stored once ([write_rdz()], "Native and
+#' generic"), and hashes as a reference to its first occurrence. So
+#' `list(v, v)` and `list(v, v + 0)` are [identical()] but hash differently
+#' when `v` is that large; build values the same way to get the same hash.
+#'
 #' @param x An R object.
 #' @param mode As for [write_rdz()].
 #' @returns The hash, 32 hexadecimal digits.
@@ -48,7 +54,7 @@ rdz_hash <- function(x, mode = c("auto", "native", "r")) {
 #' decompressing it. With `content = TRUE` it also reads the value and checks
 #' it against the content hash the file records.
 #'
-#' @param path A single, non-missing path to verify.
+#' @param path A path, or a raw vector holding an rdz file ([rdz_serialize()]).
 #' @param content Whether to read the value and compare its [rdz_hash()] with
 #'   the stored one.
 #' @returns `path`, invisibly, when the file is sound; otherwise an
@@ -62,13 +68,13 @@ rdz_hash <- function(x, mode = c("auto", "native", "r")) {
 rdz_verify <- function(path, content = FALSE) {
   path <- validate_existing_rdz_path(path)
   if (!is.logical(content) || length(content) != 1L || is.na(content)) {
-    stop("`content` must be TRUE or FALSE.", call. = FALSE)
+    rdz_stop("`content` must be TRUE or FALSE.", call. = FALSE)
   }
   rdz_check(.Call(rdz_c_verify, path))
   if (content) {
     info <- rdz_info(path)
     if (is.na(info$content_hash)) {
-      stop("The file records no content hash.", call. = FALSE)
+      rdz_stop("The file records no content hash.", call. = FALSE)
     }
     mode <- if (identical(info$codec, "native_v1")) "native" else "r"
     if (!identical(rdz_hash(read_rdz(path), mode = mode), info$content_hash)) {

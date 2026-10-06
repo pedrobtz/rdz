@@ -34,6 +34,12 @@ example, a closure and its byte-compiled copy. The hash identifies the
 value as stored, so it depends on \code{mode}: a value written natively and the
 same value written with \code{mode = "r"} hash differently. XXH3-128 is not a
 cryptographic hash.
+
+The hash also records sharing: a vector of 4 KiB or more that appears
+twice in \code{x} as one object is stored once (\code{\link[=write_rdz]{write_rdz()}}, "Native and
+generic"), and hashes as a reference to its first occurrence. So
+\code{list(v, v)} and \code{list(v, v + 0)} are \code{\link[=identical]{identical()}} but hash differently
+when \code{v} is that large; build values the same way to get the same hash.
 }
 \examples{
 path <- tempfile(fileext = ".rdz")

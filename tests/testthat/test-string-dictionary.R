@@ -70,7 +70,8 @@ test_that("an unsupported name found mid-write falls back without leaving files"
 
   for (policy in dictionary_policies) {
     with_string_dictionary(policy, {
-      expect_error(write_rdz(x, path, mode = "native"), "non-ASCII native-encoded names")
+      # not valid UTF-8 in a UTF-8 locale, nor convertible to it elsewhere
+      expect_error(write_rdz(x, path, mode = "native"), class = "rdz_unsupported_error")
       expect_identical(list.files(directory, all.files = TRUE, no.. = TRUE), character())
 
       write_rdz(x, path)

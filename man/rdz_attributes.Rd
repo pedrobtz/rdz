@@ -7,7 +7,7 @@
 rdz_attributes(path, object = NULL, names = NULL, allow_full = FALSE)
 }
 \arguments{
-\item{path}{A single, non-missing path to inspect.}
+\item{path}{A path, or a raw vector holding an rdz file (\code{\link[=rdz_serialize]{rdz_serialize()}}).}
 
 \item{object}{The object whose attributes to read: \code{NULL} or \code{0} for the
 root, or a path from the root as for \code{[[}, one name or position per

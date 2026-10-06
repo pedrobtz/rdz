@@ -53,6 +53,46 @@ smaller. \code{options(rdz.threads = )} sets the threads that compress and, in
 depend on either: any setting reads any file, and the same object written
 with any number of threads gives the same bytes.
 }
+\section{Native and generic}{
+
+In automatic mode (\code{mode = "auto"}), a value is written natively when every
+part of it can be; otherwise the whole value goes through R serialization.
+Native files support selective reads (\code{select}, \code{rows}) and inspection
+below the root (\code{\link[=rdz_schema]{rdz_schema()}}, \code{\link[=rdz_attributes]{rdz_attributes()}}); generic files are read
+whole. A value is written generically when it holds, anywhere:
+\itemize{
+\item a type other than logical, integer, double, character or list (complex
+and raw vectors, environments, functions, calls, S4 objects);
+\item a string longer than 1 MiB, or a non-ASCII string the session cannot
+convert to UTF-8 losslessly (unmarked strings in the C locale);
+\item a non-ASCII attribute name, or names, row names or a class carrying
+attributes of their own;
+\item a factor with names, a data frame column of another length than its rows
+(a matrix of two or more columns) or that is itself a data frame;
+\item nesting deeper than 1,000 levels, or more than 1,000,000 parts.
+}
+
+Automatic mode also writes generically a value of at least 1,024 parts that
+average less than 1 KiB of data each, where the native directory would
+cost more than the data. \code{mode = "native"} writes those natively, and
+raises an \code{rdz_unsupported_error} (see \link{rdz-errors}) for the others.
+
+A vector of 4 KiB or more that appears more than once in \code{x} (the same
+object, as after \code{y <- x}) is stored once and read back shared.
+}
+
+\section{Replacing files}{
+
+The file is written to a temporary file beside \code{path} and renamed over it
+at the end, so readers see the old file or the new one, never a partial
+one, and an error or interrupt leaves \code{path} as it was. rdz does not ask
+the operating system to flush the file to disk (no \code{fsync}), so after a
+power failure the file may be missing or empty. On file systems whose
+rename cannot replace a file (some Windows shares), the old file is moved
+aside first, and a crash at that moment can leave it under a name ending
+in \code{.backup}.
+}
+
 \examples{
 path <- tempfile(fileext = ".rdz")
 write_rdz(list(answer = 42L), path)

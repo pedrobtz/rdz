@@ -7,7 +7,7 @@
 read_rdz(path, select = NULL, rows = NULL)
 }
 \arguments{
-\item{path}{A single, non-missing path to read.}
+\item{path}{A path, or a raw vector holding an rdz file (\code{\link[=rdz_serialize]{rdz_serialize()}}).}
 
 \item{select}{\code{NULL} (everything), or the columns of a data frame or the
 elements of a list to read: distinct names, or distinct positive

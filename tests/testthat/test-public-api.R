@@ -257,3 +257,17 @@ test_that("paths are validated", {
   expect_error(read_rdz(NA_character_), "single")
   expect_error(write_rdz(1L, tempdir()), "must not refer to a directory")
 })
+
+test_that("every error rdz raises is an rdz_error of a documented class", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  write_rdz(data.frame(a = 1:3), path)
+  expect_error(read_rdz(path, rows = 0), class = "rdz_argument_error")
+  expect_error(read_rdz(path, select = "nope"), class = "rdz_argument_error")
+  expect_error(write_rdz(1, path, metadata = c("x")), class = "rdz_argument_error")
+  expect_error(read_rdz(tempfile()), class = "rdz_io_error")
+  expect_error(write_rdz(1, file.path(tempfile(), "x.rdz")), class = "rdz_io_error")
+  expect_error(rdz_save(file = path), class = "rdz_error")
+  writeBin(as.raw(1:10), path)
+  expect_error(read_rdz(path), class = "rdz_format_error")
+})

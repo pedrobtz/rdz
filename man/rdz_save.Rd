@@ -11,8 +11,8 @@ rdz_save(
   file,
   envir = parent.frame(),
   mode = c("auto", "native", "r"),
-  metadata = NULL,
-  skip_unchanged = FALSE
+  skip_unchanged = FALSE,
+  metadata = NULL
 )
 
 rdz_load(file, names = NULL, envir = parent.frame())
@@ -28,7 +28,7 @@ from \code{\link[=rdz_serialize]{rdz_serialize()}}).}
 \item{envir}{For \code{rdz_save()}, where to find the objects; for
 \code{rdz_load()}, where to assign them.}
 
-\item{mode, metadata, skip_unchanged}{As for \code{\link[=write_rdz]{write_rdz()}}.}
+\item{mode, skip_unchanged, metadata}{As for \code{\link[=write_rdz]{write_rdz()}}.}
 
 \item{names}{\code{NULL} (everything) or the names of the objects to load.}
 }

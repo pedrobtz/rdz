@@ -37,7 +37,7 @@ rdz_object_id <- function(path, dir, object) {
     length(s) == 1L && !is.na(s) && (is.character(s) || (is.numeric(s) && s >= 1 && s == trunc(s)))
   }, logical(1L))
   if (!length(steps) || !all(ok)) {
-    stop("`object` must be NULL, 0, or a path of names and positive positions.", call. = FALSE)
+    rdz_stop("`object` must be NULL, 0, or a path of names and positive positions.", call. = FALSE)
   }
   objects <- dir$objects
   attrs <- dir$attributes
@@ -46,20 +46,20 @@ rdz_object_id <- function(path, dir, object) {
   for (s in steps) {
     o <- objects[id + 1L, ]
     if (!o$type_name %in% c("list", "data.frame")) {
-      stop("`object` goes below ", if (nzchar(where)) where else "the root",
+      rdz_stop("`object` goes below ", if (nzchar(where)) where else "the root",
            ", which is not a list or a data frame.", call. = FALSE)
     }
     if (is.character(s)) {
       names_id <- attrs$value_object[attrs$owner == id & attrs$kind == 1L]
       names <- if (length(names_id)) rdz_read_objects(path, names_id)[[1L]]
       at <- match(s, names)
-      if (is.na(at)) stop("No `", s, "` in ", if (nzchar(where)) where else "the root", ".",
+      if (is.na(at)) rdz_stop("No `", s, "` in ", if (nzchar(where)) where else "the root", ".",
                           call. = FALSE)
       where <- paste0(where, "$", s)
     } else {
       at <- as.integer(s)
       if (at > o$child_count) {
-        stop("Position ", at, " is past the ", o$child_count, " parts of ",
+        rdz_stop("Position ", at, " is past the ", o$child_count, " parts of ",
              if (nzchar(where)) where else "the root", ".", call. = FALSE)
       }
       where <- paste0(where, "[[", at, "]]")
@@ -108,10 +108,26 @@ rdz_attribute_entries <- function(dir, id) {
 #' stored bytes of everything below it. Only the directory and the parts'
 #' names and classes are read, never their data.
 #'
-#' @param path A single, non-missing path to inspect.
+#' @param path A path, or a raw vector holding an rdz file ([rdz_serialize()]).
 #' @param recursive Whether `objects` describes every level (`TRUE`) or the
 #'   root and its own parts.
-#' @returns A named schema list.
+#' @returns A list of class `rdz_schema`: `codec`, `authoritative`,
+#'   `exact_attributes`, `root_type`, `length` and `attribute_names` as in
+#'   [rdz_info()]; `data_blocks_read`, always `FALSE`; and `objects`, for a
+#'   native file a data frame with a row per part, depth first (`NULL` for a
+#'   generic file):
+#'   * `path`: the part's place, such as `"$sales$day"` or `"$models[[2]]"`
+#'     (`""` for the root).
+#'   * `depth`: 0 for the root.
+#'   * `type`: its native type; `class`: its classes, joined by `/`.
+#'   * `length`: elements (a list's parts, a data frame's rows); `columns`:
+#'     a data frame's columns, else `NA`; `shape`: its dimensions as text.
+#'   * `attributes`: its attributes' names, joined by `, `.
+#'   * `stored_bytes`: the bytes its blocks take in the file, its parts'
+#'     included.
+#'   * `shared_with`: for a part stored once and met again (a shared large
+#'     vector), the path of its first occurrence, else `NA`.
+#'   * `id`: its object ID in the directory.
 #' @examples
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(list(a = 1:3, b = data.frame(d = Sys.Date() + 0:1, x = c(1.5, 2))), path)
@@ -121,7 +137,7 @@ rdz_attribute_entries <- function(dir, id) {
 rdz_schema <- function(path, recursive = TRUE) {
   path <- validate_existing_rdz_path(path)
   if (!is.logical(recursive) || length(recursive) != 1L || is.na(recursive)) {
-    stop("`recursive` must be TRUE or FALSE.", call. = FALSE)
+    rdz_stop("`recursive` must be TRUE or FALSE.", call. = FALSE)
   }
   info <- rdz_info(path)
   out <- c(
@@ -268,7 +284,7 @@ print.rdz_schema <- function(x, ...) {
 #' files require `allow_full = TRUE`, which explicitly permits a complete
 #' object read.
 #'
-#' @param path A single, non-missing path to inspect.
+#' @param path A path, or a raw vector holding an rdz file ([rdz_serialize()]).
 #' @param object The object whose attributes to read: `NULL` or `0` for the
 #'   root, or a path from the root as for `[[`, one name or position per
 #'   level, such as `c("sales", "date")` or `list("models", 2)`.
@@ -285,10 +301,10 @@ rdz_attributes <- function(path, object = NULL, names = NULL, allow_full = FALSE
   path <- validate_existing_rdz_path(path)
   if (!is.null(names) &&
       (!is.character(names) || anyNA(names) || any(!nzchar(names)))) {
-    stop("`names` must be NULL or a character vector of non-empty names.", call. = FALSE)
+    rdz_stop("`names` must be NULL or a character vector of non-empty names.", call. = FALSE)
   }
   if (!is.logical(allow_full) || length(allow_full) != 1L || is.na(allow_full)) {
-    stop("`allow_full` must be TRUE or FALSE.", call. = FALSE)
+    rdz_stop("`allow_full` must be TRUE or FALSE.", call. = FALSE)
   }
   info <- rdz_info(path)
   if (identical(info$codec, "native_v1")) {
@@ -298,7 +314,7 @@ rdz_attributes <- function(path, object = NULL, names = NULL, allow_full = FALSE
     requested <- if (is.null(names)) base::names(entries) else names
     unknown <- setdiff(requested, base::names(entries))
     if (length(unknown)) {
-      stop("Unknown attribute: ", paste(unknown, collapse = ", "), call. = FALSE)
+      rdz_stop("Unknown attribute: ", paste(unknown, collapse = ", "), call. = FALSE)
     }
     entries <- entries[requested]
     stored <- vapply(entries, function(e) e$object, integer(1L))
@@ -308,7 +324,7 @@ rdz_attributes <- function(path, object = NULL, names = NULL, allow_full = FALSE
     return(stats::setNames(values, requested))
   }
   if (!allow_full) {
-    stop(
+    rdz_stop(
       "Exact generic attributes require a full read; set `allow_full = TRUE`.",
       call. = FALSE
     )
@@ -325,7 +341,7 @@ rdz_attributes <- function(path, object = NULL, names = NULL, allow_full = FALSE
   requested <- if (is.null(names)) available else names
   unknown <- setdiff(requested, available)
   if (length(unknown)) {
-    stop("Unknown attribute: ", paste(unknown, collapse = ", "), call. = FALSE)
+    rdz_stop("Unknown attribute: ", paste(unknown, collapse = ", "), call. = FALSE)
   }
   values[requested]
 }

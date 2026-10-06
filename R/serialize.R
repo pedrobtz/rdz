@@ -16,6 +16,40 @@
 #' depend on either: any setting reads any file, and the same object written
 #' with any number of threads gives the same bytes.
 #'
+#' @section Native and generic:
+#' In automatic mode (`mode = "auto"`), a value is written natively when every
+#' part of it can be; otherwise the whole value goes through R serialization.
+#' Native files support selective reads (`select`, `rows`) and inspection
+#' below the root ([rdz_schema()], [rdz_attributes()]); generic files are read
+#' whole. A value is written generically when it holds, anywhere:
+#' * a type other than logical, integer, double, character or list (complex
+#'   and raw vectors, environments, functions, calls, S4 objects);
+#' * a string longer than 1 MiB, or a non-ASCII string the session cannot
+#'   convert to UTF-8 losslessly (unmarked strings in the C locale);
+#' * a non-ASCII attribute name, or names, row names or a class carrying
+#'   attributes of their own;
+#' * a factor with names, a data frame column of another length than its rows
+#'   (a matrix of two or more columns) or that is itself a data frame;
+#' * nesting deeper than 1,000 levels, or more than 1,000,000 parts.
+#'
+#' Automatic mode also writes generically a value of at least 1,024 parts that
+#' average less than 1 KiB of data each, where the native directory would
+#' cost more than the data. `mode = "native"` writes those natively, and
+#' raises an `rdz_unsupported_error` (see [rdz-errors]) for the others.
+#'
+#' A vector of 4 KiB or more that appears more than once in `x` (the same
+#' object, as after `y <- x`) is stored once and read back shared.
+#'
+#' @section Replacing files:
+#' The file is written to a temporary file beside `path` and renamed over it
+#' at the end, so readers see the old file or the new one, never a partial
+#' one, and an error or interrupt leaves `path` as it was. rdz does not ask
+#' the operating system to flush the file to disk (no `fsync`), so after a
+#' power failure the file may be missing or empty. On file systems whose
+#' rename cannot replace a file (some Windows shares), the old file is moved
+#' aside first, and a crash at that moment can leave it under a name ending
+#' in `.backup`.
+#'
 #' @param x An R object to serialize.
 #' @param path A single, non-missing path to write.
 #' @param mode Codec selection. `"auto"` uses a native codec only when the
@@ -43,7 +77,7 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged =
   mode <- match.arg(mode)
   section <- rdz_metadata_section(metadata)
   if (!is.logical(skip_unchanged) || length(skip_unchanged) != 1L || is.na(skip_unchanged)) {
-    stop("`skip_unchanged` must be TRUE or FALSE.", call. = FALSE)
+    rdz_stop("`skip_unchanged` must be TRUE or FALSE.", call. = FALSE)
   }
   if (skip_unchanged && file.exists(path) && !dir.exists(path)) {
     stored <- tryCatch(rdz_info(path), error = function(e) NULL)
@@ -55,10 +89,10 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged =
   }
   directory <- dirname(path)
   if (!dir.exists(directory)) {
-    stop("The destination directory does not exist: ", directory, call. = FALSE)
+    rdz_stop("The destination directory does not exist: ", directory, class = "rdz_io_error", call. = FALSE)
   }
   if (dir.exists(path)) {
-    stop("`path` must not refer to a directory.", call. = FALSE)
+    rdz_stop("`path` must not refer to a directory.", call. = FALSE)
   }
 
   rdz_write_to(x, path, mode, section)
@@ -91,17 +125,17 @@ rdz_write_to <- function(x, path, mode, section) {
 #' `rdz_serialize()` gives the bytes [write_rdz()] would write, as a raw
 #' vector, for a database column, a key-value store such as Redis, or a
 #' socket; `rdz_unserialize()` reads them back. Everything else takes a raw
-#' vector where it takes a path: [read_rdz()] (`select` included),
+#' vector where it takes a path: [read_rdz()] (`select` and `rows` included),
 #' [rdz_info()], [rdz_schema()], [rdz_attributes()] and [rdz_verify()].
 #'
 #' @inheritParams write_rdz
 #' @param bytes A raw vector holding an rdz file.
-#' @param select As for [read_rdz()].
+#' @param select,rows As for [read_rdz()].
 #' @returns `rdz_serialize()`: a raw vector. `rdz_unserialize()`: the object.
 #' @examples
 #' bytes <- rdz_serialize(mtcars)
 #' identical(rdz_unserialize(bytes), mtcars)
-#' rdz_unserialize(bytes, select = "mpg")
+#' rdz_unserialize(bytes, select = "mpg", rows = 1:3)
 #' @export
 rdz_serialize <- function(x, mode = c("auto", "native", "r"), metadata = NULL) {
   mode <- match.arg(mode)
@@ -110,9 +144,9 @@ rdz_serialize <- function(x, mode = c("auto", "native", "r"), metadata = NULL) {
 
 #' @rdname rdz_serialize
 #' @export
-rdz_unserialize <- function(bytes, select = NULL) {
-  if (!is.raw(bytes)) stop("`bytes` must be a raw vector.", call. = FALSE)
-  read_rdz(bytes, select = select)
+rdz_unserialize <- function(bytes, select = NULL, rows = NULL) {
+  if (!is.raw(bytes)) rdz_stop("`bytes` must be a raw vector.", call. = FALSE)
+  read_rdz(bytes, select = select, rows = rows)
 }
 
 #' Read an R Object from an rdz File
@@ -134,7 +168,7 @@ rdz_unserialize <- function(bytes, select = NULL) {
 #' the root or nested in lists. rdz never calls or loads data.table. Tibbles
 #' need nothing rebuilt.
 #'
-#' @param path A single, non-missing path to read.
+#' @param path A path, or a raw vector holding an rdz file ([rdz_serialize()]).
 #' @param select `NULL` (everything), or the columns of a data frame or the
 #'   elements of a list to read: distinct names, or distinct positive
 #'   positions.
@@ -190,11 +224,11 @@ rdz_rows_refused <- function(path, rows, e) {
   root <- rdz_directory(path)$objects[1L, ]
   if (!root$type_name %in% c("data.frame", "logical", "integer", "double", "character",
                              "factor")) {
-    stop("`rows` needs a data frame or a vector; use `select` for a list's elements.",
+    rdz_stop("`rows` needs a data frame or a vector; use `select` for a list's elements.",
          call. = FALSE)
   }
   if (length(rows) && max(rows) > root$length) {
-    stop("`rows` must be at most ", root$length, ".", call. = FALSE)
+    rdz_stop("`rows` must be at most ", root$length, ".", call. = FALSE)
   }
   if (inherits(e, "rdz_unsupported_error")) return(NULL)
   stop(e)
@@ -202,7 +236,7 @@ rdz_rows_refused <- function(path, rows, e) {
 
 rdz_rows_check <- function(rows) {
   if (!is.numeric(rows) || anyNA(rows) || any(rows < 1) || any(rows != trunc(rows))) {
-    stop("`rows` must be positive whole numbers.", call. = FALSE)
+    rdz_stop("`rows` must be positive whole numbers.", call. = FALSE)
   }
   rows
 }
@@ -216,14 +250,14 @@ rdz_rows_check <- function(rows) {
 rdz_rows_take <- function(value, rows, lo) {
   if (!is.data.frame(value)) {
     if (is.list(value) && !is.object(value)) {
-      stop("`rows` needs a data frame or a vector; use `select` for a list's elements.",
+      rdz_stop("`rows` needs a data frame or a vector; use `select` for a list's elements.",
            call. = FALSE)
     }
-    if (max(c(rows, 0)) > length(value) + lo) stop("`rows` must be at most ", length(value) + lo, ".", call. = FALSE)
+    if (max(c(rows, 0)) > length(value) + lo) rdz_stop("`rows` must be at most ", length(value) + lo, ".", call. = FALSE)
     return(value[rows - lo])
   }
   n <- .row_names_info(value, 2L) # rows read: the window's, or all of them
-  if (max(c(rows, 0)) > n + lo) stop("`rows` must be at most ", n + lo, ".", call. = FALSE)
+  if (max(c(rows, 0)) > n + lo) rdz_stop("`rows` must be at most ", n + lo, ".", call. = FALSE)
   cols <- lapply(unclass(value), function(col) {
     rdz_rows_of(col, if (NROW(col) == n) rows - lo else rows)
   })
@@ -258,12 +292,12 @@ rdz_metadata_vector <- function(metadata) {
   ok <- (is.character(metadata) || is.list(metadata)) && !is.null(names(metadata)) &&
     all(vapply(metadata, function(v) is.character(v) && length(v) == 1L && !is.na(v), TRUE))
   if (!ok) {
-    stop("`metadata` must be NULL or a named character vector (or a named list of single ",
+    rdz_stop("`metadata` must be NULL or a named character vector (or a named list of single ",
          "strings), without NA.", call. = FALSE)
   }
   keys <- enc2utf8(names(metadata))
   if (anyNA(keys) || any(!nzchar(keys)) || anyDuplicated(keys)) {
-    stop("`metadata` names must be distinct and non-empty.", call. = FALSE)
+    rdz_stop("`metadata` names must be distinct and non-empty.", call. = FALSE)
   }
   values <- enc2utf8(vapply(metadata, identity, ""))
   out <- stats::setNames(values, keys)
@@ -279,7 +313,7 @@ rdz_metadata_section <- function(metadata) {
   u32 <- function(n) writeBin(as.integer(n), raw(), size = 4L, endian = "little")
   str <- function(s) { b <- charToRaw(s); c(u32(length(b)), b) }
   out <- c(u32(length(v)), unlist(lapply(seq_along(v), function(i) c(str(names(v)[i]), str(v[[i]])))))
-  if (length(out) > 64 * 1024) stop("`metadata` exceeds 64 KiB.", call. = FALSE)
+  if (length(out) > 64 * 1024) rdz_stop("`metadata` exceeds 64 KiB.", call. = FALSE)
   out
 }
 
@@ -287,7 +321,7 @@ rdz_metadata_section <- function(metadata) {
 # root, reading only its names.
 rdz_select_index <- function(path, info, select) {
   if (!info$root_type %in% c("list", "data.frame")) {
-    stop("`select` needs a list or a data frame; the file holds ",
+    rdz_stop("`select` needs a list or a data frame; the file holds ",
          if (nzchar(info$root_type)) info$root_type else "neither", ".", call. = FALSE)
   }
   n <- info$root_length
@@ -300,21 +334,21 @@ rdz_select_index <- function(path, info, select) {
 # The 1-based positions `select` names among n parts with these names.
 rdz_select_positions <- function(select, n, names) {
   if (is.character(select)) {
-    if (anyNA(select)) stop("`select` must not contain NA.", call. = FALSE)
-    if (is.null(names)) stop("`select` names parts, but they have no names.", call. = FALSE)
+    if (anyNA(select)) rdz_stop("`select` must not contain NA.", call. = FALSE)
+    if (is.null(names)) rdz_stop("`select` names parts, but they have no names.", call. = FALSE)
     at <- match(select, names)
     if (anyNA(at)) {
-      stop("Unknown in `select`: ", paste(select[is.na(at)], collapse = ", "), call. = FALSE)
+      rdz_stop("Unknown in `select`: ", paste(select[is.na(at)], collapse = ", "), call. = FALSE)
     }
   } else if (is.numeric(select)) {
     if (anyNA(select) || any(select != trunc(select)) || any(select < 1) || any(select > n)) {
-      stop("`select` positions must be whole numbers from 1 to ", n, ".", call. = FALSE)
+      rdz_stop("`select` positions must be whole numbers from 1 to ", n, ".", call. = FALSE)
     }
     at <- as.integer(select)
   } else {
-    stop("`select` must be NULL, a character vector or a numeric vector.", call. = FALSE)
+    rdz_stop("`select` must be NULL, a character vector or a numeric vector.", call. = FALSE)
   }
-  if (anyDuplicated(at)) stop("`select` must not repeat a part.", call. = FALSE)
+  if (anyDuplicated(at)) rdz_stop("`select` must not repeat a part.", call. = FALSE)
   at
 }
 
@@ -322,7 +356,7 @@ rdz_select_positions <- function(select, n, names) {
 # with their names; a data frame's row names and class.
 rdz_select_generic <- function(value, select) {
   if (typeof(value) != "list") {
-    stop("`select` needs a list or a data frame.", call. = FALSE)
+    rdz_stop("`select` needs a list or a data frame.", call. = FALSE)
   }
   at <- rdz_select_positions(select, length(value), names(value))
   out <- unclass(value)[at]
@@ -347,8 +381,32 @@ rdz_select_generic <- function(value, select) {
 #' the implementation and version that wrote the file, or is `""` when the file
 #' does not record one.
 #'
-#' @param path A single, non-missing path to inspect.
-#' @returns A named list of container information and a bounded root synopsis.
+#' @param path A path, or a raw vector holding an rdz file ([rdz_serialize()]).
+#' @returns A list of class `rdz_info`:
+#'   * `container_version`, `codec` (`"native_v1"` or `"r_serial_v3"`),
+#'     `codec_id`, `codec_version`: the file's format versions and payload
+#'     codec.
+#'   * `block_size` (the largest decoded block, in bytes), `block_count`,
+#'     `object_count`, `attribute_count`: the directory's counts.
+#'   * `payload_bytes` (stored block bytes) and `file_bytes`.
+#'   * `root_type`, `root_length`, `attribute_names`: the root's type (a native
+#'     type such as `"data.frame"`, or for a generic file R's [typeof()]), its
+#'     length (a data frame's number of columns) and its attributes' names.
+#'   * `writer`: the implementation and version that wrote the file, such as
+#'     `"rdz 0.1.0"`, or `""` when the file does not record one.
+#'   * `content_hash`: the value's hash ([rdz_hash()]), 32 hexadecimal digits,
+#'     or `NA` when the file records none.
+#'   * `metadata`: the user metadata [write_rdz()] recorded, a named character
+#'     vector (empty when there is none).
+#'   * `synopsis`: for a generic file, the bounded description of the root
+#'     recorded when it was written (`NULL` for a native file).
+#'   * `authoritative`, `exact_attributes`: whether the directory describes
+#'     the value exactly (native files) rather than through the synopsis;
+#'     `full_read_required_for_attributes` is their opposite.
+#'   * `schema`: `root_type`, `length` and `attribute_names` as one list.
+#'   * `integrity_checks`: the checks `rdz_info()` makes: the header's and the
+#'     directory's checksums and every offset and length in the directory.
+#'     Block checksums are checked by [read_rdz()] and [rdz_verify()].
 #' @examples
 #' path <- tempfile(fileext = ".rdz")
 #' write_rdz(data.frame(value = 1:3), path)
@@ -411,7 +469,7 @@ print.rdz_info <- function(x, ...) {
 
 validate_rdz_path <- function(path) {
   if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)) {
-    stop("`path` must be a single, non-missing, non-empty string.", call. = FALSE)
+    rdz_stop("`path` must be a single, non-missing, non-empty string.", call. = FALSE)
   }
   path.expand(path)
 }
@@ -421,7 +479,7 @@ validate_existing_rdz_path <- function(path) {
   if (is.raw(path)) return(path)
   path <- validate_rdz_path(path)
   if (!file.exists(path) || dir.exists(path)) {
-    stop("The file does not exist: ", path, call. = FALSE)
+    rdz_stop("The file does not exist: ", path, class = "rdz_io_error", call. = FALSE)
   }
   path
 }
@@ -453,18 +511,18 @@ rdz_synopsis_plain <- function(bytes) {
   n <- length(bytes)
   at <- 0
   int <- function() {
-    if (at + 4 > n) stop("short")
+    if (at + 4 > n) rdz_stop("short")
     v <- readBin(bytes[at + 1:4], "integer", size = 4L, endian = "big")
     at <<- at + 4
     v
   }
   skip <- function(k) {
-    if (k < 0 || at + k > n) stop("short")
+    if (k < 0 || at + k > n) rdz_stop("short")
     at <<- at + k
   }
   symbols <- 0
   item <- function(depth) {
-    if (depth > 64L) stop("deep")
+    if (depth > 64L) rdz_stop("deep")
     flags <- int()
     type <- bitwAnd(flags, 0xFF)
     has_attr <- bitwAnd(flags, 0x200) != 0
@@ -473,7 +531,7 @@ rdz_synopsis_plain <- function(bytes) {
     if (type == 255L) { # a reference: only to a symbol already read
       ref <- bitwShiftR(flags, 8L)
       if (ref == 0L) ref <- int()
-      if (ref < 1L || ref > symbols) stop("reference")
+      if (ref < 1L || ref > symbols) rdz_stop("reference")
       return(invisible())
     }
     if (type == 1L) { # a symbol: its name, a string
@@ -489,7 +547,7 @@ rdz_synopsis_plain <- function(bytes) {
         flags <- int()
         type <- bitwAnd(flags, 0xFF)
         if (type == 254L) return(invisible())
-        if (type != 2L) stop("type")
+        if (type != 2L) rdz_stop("type")
         has_attr <- bitwAnd(flags, 0x200) != 0
         has_tag <- bitwAnd(flags, 0x400) != 0
       }
@@ -499,10 +557,10 @@ rdz_synopsis_plain <- function(bytes) {
       if (len != -1L) skip(len)
       return(invisible())
     }
-    if (!type %in% c(10L, 13L, 14L, 16L, 19L)) stop("type")
+    if (!type %in% c(10L, 13L, 14L, 16L, 19L)) rdz_stop("type")
     len <- int()
-    if (len == -1L) stop("long") # a synopsis is never a long vector
-    if (len < 0L) stop("length")
+    if (len == -1L) rdz_stop("long") # a synopsis is never a long vector
+    if (len < 0L) rdz_stop("length")
     if (type == 10L || type == 13L) skip(4 * len)
     else if (type == 14L) skip(8 * len)
     else for (k in seq_len(len)) item(depth + 1L)
@@ -510,13 +568,13 @@ rdz_synopsis_plain <- function(bytes) {
     invisible()
   }
   tryCatch({
-    if (n < 14 || !identical(bytes[1:2], charToRaw("X\n"))) stop("header")
+    if (n < 14 || !identical(bytes[1:2], charToRaw("X\n"))) rdz_stop("header")
     at <- 2
     version <- int()
     int()
     int()
     if (version == 3L) skip(int()) # the native encoding's name
-    else if (version != 2L) stop("version")
+    else if (version != 2L) rdz_stop("version")
     item(0L)
     at == n
   }, error = function(e) FALSE)

@@ -7,7 +7,7 @@
 \usage{
 rdz_serialize(x, mode = c("auto", "native", "r"), metadata = NULL)
 
-rdz_unserialize(bytes, select = NULL)
+rdz_unserialize(bytes, select = NULL, rows = NULL)
 }
 \arguments{
 \item{x}{An R object to serialize.}
@@ -24,7 +24,7 @@ version or a cache key's inputs. \code{\link[=rdz_info]{rdz_info()}} reads it ba
 
 \item{bytes}{A raw vector holding an rdz file.}
 
-\item{select}{As for \code{\link[=read_rdz]{read_rdz()}}.}
+\item{select, rows}{As for \code{\link[=read_rdz]{read_rdz()}}.}
 }
 \value{
 \code{rdz_serialize()}: a raw vector. \code{rdz_unserialize()}: the object.
@@ -33,11 +33,11 @@ version or a cache key's inputs. \code{\link[=rdz_info]{rdz_info()}} reads it ba
 \code{rdz_serialize()} gives the bytes \code{\link[=write_rdz]{write_rdz()}} would write, as a raw
 vector, for a database column, a key-value store such as Redis, or a
 socket; \code{rdz_unserialize()} reads them back. Everything else takes a raw
-vector where it takes a path: \code{\link[=read_rdz]{read_rdz()}} (\code{select} included),
+vector where it takes a path: \code{\link[=read_rdz]{read_rdz()}} (\code{select} and \code{rows} included),
 \code{\link[=rdz_info]{rdz_info()}}, \code{\link[=rdz_schema]{rdz_schema()}}, \code{\link[=rdz_attributes]{rdz_attributes()}} and \code{\link[=rdz_verify]{rdz_verify()}}.
 }
 \examples{
 bytes <- rdz_serialize(mtcars)
 identical(rdz_unserialize(bytes), mtcars)
-rdz_unserialize(bytes, select = "mpg")
+rdz_unserialize(bytes, select = "mpg", rows = 1:3)
 }
