@@ -30,8 +30,8 @@ static int rdz_logical_length_ok(uint16_t encoding, uint64_t count, uint64_t sto
 {
     uint64_t bitmap = (count + 7) / 8;
     switch (encoding) {
-    case RDZ_ENCODING_LOGICAL_2BIT:
-        return stored == (count + 3) / 4;
+    case RDZ_ENCODING_LOGICAL_2BIT: /* an empty logical is one encoding-4 block */
+        return count != 0 && stored == (count + 3) / 4;
     case RDZ_ENCODING_LOGICAL_CONSTANT:
         return count != 0 && stored == RDZ_LOGICAL_CONSTANT_HEADER_LEN;
     case RDZ_ENCODING_LOGICAL_DENSE_PLANES:

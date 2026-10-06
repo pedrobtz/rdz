@@ -161,7 +161,7 @@ int rdz_vec_read_strings(rdz_vec *v, rdz_reader *r, uint32_t object, const rdz_n
         v->have_pipe = 0;
     }
     if (rdz_pipeline_init(&v->pipe, o->block_count > 1 ? threads : 1, rdz_job_decode,
-                          (size_t)RDZ_MAX_BLOCK_SIZE, e)) {
+                          (size_t)RDZ_MAX_BLOCK_SIZE, (size_t)r->block_size, e)) {
         return 1;
     }
     v->have_pipe = 1;
@@ -240,7 +240,7 @@ int rdz_vec_read(rdz_vec *v, rdz_reader *r, void *out, int threads, rdz_tick_fn 
         v->have_pipe = 0;
     }
     if (rdz_pipeline_init(&v->pipe, root->block_count > 1 ? threads : 1, rdz_job_decode,
-                          (size_t)RDZ_MAX_BLOCK_SIZE, e)) {
+                          (size_t)RDZ_MAX_BLOCK_SIZE, (size_t)r->block_size, e)) {
         return 1;
     }
     v->have_pipe = 1;

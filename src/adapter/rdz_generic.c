@@ -265,7 +265,7 @@ SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP met
     g->block_size = set.block_size;
 
     if (rdz_pipeline_init(&g->pipe, set.threads, rdz_job_compress, (size_t)RDZ_MAX_BLOCK_SIZE,
-                          &e)) {
+                          (size_t)set.block_size, &e)) {
         /* e is set */
     } else if (rdz_writer_open(&g->w, p, RDZ_CODEC_R_SERIAL_V3, RDZ_R_SERIAL_CODEC_VERSION,
                                set.block_size, &e)) {
@@ -437,7 +437,7 @@ SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *n
     }
     /* A one-block file needs no workers. */
     if (rdz_pipeline_init(&g->pipe, g->r.nblocks > 1 ? set.threads : 1, rdz_job_decode,
-                          (size_t)RDZ_MAX_BLOCK_SIZE, &e)) {
+                          (size_t)RDZ_MAX_BLOCK_SIZE, (size_t)g->r.block_size, &e)) {
         rdz_gen_in_finalize(ptr);
         UNPROTECT(2);
         return rdz_failure(&e);

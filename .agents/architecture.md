@@ -180,6 +180,14 @@ stated.
   conversion is lossless (above), and the reader never transcodes: a string
   comes back marked as stored (UTF-8, Latin-1, bytes or ASCII).
 - **data.table selfref**: a NULL external pointer, not omission (above).
+  The format does not record whether the written value had one, so a
+  data.table-classed list written without `.internal.selfref` gains one on
+  read (`identical()` is then `FALSE`). Accepted: data.table makes every
+  data.table it creates with one, and repairs a NULL one itself.
+- **Writing through a symbolic link** replaces the file it names, and keeps
+  the link (POSIX; on Windows the path itself is replaced).
+- **Read-ahead** holds at most two blocks a thread and at most 1 GiB of
+  blocks of the file's declared size.
 - **Named factors** are written generically.
 - **Encoding 1** (the Rust reference's dense two-bit logical record) is
   read, never written; its decoder stays for the files that reference wrote.

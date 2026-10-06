@@ -280,7 +280,8 @@ static int pipeline_roundtrip(const uint8_t *data, size_t n, uint32_t block, int
     uint32_t i;
     int must, ok = 1;
 
-    if (rdz_pipeline_init(&p, threads, rdz_job_compress, (size_t)RDZ_MAX_BLOCK_SIZE, &e) ||
+    if (rdz_pipeline_init(&p, threads, rdz_job_compress, (size_t)RDZ_MAX_BLOCK_SIZE,
+                          (size_t)RDZ_BLOCK_SIZE, &e) ||
         rdz_writer_open(&w, path, RDZ_CODEC_R_SERIAL_V3, RDZ_R_SERIAL_CODEC_VERSION, block, &e)) {
         CHECK(0, "pipeline setup: %s", e.message);
         return 1;
@@ -312,7 +313,8 @@ static int pipeline_roundtrip(const uint8_t *data, size_t n, uint32_t block, int
     /* read back through a decode pipeline */
     got = (uint8_t *)malloc(n ? n : 1);
     if (rdz_reader_open(&r, path, &e) ||
-        rdz_pipeline_init(&p, threads, rdz_job_decode, (size_t)RDZ_MAX_BLOCK_SIZE, &e)) {
+        rdz_pipeline_init(&p, threads, rdz_job_decode, (size_t)RDZ_MAX_BLOCK_SIZE,
+                          (size_t)RDZ_BLOCK_SIZE, &e)) {
         CHECK(0, "pipeline read setup: %s", e.message);
         free(got);
         return 1;
@@ -884,6 +886,20 @@ static void test_pipeline(const char *tmpdir)
     char path[512];
     int threads[] = {1, 2, 8};
     int k;
+    /* read-ahead is bounded in bytes: 256 threads of 64 MiB blocks get 16
+       slots (1 GiB), of 1 MiB blocks their 512 */
+    {
+        rdz_pipeline p;
+        rdz_error e;
+        CHECK(!rdz_pipeline_init(&p, 256, rdz_job_decode, (size_t)RDZ_MAX_BLOCK_SIZE,
+                                 (size_t)RDZ_MAX_BLOCK_SIZE, &e) && p.nslots == 16,
+              "64 MiB blocks: %u slots", (unsigned)p.nslots);
+        rdz_pipeline_free(&p);
+        CHECK(!rdz_pipeline_init(&p, 256, rdz_job_decode, (size_t)RDZ_MAX_BLOCK_SIZE,
+                                 (size_t)RDZ_BLOCK_SIZE, &e) && p.nslots == 512,
+              "1 MiB blocks: %u slots", (unsigned)p.nslots);
+        rdz_pipeline_free(&p);
+    }
     /* compressible stretches and noise, so blocks of both kinds occur */
     for (i = 0; i < n; i++) {
         x = x * 1103515245u + 12345u;
@@ -969,6 +985,43 @@ static uint8_t *ext_file(const char *path, const uint32_t *sizes, uint32_t nsize
         return NULL;
     }
     return slurp(path, n);
+}
+
+/* An empty logical root in one block of `encoding` holding `bytes`: only
+   the canonical encoding-4 record (its 4-byte header) is accepted. */
+static void test_empty_logical(const char *tmpdir)
+{
+    static const uint8_t header[RDZ_LOGICAL_DENSE_HEADER_LEN] = {0};
+    char path[512];
+    int k;
+    snprintf(path, sizeof path, "%s/empty-logical.rdz", tmpdir);
+    for (k = 0; k < 2; k++) {
+        uint16_t encoding = k ? RDZ_ENCODING_LOGICAL_DENSE_PLANES : RDZ_ENCODING_LOGICAL_2BIT;
+        rdz_writer w;
+        rdz_reader r;
+        rdz_object o;
+        rdz_error e;
+        uint8_t *data;
+        size_t n = 0;
+        int opened;
+        memset(&o, 0, sizeof o);
+        o.parent_id = RDZ_ROOT_PARENT_ID;
+        o.type_tag = RDZ_TYPE_LOGICAL;
+        o.block_count = 1;
+        if (rdz_writer_open(&w, path, RDZ_CODEC_NATIVE_V1, RDZ_NATIVE_CODEC_VERSION,
+                            RDZ_BLOCK_SIZE, &e) ||
+            rdz_writer_block(&w, encoding, 0, header, k ? sizeof header : 0, &e) ||
+            rdz_writer_finish(&w, &o, 1, NULL, 0, NULL, 0, &e)) {
+            CHECK(0, "empty logical, encoding %u: %s", (unsigned)encoding, e.message);
+            continue;
+        }
+        data = slurp(path, &n);
+        opened = data && rdz_reader_open_memory(&r, data, n, &e) == 0;
+        if (opened) rdz_reader_close(&r);
+        CHECK(opened == (k == 1), "empty logical in encoding %u: opened %d (%s)",
+              (unsigned)encoding, opened, opened ? "" : e.message);
+        free(data);
+    }
 }
 
 static void ext_reseal(uint8_t *data, size_t n)
@@ -1103,6 +1156,7 @@ int main(int argc, char **argv)
     test_numeric(tmpdir);
     test_alp(tmpdir);
     test_extensions(tmpdir);
+    test_empty_logical(tmpdir);
     printf("logical kernel: %s\n", rdz_logical_kernel());
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
