@@ -28,6 +28,8 @@ read_rdz(path, select = NULL, rows = NULL)
   only the blocks covering `range(rows)` are read; each column is then
   taken with `[`, so a Date or factor column keeps its class. Stored row
   names are taken too; automatic ones stay automatic (`1:length(rows)`).
+  A matrix, array or time series root is read whole and gives its
+  elements (`x[rows]`), as for any vector.
 
 ## Value
 

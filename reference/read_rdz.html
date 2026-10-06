@@ -69,7 +69,9 @@ positions.</p></dd>
 vector to read: positive positions, in any order. From a natively
 written file only the blocks covering <code>range(rows)</code> are read; each column
 is then taken with <code>[</code>, so a Date or factor column keeps its class. Stored
-row names are taken too; automatic ones stay automatic (<code>1:length(rows)</code>).</p></dd>
+row names are taken too; automatic ones stay automatic (<code>1:length(rows)</code>).
+A matrix, array or time series root is read whole and gives its
+elements (<code>x[rows]</code>), as for any vector.</p></dd>
 
 </dl></div>
     <div class="section level2">
