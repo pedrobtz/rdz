@@ -796,7 +796,8 @@ SEXP rdz_c_hash_native(SEXP x, SEXP strict)
 SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy, SEXP settings,
                             SEXP metadata)
 {
-    const char *p = rdz_path(path);
+    /* no path: into memory, returned as a raw vector (rdz_serialize()) */
+    const char *p = path == R_NilValue ? NULL : rdz_path(path);
     SEXP ptr, cont;
     rdz_write_call call;
     const char *why;
@@ -824,6 +825,15 @@ SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy, SEXP se
     call.threads = INTEGER(settings)[1] < 1 ? 1 : INTEGER(settings)[1];
     call.failed = 0;
     R_UnwindProtect(rdz_write_body, &call, rdz_plan_cleanup, ptr, cont);
+    if (!call.failed && !p) {
+        /* the bytes, copied before the plan (which owns them) goes */
+        const zb_buf *b = &call.p->v.w.result;
+        SEXP out = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)b->len));
+        if (b->len) memcpy(RAW(out), b->data, b->len);
+        rdz_plan_finalize(ptr);
+        UNPROTECT(3);
+        return out;
+    }
     rdz_plan_finalize(ptr);
     UNPROTECT(2);
     if (!call.failed) return Rf_ScalarLogical(1);
@@ -1409,7 +1419,7 @@ SEXP rdz_native_attribute_names(rdz_reader *r, rdz_error *e)
    row.names), reading only the blocks of the object that holds it. */
 SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
 {
-    const char *p = rdz_path(path), *w = CHAR(STRING_ELT(which, 0));
+    const char *w = CHAR(STRING_ELT(which, 0));
     rdz_reader r, view;
     rdz_error e;
     const rdz_object *root;
@@ -1418,7 +1428,7 @@ SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
     int failed;
     SEXP out;
 
-    if (rdz_reader_open(&r, p, &e)) return rdz_failure(&e);
+    if (rdz_open_source(&r, path, &e)) return rdz_failure(&e);
     if (r.codec_id != RDZ_CODEC_NATIVE_V1) {
         rdz_codec_error(&e, r.codec_id, r.codec_version);
         rdz_reader_close(&r);
@@ -1508,7 +1518,6 @@ static void rdz_col(SEXP list, SEXP names, int i, const char *name, SEXP value)
    objects; nothing else is read. */
 SEXP rdz_c_directory(SEXP path)
 {
-    const char *p = rdz_path(path);
     rdz_reader *rp;
     rdz_error e;
     SEXP ptr = PROTECT(rdz_reader_handle(&rp));
@@ -1516,7 +1525,7 @@ SEXP rdz_c_directory(SEXP path)
     SEXP out, outn, obj, objn, att, attn, col;
     int *id, *parent, *role, *type, *flags, *fc, *cc, *fa, *ac, *fb, *bc;
     double *len, *stored, *decoded;
-    if (rdz_reader_open(rp, p, &e)) {
+    if (rdz_open_source(rp, path, &e)) {
         rdz_reader_finalize(ptr);
         UNPROTECT(1);
         return rdz_failure(&e);
@@ -1626,12 +1635,11 @@ SEXP rdz_c_directory(SEXP path)
    alone: the list of them. */
 SEXP rdz_c_read_objects(SEXP path, SEXP ids, SEXP settings)
 {
-    const char *p = rdz_path(path);
     rdz_reader r;
     rdz_error e;
     int failed, threads = INTEGER(settings)[1] < 1 ? 1 : INTEGER(settings)[1];
     SEXP out;
-    if (rdz_reader_open(&r, p, &e)) return rdz_failure(&e);
+    if (rdz_open_source(&r, path, &e)) return rdz_failure(&e);
     if (r.codec_id != RDZ_CODEC_NATIVE_V1) {
         rdz_codec_error(&e, r.codec_id, r.codec_version);
         rdz_reader_close(&r);

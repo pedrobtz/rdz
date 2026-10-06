@@ -61,16 +61,21 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged =
     stop("`path` must not refer to a directory.", call. = FALSE)
   }
 
+  rdz_write_to(x, path, mode, section)
+  invisible(path)
+}
+
+# Writes x to path, or with a NULL path into a raw vector, which it returns:
+# natively when it can (and mode allows), else through R serialization.
+rdz_write_to <- function(x, path, mode, section) {
   if (!identical(mode, "r")) {
-    native_written <- rdz_check(.Call(
+    native <- rdz_check(.Call(
       rdz_c_try_write_native, x, path, identical(mode, "native"), rdz_dictionary_policy(),
       rdz_settings(), section
     ))
-    if (isTRUE(native_written)) {
-      return(invisible(path))
-    }
+    if (is.raw(native)) return(native)
+    if (isTRUE(native)) return(invisible(NULL))
   }
-
   synopsis <- serialize(
     build_rdz_synopsis(x),
     connection = NULL,
@@ -79,7 +84,35 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged =
     version = 3L
   )
   rdz_check(.Call(rdz_c_write_generic, x, synopsis, path, rdz_settings(), section))
-  invisible(path)
+}
+
+#' Serialize an R Object to a Raw Vector
+#'
+#' `rdz_serialize()` gives the bytes [write_rdz()] would write, as a raw
+#' vector, for a database column, a key-value store such as Redis, or a
+#' socket; `rdz_unserialize()` reads them back. Everything else takes a raw
+#' vector where it takes a path: [read_rdz()] (`select` included),
+#' [rdz_info()], [rdz_schema()], [rdz_attributes()] and [rdz_verify()].
+#'
+#' @inheritParams write_rdz
+#' @param bytes A raw vector holding an rdz file.
+#' @param select As for [read_rdz()].
+#' @returns `rdz_serialize()`: a raw vector. `rdz_unserialize()`: the object.
+#' @examples
+#' bytes <- rdz_serialize(mtcars)
+#' identical(rdz_unserialize(bytes), mtcars)
+#' rdz_unserialize(bytes, select = "mpg")
+#' @export
+rdz_serialize <- function(x, mode = c("auto", "native", "r"), metadata = NULL) {
+  mode <- match.arg(mode)
+  rdz_write_to(x, NULL, mode, rdz_metadata_section(metadata))
+}
+
+#' @rdname rdz_serialize
+#' @export
+rdz_unserialize <- function(bytes, select = NULL) {
+  if (!is.raw(bytes)) stop("`bytes` must be a raw vector.", call. = FALSE)
+  read_rdz(bytes, select = select)
 }
 
 #' Read an R Object from an rdz File
@@ -305,7 +338,9 @@ validate_rdz_path <- function(path) {
   path.expand(path)
 }
 
+# A path to an existing file, or a raw vector holding one (rdz_serialize()).
 validate_existing_rdz_path <- function(path) {
+  if (is.raw(path)) return(path)
   path <- validate_rdz_path(path)
   if (!file.exists(path) || dir.exists(path)) {
     stop("The file does not exist: ", path, call. = FALSE)

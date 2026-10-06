@@ -20,6 +20,8 @@
 
 #include <stdio.h>
 
+#include <zubin/buf.h>
+
 #include "rdz_format.h"
 
 typedef struct {
@@ -43,10 +45,13 @@ typedef struct {
     uint64_t position;
     int have_mode;
     unsigned mode;
+    int to_memory; /* writing into `memory` instead of a file (rdz_serialize) */
+    zb_buf memory;
 } rdz_outfile;
 
 void rdz_outfile_init(rdz_outfile *f);
-/* Creates the temporary file beside path. */
+/* Creates the temporary file beside path; with a NULL path, writes into
+   memory, which commit leaves in f->memory for the caller to take. */
 int rdz_outfile_open(rdz_outfile *f, const char *path, rdz_error *e);
 int rdz_outfile_write(rdz_outfile *f, const void *data, size_t n, rdz_error *e);
 /* Closes the temporary file and renames it over the destination. */

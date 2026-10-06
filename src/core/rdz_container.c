@@ -873,6 +873,7 @@ void rdz_writer_init(rdz_writer *w)
     memset(w->content_hash, 0, sizeof w->content_hash);
     w->metadata = NULL;
     w->metadata_len = 0;
+    zb_buf_init(&w->result);
     w->open = 0;
 }
 
@@ -1023,6 +1024,10 @@ int rdz_writer_finish(rdz_writer *w, const rdz_object *objects, uint32_t nobject
              rdz_outfile_write(&w->out, t, sizeof t, e) || rdz_outfile_commit(&w->out, e);
     zb_buf_release(&dir);
     if (failed) return 1;
+    if (w->out.to_memory) { /* moved out before the discard below */
+        w->result = w->out.memory;
+        zb_buf_init(&w->out.memory);
+    }
     rdz_writer_discard(w);
     return 0;
 }

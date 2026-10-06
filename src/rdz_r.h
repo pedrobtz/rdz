@@ -22,6 +22,8 @@ const char *rdz_path(SEXP path);
 /* An external pointer owning a closed reader (protect it), so a longjmp
    frees the reader; rdz_reader_finalize() frees it at once. */
 SEXP rdz_reader_handle(rdz_reader **out);
+/* Opens a path, or a raw vector holding a file (the caller keeps it alive). */
+int rdz_open_source(rdz_reader *r, SEXP src, rdz_error *e);
 
 /* A content hash's text: the canonical XXH128 form, high then low u64 in
    hex (adapter/rdz_native_r.c). */

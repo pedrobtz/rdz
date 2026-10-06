@@ -78,6 +78,8 @@ typedef struct {
     uint8_t content_hash[16];
     const uint8_t *metadata;   /* set before rdz_writer_finish(): a metadata section */
     uint32_t metadata_len;
+    zb_buf result;             /* opened without a path: the file's bytes after finish,
+                                  for its owner to take and release */
     int open;
 } rdz_writer;
 

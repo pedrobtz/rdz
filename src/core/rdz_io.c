@@ -269,6 +269,8 @@ void rdz_outfile_init(rdz_outfile *f)
     f->position = 0;
     f->have_mode = 0;
     f->mode = 0;
+    f->to_memory = 0;
+    zb_buf_init(&f->memory);
 }
 
 static int rdz_is_separator(char c)
@@ -298,10 +300,16 @@ static char *rdz_sibling(const char *path, const char *suffix)
 
 int rdz_outfile_open(rdz_outfile *f, const char *path, rdz_error *e)
 {
-    int is_dir = 0, attempt;
+    int is_dir = 0, attempt, exists;
     unsigned mode = 0;
-    int exists = rdz_exists(path, &is_dir, &mode);
-    size_t n = strlen(path);
+    size_t n;
+    if (!path) {
+        f->to_memory = 1;
+        if (zb_buf_alloc(&f->memory, 0, 0)) return rdz_memory(e, "the output");
+        return 0;
+    }
+    exists = rdz_exists(path, &is_dir, &mode);
+    n = strlen(path);
 
     if (n == 0 || rdz_is_separator(path[n - 1])) {
         return rdz_invalid(e, "destination has no file name");
@@ -337,16 +345,22 @@ int rdz_outfile_open(rdz_outfile *f, const char *path, rdz_error *e)
 int rdz_outfile_write(rdz_outfile *f, const void *data, size_t n, rdz_error *e)
 {
     if (n == 0) return 0;
-    if (fwrite(data, 1, n, f->fp) != n) return rdz_io_errno(e, errno);
+    if (f->to_memory) {
+        if (zb_put_bytes(&f->memory, data, n)) return rdz_memory(e, "the output");
+    } else if (fwrite(data, 1, n, f->fp) != n) {
+        return rdz_io_errno(e, errno);
+    }
     if (rdz_add_u64(f->position, (uint64_t)n, &f->position, e)) return 1;
     return 0;
 }
 
 int rdz_outfile_commit(rdz_outfile *f, rdz_error *e)
 {
-    int failed = fflush(f->fp) != 0 || ferror(f->fp);
-    int saved = errno, is_dir = 0, exists;
+    int failed, saved, is_dir = 0, exists;
     unsigned mode = 0;
+    if (f->to_memory) return 0; /* the bytes stay in f->memory */
+    failed = fflush(f->fp) != 0 || ferror(f->fp);
+    saved = errno;
     if (fclose(f->fp) != 0 && !failed) {
         failed = 1;
         saved = errno;
@@ -398,6 +412,8 @@ committed:
 
 void rdz_outfile_discard(rdz_outfile *f)
 {
+    zb_buf_release(&f->memory);
+    f->to_memory = 0;
     if (f->fp) fclose(f->fp);
     f->fp = NULL;
     if (f->temporary) rdz_remove(f->temporary);

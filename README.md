@@ -30,6 +30,9 @@ through R's own serializer, streamed through the same blocks.
   is, and `rdz_verify()` checks a file's integrity without building it.
 - **Compact graphs:** a large vector that appears twice in an object is
   stored once and read back shared, as pickle and Kryo do.
+- **In memory:** `rdz_serialize(x)` gives the bytes as a raw vector (for
+  Redis, a database, a socket) and `rdz_unserialize()` reads them back; every
+  reader takes a raw vector where it takes a path.
 - **Self-describing:** `write_rdz(x, path, metadata = c(source = "..."))`
   records key-value strings that `rdz_info()` reads without the data.
 - **Tables as written:** data.tables come back usable in place, nested or not,

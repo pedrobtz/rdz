@@ -77,6 +77,7 @@ static void rdz_gen_out_finalize(SEXP ptr)
     if (g) {
         rdz_pipeline_free(&g->pipe); /* joins the workers first */
         rdz_writer_discard(&g->w);
+        zb_buf_release(&g->w.result);
         free(g);
         R_ClearExternalPtr(ptr);
     }
@@ -245,7 +246,7 @@ SEXP rdz_c_hash_generic(SEXP x)
 SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP metadata,
                        int fail_after)
 {
-    const char *p = rdz_path(path);
+    const char *p = path == R_NilValue ? NULL : rdz_path(path); /* NULL: into memory */
     rdz_settings set = rdz_settings_of(settings);
     rdz_error e;
     rdz_gen_out *g;
@@ -284,9 +285,13 @@ SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP met
             e = g->e;
         } else if (!rdz_writer_finish(&g->w, NULL, 0, NULL, 0, RAW(synopsis),
                                       (size_t)XLENGTH(synopsis), &e)) {
+            SEXP out = PROTECT(p ? R_NilValue
+                                 : Rf_allocVector(RAWSXP, (R_xlen_t)g->w.result.len));
+            /* the bytes, copied before the writer (which owns them) goes */
+            if (!p && g->w.result.len) memcpy(RAW(out), g->w.result.data, g->w.result.len);
             rdz_gen_out_finalize(ptr);
-            UNPROTECT(2);
-            return R_NilValue;
+            UNPROTECT(3);
+            return out;
         }
     }
     rdz_gen_out_finalize(ptr);
@@ -401,7 +406,6 @@ static void rdz_gen_in_cleanup(void *data, Rboolean jump)
    *native: whether the file was native. */
 SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, int *native)
 {
-    const char *p = rdz_path(path);
     rdz_settings set = rdz_settings_of(settings);
     rdz_error e;
     rdz_gen_in *g;
@@ -417,7 +421,7 @@ SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, int *native)
     g->threads = set.threads;
     R_SetExternalPtrAddr(ptr, g);
 
-    if (rdz_reader_open(&g->r, p, &e)) {
+    if (rdz_open_source(&g->r, path, &e)) {
         rdz_gen_in_finalize(ptr);
         UNPROTECT(2);
         return rdz_failure(&e);
