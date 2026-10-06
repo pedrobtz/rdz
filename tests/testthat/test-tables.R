@@ -59,12 +59,14 @@ test_that("reading a file without a data.table does not load data.table", {
   # a script file, not -e: no shell quoting to differ between systems
   script <- tempfile(fileext = ".R")
   on.exit(unlink(script), add = TRUE)
+  # the child finds rdz through .libPaths(), set in the script: system2()'s
+  # env = works only on Unix
   writeLines(c(
+    sprintf(".libPaths(%s)", paste(deparse(.libPaths()), collapse = "")),
     sprintf("invisible(rdz::read_rdz(%s))", deparse(normalizePath(path, winslash = "/"))),
     'cat("data.table" %in% loadedNamespaces())'
   ), script)
   out <- system2(file.path(R.home("bin"), "Rscript"), c("--vanilla", shQuote(script)),
-                 stdout = TRUE,
-                 env = paste0("R_LIBS=", paste(.libPaths(), collapse = .Platform$path.sep)))
+                 stdout = TRUE)
   expect_identical(utils::tail(out, 1L), "FALSE")
 })
