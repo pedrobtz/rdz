@@ -1,6 +1,6 @@
 # RDZ Performance Design
 
-> **Historical.** This document records performance design and measurements from the Rust implementation (crc32fast, its block sizes and presets). The presets now differ only in the zstd level (`speed`: none, `balanced`: 1, `compact`: 6), and `speed` never writes the decimal double encoding. Current measurements are in `tools/benchmark.R` (see `.github/CONTRIBUTING.md`). Where it disagrees with the code, the code and [architecture.md](architecture.md) are right.
+> **Historical.** This document records performance design and measurements from the Rust implementation (crc32fast, its block sizes and presets). Compression is now one number, the zstd level of each block (`compress`, 0 to 19, default 1), and level 0 never writes the decimal double encoding. Current measurements are in `tools/benchmark.R` (see `.github/CONTRIBUTING.md`). Where it disagrees with the code, the code and [architecture.md](architecture.md) are right.
 
 ## Performance objective
 

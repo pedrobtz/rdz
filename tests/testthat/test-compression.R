@@ -1,19 +1,5 @@
 # Per-block zstd compression and the threaded pipeline (plan-c Stage D).
 
-with_rdz_options <- function(code, ...) {
-  old <- options(...)
-  on.exit(options(old), add = TRUE)
-  force(code)
-}
-
-write_with <- function(x, ...) {
-  path <- tempfile(fileext = ".rdz")
-  with_rdz_options(write_rdz(x, path, mode = "r"), ...)
-  path
-}
-
-file_bytes <- function(path) readBin(path, "raw", file.size(path))
-
 test_that("rdz carries the zstd release its vendor manifest pins", {
   expect_identical(rdz:::rdz_zstd_version(), "1.5.7")
 })

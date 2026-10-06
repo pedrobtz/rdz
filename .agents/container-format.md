@@ -19,9 +19,9 @@ plan-c Stage I the format has the extension points of "Compatibility and
 extension" below, decided before the 0.1.0 freeze.
 
 The container and directory layouts are shared by the generic `R_SERIAL_V3`
-codec and `NATIVE_V1`. Phase 1 populates native object records for logical
-vectors and their optional `names` attribute. Other roots continue through the
-whole-root generic codec.
+codec and `NATIVE_V1`. Native files hold object graphs of the types below;
+anything else goes whole through the generic codec (`?write_rdz`, "Native and
+generic").
 
 ## Identifiers and limits
 
@@ -61,9 +61,8 @@ conversions are checked before allocation or seeking.
 
 Native type tags are reserved as `0=NULL`, `1=logical`, `2=integer`, `3=double`,
 `4=character`, `5=factor`, `6=list`, `7=data frame`, and `8=reference` (since
-plan-c Stage O). A tag is not usable
-until its codec phase defines its logical and physical record representation.
-Unknown IDs, versions, mandatory flags, or nonzero reserved fields are errors.
+plan-c Stage O). Unknown IDs, versions, mandatory flags, or nonzero
+reserved fields are errors.
 
 ## Compatibility and extension
 
@@ -354,10 +353,10 @@ sum to the root descriptor length.
 An optional `names` attribute adds two character objects and one attribute
 entry. Encoding 2 stores each string as a one-byte tag, a little-endian `u32`
 byte length, and exact bytes. Tag 0 is `NA_STRING` and requires length zero;
-tags 1 through 4 mean R native, UTF-8, Latin-1, and bytes encodings. Phase 1
-accepts native-encoded names only when all bytes are ASCII; non-ASCII native
-strings select whole-root fallback because their interpretation is locale
-dependent. Today's writer puts each character record in one 1 MiB block, a
+tags 1 through 4 mean R native, UTF-8, Latin-1, and bytes encodings. The
+writer tags a string native only when it is ASCII; a non-ASCII string in the
+session's encoding is stored with the UTF-8 tag when its conversion is
+lossless, else the root goes to the generic codec (the C locale). Today's writer puts each character record in one 1 MiB block, a
 writer policy: readers bound a block only by the header's maximum, at most
 64 MiB, so a later writer may give a long string its own larger block. Attribute-name and
 value blocks are independently addressable, so reading `names` does not touch
@@ -432,10 +431,11 @@ marks an ordered factor (class `c("ordered", "factor")`, otherwise
 reject a code outside `1..length(levels)` that is not `NA`. Objects and their
 blocks come in the order root, levels, attribute name, attribute value.
 
-Strings are bytes plus R's encoding tag. A native-encoded string that is not
-ASCII is not portable (portability.md) and is never written natively: the
-whole root goes to the generic codec in automatic mode, and strict native
-mode rejects it. Today's writer sends a string longer than its 1 MiB blocks
+Strings are bytes plus R's encoding tag. A non-ASCII string in the session's
+encoding is never written with the native tag (it would not be portable): it
+is stored as its UTF-8 when the conversion is lossless, and otherwise the
+whole root goes to the generic codec in automatic mode, and strict native mode
+rejects it. Today's writer sends a string longer than its 1 MiB blocks
 the same way (a writer policy; see above). Since Stage G the default dictionary policy is `auto`.
 
 ### Native object graphs

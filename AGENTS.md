@@ -69,7 +69,7 @@ native-word-order scalars, pointer widths, addresses, or CPU-specific requiremen
 - `tools/run-fuzz [seconds]` fuzzes the container reader after its canary has crashed; `tools/run-fuzz --replay` runs the seeds and corpus once where the compiler has no libFuzzer.
 - `Rscript tools/exchange.R write DIR` and `check DIR...` exchange the frozen corpus's specs between platforms (`exchange.yaml`); `tools/make-frozen-fixtures.R` wrote the corpus once and is never rerun over it.
 - `Rscript -e 'testthat::test_local(reporter = "summary")'` runs R integration tests.
-- `R CMD INSTALL .` installs locally. For release checks, run `R CMD build .`, then `R CMD check --no-manual rdz_0.0.0.9000.tar.gz`.
+- `R CMD INSTALL .` installs locally. For release checks, run `R CMD build .`, then `R CMD check --no-manual rdz_*.tar.gz`.
 
 ## C Rules
 
@@ -81,7 +81,7 @@ Use two-space indentation, `<-`, and `snake_case` in R.
 
 ## Testing Guidelines
 
-Name files `test-*.R`, helpers `helper-*.R`, and use descriptive `test_that()` labels. R-side tests are authoritative; the C harness and the fuzz targets cover the R-free core.
+Name files `test-*.R`, helpers `helper-*.R`, and use descriptive `test_that()` labels. A test file holds only `test_that()` calls: any function or value defined at its top level goes in a `helper-*.R` (the suite passes `devtools::test(shuffle = TRUE)`, which runs a file's top-level code in any order), and two helpers never share a name. R-side tests are authoritative; the C harness and the fuzz targets cover the R-free core.
 
 Build a double whose bits matter (`-0`, NaN payloads) from its bytes in any function a test calls more than once: R's byte compiler folds the literal `-0` to `+0`, so the value changes once the JIT compiles the function, and `identical()` cannot tell (the content hash can).
 

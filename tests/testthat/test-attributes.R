@@ -1,13 +1,6 @@
 # General attributes (plan-c Stage I): any attribute whose value is native
 # is written natively, attributes of its own included.
 
-roundtrip_attrs <- function(x) {
-  path <- tempfile(fileext = ".rdz")
-  on.exit(unlink(path), add = TRUE)
-  write_rdz(x, path, mode = "native")
-  list(value = read_rdz(path), info = rdz_info(path))
-}
-
 test_that("common attributed objects are native and identical", {
   cases <- list(
     date = as.Date("2026-10-05") + 0:4,

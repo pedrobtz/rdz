@@ -132,7 +132,7 @@ replacement for the R object graph. `rdz_schema()` and `rdz_attributes()` must
 mark it as non-authoritative. Exact generic attributes require `allow_full = TRUE`
 or a normal full read.
 
-The Phase 0B synopsis has a stable success/failure schema. Bounded strings are
+The synopsis has a stable success/failure schema. Bounded strings are
 cut only at valid encoded-character boundaries, and `truncated` is derived from
 the actual bounded result rather than a separate heuristic. `synopsis_error` is
 always present: `FALSE` for a complete bounded synopsis and `TRUE` for the
@@ -142,24 +142,15 @@ Do not execute `refhook`, package hooks, active bindings, or arbitrary R code wh
 performing metadata-only inspection. If obtaining information would require such
 behavior, report it as unavailable without a full read.
 
-## R-thread and Rust boundaries
+## Where this is implemented
 
-Pure Rust code owns header, trailer, directory, range-read, checksum, and descriptor
-validation. It can return a bounded neutral metadata model without R.
-
-The R adapter converts that neutral model into R lists/data frames on the R thread.
-Reading an exact attribute value allocates only that selected R value and any
-objects it references. Savvy SEXP wrappers and R API calls never move to worker
-threads.
-
-Suggested Rust modules are:
-
-```text
-container/metadata.rs
-container/directory.rs
-container/range_reader.rs
-r_adapter/metadata.rs
-```
+The R-free core (`src/core/rdz_container.c`) validates the header, trailer,
+directory, ranges, checksums and descriptors, without R. The adapter
+(`src/adapter/rdz_native_r.c`: the directory dump, one object's attributes,
+selected objects) turns that into R values on the R thread; reading an exact
+attribute value allocates only that value and the objects it references. No
+R API call runs on a worker thread. `rdz_info()`, `rdz_schema()` and
+`rdz_attributes()` (`R/serialize.R`, `R/inspect.R`) are the interface.
 
 ## Validation and security
 

@@ -235,3 +235,10 @@ bytes_but_writer <- function(path) {
   bytes[21:32] <- as.raw(0L)
   bytes
 }
+
+rust_fixture_manifest <- function() {
+  utils::read.delim(
+    file.path(rust_fixture_dir(), "manifest.tsv"),
+    colClasses = "character", quote = ""
+  )
+}
