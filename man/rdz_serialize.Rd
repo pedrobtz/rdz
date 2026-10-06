@@ -5,7 +5,12 @@
 \alias{rdz_unserialize}
 \title{Serialize an R Object to a Raw Vector}
 \usage{
-rdz_serialize(x, mode = c("auto", "native", "r"), metadata = NULL)
+rdz_serialize(
+  x,
+  mode = c("auto", "native", "r"),
+  metadata = NULL,
+  hash = getOption("rdz.hash", TRUE)
+)
 
 rdz_unserialize(bytes, select = NULL, rows = NULL)
 }
@@ -21,6 +26,12 @@ character vector (or a named list of single strings), up to 1,024
 distinct non-empty names and 64 KiB in all, such as a source, a code
 version or a cache key's inputs. \code{\link[=rdz_info]{rdz_info()}} reads it back, as
 \code{metadata}, without reading \code{x}; it is not part of the content hash.}
+
+\item{hash}{Whether to record the content hash (\code{\link[=rdz_hash]{rdz_hash()}}), from
+\code{options(rdz.hash)}, \code{TRUE} by default. Computing it reads the value once
+more (about a tenth of a write's time); without it the file is just as
+valid and as readable, but \code{skip_unchanged}, \code{rdz_verify(content = TRUE)}
+and \code{rdz_info()$content_hash} (then \code{NA}) have nothing to use.}
 
 \item{bytes}{A raw vector holding an rdz file.}
 

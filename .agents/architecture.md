@@ -135,7 +135,10 @@ write_rdz(x, path)
 ```
 
 The bytes depend only on the value, the preset and the block size, never on
-the number of threads (tested).
+the number of threads (tested). The content hash is fed in the same pass as
+the encoding; `hash = FALSE` (`options(rdz.hash)`) skips it and writes
+scheme 0, which costs a tenth of a write's time less. For a generic file the
+hash is a separate R serialization pass, so skipping it saves more.
 
 ## Reading
 

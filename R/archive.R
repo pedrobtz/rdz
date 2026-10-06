@@ -16,7 +16,7 @@
 #'   from [rdz_serialize()]).
 #' @param envir For `rdz_save()`, where to find the objects; for
 #'   `rdz_load()`, where to assign them.
-#' @param mode,skip_unchanged,metadata As for [write_rdz()].
+#' @param mode,skip_unchanged,metadata,hash As for [write_rdz()].
 #' @param names `NULL` (everything) or the names of the objects to load.
 #' @returns `rdz_save()`: `file`, invisibly. `rdz_load()`: the names of the
 #'   objects assigned, invisibly.
@@ -32,7 +32,8 @@
 #' unlink(path)
 #' @export
 rdz_save <- function(..., list = character(), file, envir = parent.frame(),
-                     mode = c("auto", "native", "r"), skip_unchanged = FALSE, metadata = NULL) {
+                     mode = c("auto", "native", "r"), skip_unchanged = FALSE, metadata = NULL,
+                     hash = getOption("rdz.hash", TRUE)) {
   dots <- as.list(substitute(list(...)))[-1L]
   named <- vapply(dots, function(d) {
     if (is.symbol(d)) return(as.character(d))
@@ -50,7 +51,7 @@ rdz_save <- function(..., list = character(), file, envir = parent.frame(),
     rdz_stop("Object not found: ", paste(missing, collapse = ", "), call. = FALSE)
   }
   write_rdz(mget(names, envir = envir, inherits = TRUE), file, mode = match.arg(mode),
-            skip_unchanged = skip_unchanged, metadata = metadata)
+            skip_unchanged = skip_unchanged, metadata = metadata, hash = hash)
 }
 
 #' @rdname rdz_save

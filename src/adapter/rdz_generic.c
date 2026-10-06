@@ -33,12 +33,14 @@
 SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, SEXP window,
                        rdz_error *e, int *failed);
 
-/* settings: c(level, threads, block_size); level 0 stores raw, block_size 0
-   is the format's 1 MiB. */
+/* settings: c(level, threads, block_size[, hash]); level 0 stores raw,
+   block_size 0 is the format's 1 MiB, hash 0 writes no content hash (readers
+   ignore a fourth element they do not need). */
 typedef struct {
     int level;
     int threads;
     uint32_t block_size;
+    int hash;
 } rdz_settings;
 
 static rdz_settings rdz_settings_of(SEXP settings)
@@ -47,9 +49,11 @@ static rdz_settings rdz_settings_of(SEXP settings)
     out.level = 0;
     out.threads = 1;
     out.block_size = RDZ_BLOCK_SIZE;
-    if (TYPEOF(settings) != INTSXP || XLENGTH(settings) != 3) {
-        Rf_error("`settings` must be an integer vector of length 3.");
+    out.hash = 1;
+    if (TYPEOF(settings) != INTSXP || XLENGTH(settings) < 3 || XLENGTH(settings) > 4) {
+        Rf_error("`settings` must be an integer vector of length 3 or 4.");
     }
+    if (XLENGTH(settings) == 4) out.hash = INTEGER(settings)[3] != 0;
     out.level = INTEGER(settings)[0];
     out.threads = INTEGER(settings)[1] < 1 ? 1 : INTEGER(settings)[1];
     if (out.threads > 256) out.threads = 256;
@@ -271,9 +275,12 @@ SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP met
                                set.block_size, &e)) {
         /* e is set */
     } else {
-        /* the content hash first: the directory the write ends with holds it */
-        rdz_generic_hash(x, g->w.content_hash);
-        g->w.hash_scheme = RDZ_CONTENT_HASH_V1;
+        /* the content hash first: the directory the write ends with holds it
+           (unless asked for none: then scheme 0, no hash) */
+        if (set.hash) {
+            rdz_generic_hash(x, g->w.content_hash);
+            g->w.hash_scheme = RDZ_CONTENT_HASH_V1;
+        }
         if (TYPEOF(metadata) == RAWSXP) { /* held by the caller for the whole call */
             g->w.metadata = RAW(metadata);
             g->w.metadata_len = (uint32_t)XLENGTH(metadata);

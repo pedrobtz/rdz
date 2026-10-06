@@ -14,5 +14,7 @@
 * Content hashes: every file records one, `rdz_hash()` computes it for an
   object, `write_rdz(skip_unchanged = TRUE)` leaves a file holding the
   value untouched, and `rdz_verify()` checks a file.
+* `write_rdz(hash = FALSE)` (or `options(rdz.hash = FALSE)`) skips the
+  content hash, for about a tenth less write time.
 * `rdz_serialize()` and `rdz_unserialize()` work on raw vectors;
   `rdz_save()` and `rdz_load()` keep several objects in one file.
