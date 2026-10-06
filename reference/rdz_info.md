@@ -1,8 +1,9 @@
 # Inspect an rdz Container Without Reading Its Payload
 
 `rdz_info()` reads the fixed header, closing trailer, and bounded
-directory. For the transitional R-serialization codec, `synopsis` is
-informative and exact attribute values still require
+directory. For a file written through R serialization (the generic
+codec), `synopsis` is informative and exact attribute values still
+require
 [`read_rdz()`](https://pedrobtz.github.io/rdz/reference/read_rdz.md).
 Data block checksums are validated by
 [`read_rdz()`](https://pedrobtz.github.io/rdz/reference/read_rdz.md),
