@@ -39,7 +39,7 @@ test_that("metadata is not part of the content hash, but skip_unchanged sees it"
 test_that("metadata is read without the value", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  old <- options(rdz.preset = "speed")
+  old <- options(rdz.compress = 0)
   on.exit(options(old), add = TRUE)
   write_rdz(seq_len(50000L), path, metadata = c(k = "v"))
   bytes <- readBin(path, "raw", file.size(path))

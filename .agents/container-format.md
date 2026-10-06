@@ -101,7 +101,7 @@ add to the format without locking 0.1.0 readers out of every new file:
   work around a writer's bugs in files already written.
 - **Fixtures.** The frozen 0.1.0 fixtures are read-compatibility tests: every
   later reader reads them to the same values. Byte equality is required only
-  of uncompressed (`speed` preset) native files: zstd's output may change
+  of uncompressed (level 0, the corpus's `_speed` files) native files: zstd's output may change
   between its versions, and a generic payload's R serialization header records
   the R version that wrote it.
 
@@ -174,11 +174,11 @@ and the checksum covers the stored (compressed) bytes, so a reader verifies a
 block before it decompresses it. Readers reject a compressed block whose stored
 length is not less than its decoded length, so an incompressible block is
 always raw. The 0.1.0 writer compresses a block only when that saves at least an eighth
-of it, or under the compact preset any saving (writer policy), so a block
-that barely compresses is read without decompression. The
-writer's presets choose the level (`rdz.preset`: level 1 by default, 6 for
-`"compact"`, no compression for `"speed"`); the level is not recorded and no
-reader needs it. Neither the preset nor the thread count changes a reader's
+of it, or from level 6 any saving (writer policy), so a block that barely
+compresses is read without decompression. The writer's level (`compress`,
+`options(rdz.compress)`: 1 by default, 0 for none, at most 19) is not
+recorded and no reader needs it. Neither the level nor the thread count
+changes a reader's
 work, and the same object written with any thread count gives the same bytes.
 Every decoded block length must be less than or equal to the maximum recorded in
 the file header; readers reject a contradictory header even when its checksum
@@ -265,7 +265,7 @@ Scheme 1 hashes the value, not its bytes on disk:
   digest (XXH3-64 of `tag:u8 length:u32` and its bytes) as a little-endian
   `u64`; then every attribute entry as `owner name_object value_object
   ordinal flags`, each a `u32`. No encoding, compression, block size,
-  dictionary, preset or thread count enters it, nor whether a vector was
+  dictionary, compression level or thread count enters it, nor whether a vector was
   ALTREP.
 - **Generic files:** the eight bytes `RDZH 01 G 00 00`, then R serialization
   version 2 (XDR) of the root without its first 14 bytes (format and R
@@ -401,8 +401,8 @@ block's record, before any compression:
   exception replaces the value at its position with its bits, so NA, NaN
   payloads, `-0`, infinities and full-precision values survive exactly. The
   record is exactly as long as its vectors. Writers choose `e` and `f` by
-  sampling, and use this record only when compressing (not the `speed`
-  preset) and when it is smaller than raw and runs; the pipeline then
+  sampling, and use this record only when compressing (not at level 0)
+  and when it is smaller than raw and runs; the pipeline then
   compresses it like any record. Readers on x87 extended precision decode
   through `strtod()`, which rounds once.
 
@@ -469,9 +469,9 @@ without a class attribute has class `"data.frame"`. A data.table's
 back as R's own compact form `c(NA, -n)` whatever sign they were written with:
 `identical()` holds, and only `.row_names_info(x, 1)`'s sign can differ.
 
-Since Stage H every block, logical ones included, is compressed under the
-writer's preset (raw when that is not smaller): the `speed` preset writes
-the Phase 1 bytes the Rust reference wrote.
+Since Stage H every block, logical ones included, is compressed at the
+writer's level (raw when that does not pay): level 0 writes the Phase 1
+bytes the Rust reference wrote.
 
 ### Character dictionary blocks
 

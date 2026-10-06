@@ -1,6 +1,6 @@
 # The native logical codec in C (plan-c Stage E): the files it writes are the
 # Rust implementation's, byte for byte, whichever classifier kernel runs --
-# with blocks stored raw (the "speed" preset), as the Rust writer stored them.
+# with blocks stored raw (level 0), as the Rust writer stored them.
 
 with_dictionary_policy <- function(policy, code) {
   old <- Sys.getenv("RDZ_STRING_DICT", unset = NA)
@@ -19,7 +19,7 @@ native_specs <- function() {
 }
 
 test_that("every native fixture is reproduced byte for byte, with every kernel", {
-  old <- options(rdz.preset = "speed")
+  old <- options(rdz.compress = 0)
   on.exit(options(old), add = TRUE)
   copy <- tempfile(fileext = ".rdz")
   on.exit({

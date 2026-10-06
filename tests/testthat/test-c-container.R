@@ -110,7 +110,7 @@ test_that("files record the writer, which matches the package version", {
 test_that("a NUL inside a string or in metadata is a format error, not R's", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  old <- options(rdz.preset = "speed")
+  old <- options(rdz.compress = 0)
   on.exit(options(old), add = TRUE)
   find <- function(bytes, s) {
     p <- charToRaw(s)

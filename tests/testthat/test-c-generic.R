@@ -107,7 +107,7 @@ test_that("the streamed writer reproduces the Rust writer's files", {
   copy <- tempfile(fileext = ".rdz")
   on.exit(unlink(copy), add = TRUE)
   # The Rust writer did not compress.
-  old <- options(rdz.preset = "speed")
+  old <- options(rdz.compress = 0)
   on.exit(options(old), add = TRUE)
   for (spec in rust_fixture_specs()) {
     if (manifest$codec[manifest$name == spec$name] != "r_serial_v3") next
@@ -165,7 +165,7 @@ test_that("a block that fails its checksum stops the read with a classed error",
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
   x <- rep_len(as.raw(0:250), 3e6)
-  old <- options(rdz.preset = "speed") # raw blocks, so offsets are known
+  old <- options(rdz.compress = 0) # raw blocks, so offsets are known
   on.exit(options(old), add = TRUE)
   write_rdz(x, path, mode = "r")
   bytes <- readBin(path, "raw", file.size(path))

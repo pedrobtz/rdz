@@ -821,7 +821,7 @@ static void test_alp(const char *tmpdir)
     for (i = 0; i < 10; i++) v[i] = (double)i / 10;
     CHECK(alp_roundtrip(v, 10, "ten tenths") != RDZ_ENCODING_DBL_DECIMAL, "ten values are not ALP");
 
-    /* through files: chosen when compressing, never at the speed preset */
+    /* through files: chosen when compressing, never at level 0 */
     {
         double *d = (double *)malloc(300000 * sizeof *d);
         for (i = 0; i < 300000; i++) d[i] = (double)(long long)((i * 2654435761u) % 100000) / 100;

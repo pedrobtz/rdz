@@ -10,6 +10,7 @@ write_rdz(
   mode = c("auto", "native", "r"),
   skip_unchanged = FALSE,
   metadata = NULL,
+  compress = getOption("rdz.compress", 1L),
   hash = getOption("rdz.hash", TRUE)
 )
 }
@@ -33,6 +34,9 @@ distinct non-empty names and 64 KiB in all, such as a source, a code
 version or a cache key's inputs. \code{\link[=rdz_info]{rdz_info()}} reads it back, as
 \code{metadata}, without reading \code{x}; it is not part of the content hash.}
 
+\item{compress}{The Zstandard level of each block, a whole number from \code{0}
+(none) to \code{19}; by default \code{options(rdz.compress)}, else \code{1}.}
+
 \item{hash}{Whether to record the content hash (\code{\link[=rdz_hash]{rdz_hash()}}), from
 \code{options(rdz.hash)}, \code{TRUE} by default. Computing it reads the value once
 more (about a tenth of a write's time); without it the file is just as
@@ -51,13 +55,13 @@ blocks of 1 MiB. Every file records the object's content hash
 (\code{\link[=rdz_hash]{rdz_hash()}}).
 }
 \details{
-Two options control how blocks are stored and how many threads do the
-work. \code{options(rdz.preset = )} is \code{"balanced"} (the default; each block is
-compressed with Zstandard at level 1), \code{"compact"} (level 6) or \code{"speed"}
-(no compression). Under \code{"balanced"} a block is stored compressed only
-when that saves at least an eighth of it, so data that barely compresses
-reads at memory speed; under \code{"compact"}, whenever it is smaller.
-\code{options(rdz.threads = )} sets the threads that compress and, in
+\code{compress} is the Zstandard level each block is compressed at: \code{0} stores
+every block raw (the fastest to write and read), \code{1} (the default) is fast
+and already small, and higher levels, up to \code{19}, trade write time for
+size; reads stay fast at any level. Below level 6 a block is stored
+compressed only when that saves at least an eighth of it, so data that
+barely compresses reads at memory speed; from level 6, whenever it is
+smaller. \code{options(rdz.threads = )} sets the threads that compress and, in
 \code{\link[=read_rdz]{read_rdz()}}, decompress blocks; the default is 1. The file does not
 depend on either: any setting reads any file, and the same object written
 with any number of threads gives the same bytes.

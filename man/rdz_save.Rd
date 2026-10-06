@@ -13,6 +13,7 @@ rdz_save(
   mode = c("auto", "native", "r"),
   skip_unchanged = FALSE,
   metadata = NULL,
+  compress = getOption("rdz.compress", 1L),
   hash = getOption("rdz.hash", TRUE)
 )
 
@@ -29,7 +30,7 @@ from \code{\link[=rdz_serialize]{rdz_serialize()}}).}
 \item{envir}{For \code{rdz_save()}, where to find the objects; for
 \code{rdz_load()}, where to assign them.}
 
-\item{mode, skip_unchanged, metadata, hash}{As for \code{\link[=write_rdz]{write_rdz()}}.}
+\item{mode, skip_unchanged, metadata, compress, hash}{As for \code{\link[=write_rdz]{write_rdz()}}.}
 
 \item{names}{\code{NULL} (everything) or the names of the objects to load.}
 }

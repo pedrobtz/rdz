@@ -7,13 +7,13 @@
 #' blocks of 1 MiB. Every file records the object's content hash
 #' ([rdz_hash()]).
 #'
-#' Two options control how blocks are stored and how many threads do the
-#' work. `options(rdz.preset = )` is `"balanced"` (the default; each block is
-#' compressed with Zstandard at level 1), `"compact"` (level 6) or `"speed"`
-#' (no compression). Under `"balanced"` a block is stored compressed only
-#' when that saves at least an eighth of it, so data that barely compresses
-#' reads at memory speed; under `"compact"`, whenever it is smaller.
-#' `options(rdz.threads = )` sets the threads that compress and, in
+#' `compress` is the Zstandard level each block is compressed at: `0` stores
+#' every block raw (the fastest to write and read), `1` (the default) is fast
+#' and already small, and higher levels, up to `19`, trade write time for
+#' size; reads stay fast at any level. Below level 6 a block is stored
+#' compressed only when that saves at least an eighth of it, so data that
+#' barely compresses reads at memory speed; from level 6, whenever it is
+#' smaller. `options(rdz.threads = )` sets the threads that compress and, in
 #' [read_rdz()], decompress blocks; the default is 1. The file does not
 #' depend on either: any setting reads any file, and the same object written
 #' with any number of threads gives the same bytes.
@@ -66,6 +66,8 @@
 #'   distinct non-empty names and 64 KiB in all, such as a source, a code
 #'   version or a cache key's inputs. [rdz_info()] reads it back, as
 #'   `metadata`, without reading `x`; it is not part of the content hash.
+#' @param compress The Zstandard level of each block, a whole number from `0`
+#'   (none) to `19`; by default `options(rdz.compress)`, else `1`.
 #' @param hash Whether to record the content hash ([rdz_hash()]), from
 #'   `options(rdz.hash)`, `TRUE` by default. Computing it reads the value once
 #'   more (about a tenth of a write's time); without it the file is just as
@@ -79,7 +81,8 @@
 #' unlink(path)
 #' @export
 write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged = FALSE,
-                      metadata = NULL, hash = getOption("rdz.hash", TRUE)) {
+                      metadata = NULL, compress = getOption("rdz.compress", 1L),
+                      hash = getOption("rdz.hash", TRUE)) {
   path <- validate_rdz_path(path)
   mode <- match.arg(mode)
   section <- rdz_metadata_section(metadata)
@@ -87,6 +90,7 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged =
     rdz_stop("`skip_unchanged` must be TRUE or FALSE.", call. = FALSE)
   }
   hash <- rdz_hash_flag(hash)
+  compress <- rdz_compress_level(compress)
   if (skip_unchanged && !hash) {
     rdz_stop("`skip_unchanged = TRUE` needs `hash = TRUE`: it compares content hashes.",
              call. = FALSE)
@@ -107,7 +111,7 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r"), skip_unchanged =
     rdz_stop("`path` must not refer to a directory.", call. = FALSE)
   }
 
-  rdz_write_to(x, path, mode, section, hash)
+  rdz_write_to(x, path, mode, section, hash, compress)
   invisible(path)
 }
 
@@ -120,8 +124,9 @@ rdz_hash_flag <- function(hash) {
 
 # Writes x to path, or with a NULL path into a raw vector, which it returns:
 # natively when it can (and mode allows), else through R serialization.
-rdz_write_to <- function(x, path, mode, section, hash = TRUE) {
-  settings <- c(rdz_settings(), as.integer(hash))
+rdz_write_to <- function(x, path, mode, section, hash = TRUE,
+                         compress = getOption("rdz.compress", 1L)) {
+  settings <- c(rdz_settings(compress), as.integer(hash))
   if (!identical(mode, "r")) {
     native <- rdz_check(.Call(
       rdz_c_try_write_native, x, path, identical(mode, "native"), rdz_dictionary_policy(),
@@ -158,9 +163,11 @@ rdz_write_to <- function(x, path, mode, section, hash = TRUE) {
 #' rdz_unserialize(bytes, select = "mpg", rows = 1:3)
 #' @export
 rdz_serialize <- function(x, mode = c("auto", "native", "r"), metadata = NULL,
+                          compress = getOption("rdz.compress", 1L),
                           hash = getOption("rdz.hash", TRUE)) {
   mode <- match.arg(mode)
-  rdz_write_to(x, NULL, mode, rdz_metadata_section(metadata), rdz_hash_flag(hash))
+  rdz_write_to(x, NULL, mode, rdz_metadata_section(metadata), rdz_hash_flag(hash),
+               rdz_compress_level(compress))
 }
 
 #' @rdname rdz_serialize
@@ -222,13 +229,13 @@ read_rdz <- function(path, select = NULL, rows = NULL) {
     window <- if (length(rows)) c(min(rows) - 1, max(rows)) else c(0, 0)
   }
   read <- tryCatch(
-    rdz_check(.Call(rdz_c_read, path, rdz_settings(), index, window)),
+    rdz_check(.Call(rdz_c_read, path, rdz_settings(0L), index, window)),
     rdz_limit_error = function(e) rdz_rows_refused(path, rows, e),
     rdz_unsupported_error = function(e) rdz_rows_refused(path, rows, e)
   )
   if (is.null(read)) { # a window the reader refuses: the value whole
     window <- NULL
-    read <- rdz_check(.Call(rdz_c_read, path, rdz_settings(), index, NULL))
+    read <- rdz_check(.Call(rdz_c_read, path, rdz_settings(0L), index, NULL))
   }
   value <- read[[1L]]
   if (!read[[2L]] && !is.null(select)) value <- rdz_select_generic(value, select)

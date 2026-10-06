@@ -9,6 +9,7 @@ rdz_serialize(
   x,
   mode = c("auto", "native", "r"),
   metadata = NULL,
+  compress = getOption("rdz.compress", 1L),
   hash = getOption("rdz.hash", TRUE)
 )
 
@@ -26,6 +27,9 @@ character vector (or a named list of single strings), up to 1,024
 distinct non-empty names and 64 KiB in all, such as a source, a code
 version or a cache key's inputs. \code{\link[=rdz_info]{rdz_info()}} reads it back, as
 \code{metadata}, without reading \code{x}; it is not part of the content hash.}
+
+\item{compress}{The Zstandard level of each block, a whole number from \code{0}
+(none) to \code{19}; by default \code{options(rdz.compress)}, else \code{1}.}
 
 \item{hash}{Whether to record the content hash (\code{\link[=rdz_hash]{rdz_hash()}}), from
 \code{options(rdz.hash)}, \code{TRUE} by default. Computing it reads the value once

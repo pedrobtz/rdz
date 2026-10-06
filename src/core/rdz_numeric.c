@@ -609,7 +609,7 @@ int rdz_dbl_encode(const double *v, size_t n, int compressing, zb_buf *out, uint
     }
     runs_len = RDZ_RUNS_HEADER + RDZ_DBL_RUN_RECORD * runs;
     /* decimals (ALP) when the block will be compressed and they are smaller
-       than runs and raw; the speed preset keeps its plain copy */
+       than runs and raw; level 0 keeps its plain copy */
     if (compressing && n) {
         int used;
         if (rdz_alp_encode(v, n, runs_len < raw_len ? runs_len : raw_len, out, &used, e)) return 1;
