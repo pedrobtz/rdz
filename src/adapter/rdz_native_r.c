@@ -1183,18 +1183,6 @@ static void rdz_window_object(const rdz_reader *r, rdz_window *w, uint8_t *slot,
 static int rdz_read_attr_name(rdz_reader *r, const rdz_attribute *a, char *out, size_t cap,
                               rdz_error *e);
 
-/* Whether object `t` is windowed only as the target of a windowed reference
-   (where else it is used, the loop in rdz_window_plan() sees). */
-static int rdz_window_target_of_slot(const rdz_reader *r, const uint8_t *slot, uint32_t t)
-{
-    uint32_t j;
-    for (j = 0; j < r->nobjects; j++) {
-        const rdz_object *o = &r->objects[j];
-        if (slot[j] && o->type_tag == RDZ_TYPE_REFERENCE && o->first_child == t) return 1;
-    }
-    return 0;
-}
-
 /* With a window: the root's rows. A data frame's vector columns and its
    stored row names, or a vector and its names; other columns (lists, data
    frames) are read whole, for R to subset. */
@@ -1232,13 +1220,15 @@ static int rdz_window_plan(rdz_graph_in *g)
             rdz_window_object(r, w, slot, at->value_object_id, (uint64_t)lo, (uint64_t)hi);
         }
     }
-    /* a windowed vector shared with a part read whole (a list column, an
-       attribute) would reach that part cut short: refused, so R reads the
-       value whole */
+    /* a windowed vector shared with a part read whole would reach that part
+       cut short: a reference outside the window to a windowed target, or a
+       windowed target that lives outside the window (an attribute, a list
+       element, planned before the column that refers to it). Refused, so R
+       reads the value whole. */
     for (j = 0; j < r->nobjects; j++) {
         const rdz_object *o = &r->objects[j];
         if ((o->type_tag == RDZ_TYPE_REFERENCE && !slot[j] && w[o->first_child].on) ||
-            (w[j].on && !slot[j] && !rdz_window_target_of_slot(r, slot, j))) {
+            (w[j].on && !slot[j])) {
             return rdz_unsupported(&g->e, "rows of a vector shared with a part read whole");
         }
         /* a matrix's or a time series' rows are not its elements' */

@@ -298,9 +298,11 @@ rdz_rows_take <- function(value, rows, lo) {
     stored[rows - lo]
   }
   class(out) <- class(value)
-  if (inherits(value, "data.table")) {
-    attr(out, ".internal.selfref") <- attr(value, ".internal.selfref", exact = TRUE)
-  }
+  # the frame's other attributes (a data.table's selfref among them) are
+  # kept whole, as `[.data.frame` keeps them
+  extra <- attributes(value)
+  extra <- extra[setdiff(names(extra), c("names", "row.names", "class"))]
+  for (a in names(extra)) attr(out, a) <- extra[[a]]
   out
 }
 
