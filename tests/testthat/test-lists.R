@@ -100,9 +100,9 @@ test_that("tibbles and data.tables keep their class and work", {
   expect_identical(class(got), c("data.table", "data.frame"))
   expect_true(data.table::is.data.table(got))
   expect_equal(as.data.frame(got), as.data.frame(dt))
-  # its self-reference restored: room to add columns by reference, and
-  # set() adds one without the warning an invalid selfref gives
-  expect_gt(data.table::truelength(got), ncol(got))
+  # its self-reference as readRDS() gives it (loaded from disk): set() adds a
+  # column in place without the warning a missing selfref gives
+  expect_identical(data.table:::selfrefok(got), -1L)
   expect_silent(data.table::set(got, j = "c", value = got$a * 2L))
   expect_identical(got$c, c(2L, 4L, 6L))
   # another external pointer attribute is not the registered one

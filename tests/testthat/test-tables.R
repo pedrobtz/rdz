@@ -1,7 +1,8 @@
-# data.tables and tibbles come back as they were written: a data.table's
-# .internal.selfref, never stored, is rebuilt by data.table::setalloccol()
-# wherever the table is (root, list element, column of a list), and only when
-# the file holds one; a tibble needs nothing rebuilt.
+# data.tables and tibbles come back as they were written. A data.table's
+# .internal.selfref, never stored, comes back as R_Unserialize() gives it (a
+# NULL pointer): data.table takes the table as loaded from disk and rebuilds
+# it at the first change, wherever it is, as after readRDS(); rdz never calls
+# or loads data.table. A tibble needs nothing rebuilt.
 
 test_that("nested data.tables are usable in place after a read, native or generic", {
   skip_if_not_installed("data.table")
@@ -16,14 +17,23 @@ test_that("nested data.tables are usable in place after a read, native or generi
     for (t in list(y$dt, y$inner$deeper)) {
       expect_s3_class(t, "data.table")
       expect_identical(data.table::key(t), "b", label = mode)
-      expect_true(data.table:::selfrefok(t) == 1L, label = mode)
+      expect_identical(data.table:::selfrefok(t), -1L, label = mode) # as from disk
     }
+    # changed in place at once: no shallow copy, no warning, the change kept
     expect_no_warning(data.table::set(y$inner$deeper, j = "c", value = 1L))
-    expect_identical(as.data.frame(y$dt), as.data.frame(dt), label = mode)
+    expect_identical(y$inner$deeper$c, rep(1L, 3L), label = mode)
+    expect_no_warning(data.table::set(y$dt, j = "c", value = 2L))
+    expect_identical(y$dt$c, rep(2L, 3L), label = mode)
+    expect_identical(as.data.frame(y$dt)[c("a", "b")], as.data.frame(dt), label = mode)
   }
-  # a selection and a read below the root rebuild them too
-  write_rdz(x, path)
-  expect_true(data.table:::selfrefok(read_rdz(path, select = "inner")$inner$deeper) == 1L)
+  # a selection gives the same, native or generic, at the root too
+  for (mode in c("native", "r")) {
+    write_rdz(dt, path, mode = mode)
+    s <- read_rdz(path, select = "a")
+    expect_identical(data.table:::selfrefok(s), -1L, label = mode)
+    expect_no_warning(data.table::set(s, j = "z", value = 0L))
+    expect_identical(s$z, rep(0L, 3L), label = mode)
+  }
 })
 
 test_that("tibbles come back identical, nested or not", {

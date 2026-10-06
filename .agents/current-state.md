@@ -19,14 +19,15 @@ Inspection below the root, and tables as written. No format change.
   bytes below each part. It is read from the directory and the parts' names,
   classes and dims only. A test corrupts a part's data: the full read fails,
   while the schema and that part's attributes are still read.
-- **data.tables** get their `.internal.selfref` rebuilt wherever they are, not
-  only at the root, so `:=` works without its shallow-copy warning.
-  - Native files: the C reader passes each table to `setalloccol` as it
-    assembles it, bottom-up.
-  - Generic files: a C walk with an explicit stack does the same, so values
-    nested past R's recursion limit work.
-  - data.table is loaded only for a file that holds a table (tested in a
-    fresh R).
+- **data.tables come back as from `readRDS()`.**
+  - Before: a native data.table came back with no `.internal.selfref`, and
+    data.table took it as broken. Its first `:=` warned and changed a shallow
+    copy, so the change was lost, at the root and nested alike.
+  - Now the native reader gives every table the attribute as
+    `R_Unserialize()` would: a NULL external pointer. data.table takes that as
+    "loaded from disk" and rebuilds the table by itself at its first change,
+    as it always has for generic files.
+  - rdz never calls or loads data.table; that is tested in a fresh R.
   - Tibbles already came back identical.
 
 ## Checkpoint 2026-10-06: plan-c Stage K

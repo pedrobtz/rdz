@@ -72,11 +72,10 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
 #' [rdz_attributes()] still reads them.
 #'
 #' A data.table's `.internal.selfref`, a pointer to the table itself, is never
-#' stored: `read_rdz()` rebuilds it with `data.table::setalloccol()` for every
-#' data.table it reads, at the root or nested in lists, so the tables can be
-#' changed in place at once. data.table is loaded only for a file that holds
-#' one; without it, the tables come back as they were stored. Tibbles need
-#' nothing rebuilt.
+#' stored: every data.table comes back as from [readRDS()], marked as loaded
+#' from disk, and data.table rebuilds it by itself at the first change, at
+#' the root or nested in lists. rdz never calls or loads data.table. Tibbles
+#' need nothing rebuilt.
 #'
 #' @param path A single, non-missing path to read.
 #' @param select `NULL` (everything), or the columns of a data frame or the
@@ -100,23 +99,10 @@ read_rdz <- function(path, select = NULL) {
       index <- rdz_select_index(path, info, select)
     }
   }
-  # a native file's data.tables are rebuilt as they are read, wherever they
-  # are in the object
-  read <- rdz_check(.Call(rdz_c_read, path, rdz_settings(), index, rdz_restore_table))
+  read <- rdz_check(.Call(rdz_c_read, path, rdz_settings(), index))
   value <- read[[1L]]
-  if (!read[[2L]] && !is.null(select)) {
-    # a generic value's tables were rebuilt in C; a selected root is new
-    value <- rdz_select_generic(value, select)
-    if (inherits(value, "data.table")) value <- rdz_restore_table(value)
-  }
+  if (!read[[2L]] && !is.null(select)) value <- rdz_select_generic(value, select)
   value
-}
-
-# A data.table read back gets its .internal.selfref, which is a pointer to
-# the object itself and so never stored, from data.table (loaded only now,
-# when a file holds a data.table); without data.table it stays as read.
-rdz_restore_table <- function(x) {
-  if (requireNamespace("data.table", quietly = TRUE)) data.table::setalloccol(x) else x
 }
 
 # The 0-based children `select` names in a native file's list or data frame
@@ -166,6 +152,10 @@ rdz_select_generic <- function(value, select) {
   if (is.data.frame(value)) {
     attr(out, "row.names") <- .row_names_info(value, 0L)
     class(out) <- class(value)
+    # a data.table's, as read: data.table rebuilds it at the first change
+    if (inherits(value, "data.table")) {
+      attr(out, ".internal.selfref") <- attr(value, ".internal.selfref", exact = TRUE)
+    }
   }
   out
 }

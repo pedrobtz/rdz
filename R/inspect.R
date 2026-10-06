@@ -17,7 +17,7 @@ rdz_directory <- function(path) {
 # Objects (0-based ids) read alone, each with everything below it.
 rdz_read_objects <- function(path, ids) {
   if (!length(ids)) return(list())
-  rdz_check(.Call(rdz_c_read_objects, path, as.integer(ids), rdz_settings(), rdz_restore_table))
+  rdz_check(.Call(rdz_c_read_objects, path, as.integer(ids), rdz_settings()))
 }
 
 # The id of the object at `object`, a path from the root like a `[[` index:
