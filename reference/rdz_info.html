@@ -70,7 +70,7 @@ does not record one.</p>
 
 
 <dl><dt id="arg-path">path<a class="anchor" aria-label="anchor" href="#arg-path"></a></dt>
-<dd><p>A single, non-missing path to inspect.</p></dd>
+<dd><p>A path, or a raw vector holding an rdz file (<code><a href="rdz_serialize.html">rdz_serialize()</a></code>).</p></dd>
 
 
 <dt id="arg-x">x<a class="anchor" aria-label="anchor" href="#arg-x"></a></dt>
@@ -83,8 +83,31 @@ does not record one.</p>
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A named list of container information and a bounded root synopsis.</p>
-<p><code>x</code>, invisibly.</p>
+    <p>A list of class <code>rdz_info</code>:</p><ul><li><p><code>container_version</code>, <code>codec</code> (<code>"native_v1"</code> or <code>"r_serial_v3"</code>),
+<code>codec_id</code>, <code>codec_version</code>: the file's format versions and payload
+codec.</p></li>
+<li><p><code>block_size</code> (the largest decoded block, in bytes), <code>block_count</code>,
+<code>object_count</code>, <code>attribute_count</code>: the directory's counts.</p></li>
+<li><p><code>payload_bytes</code> (stored block bytes) and <code>file_bytes</code>.</p></li>
+<li><p><code>root_type</code>, <code>root_length</code>, <code>attribute_names</code>: the root's type (a native
+type such as <code>"data.frame"</code>, or for a generic file R's <code><a href="https://rdrr.io/r/base/typeof.html" class="external-link">typeof()</a></code>), its
+length (a data frame's number of columns) and its attributes' names.</p></li>
+<li><p><code>writer</code>: the implementation and version that wrote the file, such as
+<code>"rdz 0.1.0"</code>, or <code>""</code> when the file does not record one.</p></li>
+<li><p><code>content_hash</code>: the value's hash (<code><a href="rdz_hash.html">rdz_hash()</a></code>), 32 hexadecimal digits,
+or <code>NA</code> when the file records none.</p></li>
+<li><p><code>metadata</code>: the user metadata <code><a href="write_rdz.html">write_rdz()</a></code> recorded, a named character
+vector (empty when there is none).</p></li>
+<li><p><code>synopsis</code>: for a generic file, the bounded description of the root
+recorded when it was written (<code>NULL</code> for a native file).</p></li>
+<li><p><code>authoritative</code>, <code>exact_attributes</code>: whether the directory describes
+the value exactly (native files) rather than through the synopsis;
+<code>full_read_required_for_attributes</code> is their opposite.</p></li>
+<li><p><code>schema</code>: <code>root_type</code>, <code>length</code> and <code>attribute_names</code> as one list.</p></li>
+<li><p><code>integrity_checks</code>: the checks <code>rdz_info()</code> makes: the header's and the
+directory's checksums and every offset and length in the directory.
+Block checksums are checked by <code><a href="read_rdz.html">read_rdz()</a></code> and <code><a href="rdz_verify.html">rdz_verify()</a></code>.</p></li>
+</ul><p><code>x</code>, invisibly.</p>
     </div>
 
     <div class="section level2">

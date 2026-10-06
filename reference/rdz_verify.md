@@ -15,7 +15,8 @@ rdz_verify(path, content = FALSE)
 
 - path:
 
-  A single, non-missing path to verify.
+  A path, or a raw vector holding an rdz file
+  ([`rdz_serialize()`](https://pedrobtz.github.io/rdz/reference/rdz_serialize.md)).
 
 - content:
 

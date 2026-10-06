@@ -16,7 +16,8 @@ rdz_attributes(path, object = NULL, names = NULL, allow_full = FALSE)
 
 - path:
 
-  A single, non-missing path to inspect.
+  A path, or a raw vector holding an rdz file
+  ([`rdz_serialize()`](https://pedrobtz.github.io/rdz/reference/rdz_serialize.md)).
 
 - object:
 

@@ -93,6 +93,11 @@ example, a closure and its byte-compiled copy. The hash identifies the
 value as stored, so it depends on <code>mode</code>: a value written natively and the
 same value written with <code>mode = "r"</code> hash differently. XXH3-128 is not a
 cryptographic hash.</p>
+<p>The hash also records sharing: a vector of 4 KiB or more that appears
+twice in <code>x</code> as one object is stored once (<code><a href="write_rdz.html">write_rdz()</a></code>, "Native and
+generic"), and hashes as a reference to its first occurrence. So
+<code>list(v, v)</code> and <code>list(v, v + 0)</code> are <code><a href="https://rdrr.io/r/base/identical.html" class="external-link">identical()</a></code> but hash differently
+when <code>v</code> is that large; build values the same way to get the same hash.</p>
     </div>
 
     <div class="section level2">

@@ -116,6 +116,43 @@ smaller. <code>options(rdz.threads = )</code> sets the threads that compress and
 depend on either: any setting reads any file, and the same object written
 with any number of threads gives the same bytes.</p>
     </div>
+    <div class="section level2">
+    <h2 id="native-and-generic">Native and generic<a class="anchor" aria-label="anchor" href="#native-and-generic"></a></h2>
+
+
+<p>In automatic mode (<code>mode = "auto"</code>), a value is written natively when every
+part of it can be; otherwise the whole value goes through R serialization.
+Native files support selective reads (<code>select</code>, <code>rows</code>) and inspection
+below the root (<code><a href="rdz_schema.html">rdz_schema()</a></code>, <code><a href="rdz_attributes.html">rdz_attributes()</a></code>); generic files are read
+whole. A value is written generically when it holds, anywhere:</p><ul><li><p>a type other than logical, integer, double, character or list (complex
+and raw vectors, environments, functions, calls, S4 objects);</p></li>
+<li><p>a string longer than 1 MiB, or a non-ASCII string the session cannot
+convert to UTF-8 losslessly (unmarked strings in the C locale);</p></li>
+<li><p>a non-ASCII attribute name, or names, row names or a class carrying
+attributes of their own;</p></li>
+<li><p>a factor with names, a data frame column of another length than its rows
+(a matrix of two or more columns) or that is itself a data frame;</p></li>
+<li><p>nesting deeper than 1,000 levels, or more than 1,000,000 parts.</p></li>
+</ul><p>Automatic mode also writes generically a value of at least 1,024 parts that
+average less than 1 KiB of data each, where the native directory would
+cost more than the data. <code>mode = "native"</code> writes those natively, and
+raises an <code>rdz_unsupported_error</code> (see <a href="rdz-errors.html">rdz-errors</a>) for the others.</p>
+<p>A vector of 4 KiB or more that appears more than once in <code>x</code> (the same
+object, as after <code>y &lt;- x</code>) is stored once and read back shared.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="replacing-files">Replacing files<a class="anchor" aria-label="anchor" href="#replacing-files"></a></h2>
+
+
+<p>The file is written to a temporary file beside <code>path</code> and renamed over it
+at the end, so readers see the old file or the new one, never a partial
+one, and an error or interrupt leaves <code>path</code> as it was. rdz does not ask
+the operating system to flush the file to disk (no <code>fsync</code>), so after a
+power failure the file may be missing or empty. On file systems whose
+rename cannot replace a file (some Windows shares), the old file is moved
+aside first, and a crash at that moment can leave it under a name ending
+in <code>.backup</code>.</p>
+    </div>
 
     <div class="section level2">
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>

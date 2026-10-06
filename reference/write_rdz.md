@@ -72,6 +72,52 @@ decompress blocks; the default is 1. The file does not depend on either:
 any setting reads any file, and the same object written with any number
 of threads gives the same bytes.
 
+## Native and generic
+
+In automatic mode (`mode = "auto"`), a value is written natively when
+every part of it can be; otherwise the whole value goes through R
+serialization. Native files support selective reads (`select`, `rows`)
+and inspection below the root
+([`rdz_schema()`](https://pedrobtz.github.io/rdz/reference/rdz_schema.md),
+[`rdz_attributes()`](https://pedrobtz.github.io/rdz/reference/rdz_attributes.md));
+generic files are read whole. A value is written generically when it
+holds, anywhere:
+
+- a type other than logical, integer, double, character or list (complex
+  and raw vectors, environments, functions, calls, S4 objects);
+
+- a string longer than 1 MiB, or a non-ASCII string the session cannot
+  convert to UTF-8 losslessly (unmarked strings in the C locale);
+
+- a non-ASCII attribute name, or names, row names or a class carrying
+  attributes of their own;
+
+- a factor with names, a data frame column of another length than its
+  rows (a matrix of two or more columns) or that is itself a data frame;
+
+- nesting deeper than 1,000 levels, or more than 1,000,000 parts.
+
+Automatic mode also writes generically a value of at least 1,024 parts
+that average less than 1 KiB of data each, where the native directory
+would cost more than the data. `mode = "native"` writes those natively,
+and raises an `rdz_unsupported_error` (see
+[rdz-errors](https://pedrobtz.github.io/rdz/reference/rdz-errors.md))
+for the others.
+
+A vector of 4 KiB or more that appears more than once in `x` (the same
+object, as after `y <- x`) is stored once and read back shared.
+
+## Replacing files
+
+The file is written to a temporary file beside `path` and renamed over
+it at the end, so readers see the old file or the new one, never a
+partial one, and an error or interrupt leaves `path` as it was. rdz does
+not ask the operating system to flush the file to disk (no `fsync`), so
+after a power failure the file may be missing or empty. On file systems
+whose rename cannot replace a file (some Windows shares), the old file
+is moved aside first, and a crash at that moment can leave it under a
+name ending in `.backup`.
+
 ## Examples
 
 ``` r

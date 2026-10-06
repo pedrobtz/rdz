@@ -45,6 +45,15 @@ value as stored, so it depends on `mode`: a value written natively and
 the same value written with `mode = "r"` hash differently. XXH3-128 is
 not a cryptographic hash.
 
+The hash also records sharing: a vector of 4 KiB or more that appears
+twice in `x` as one object is stored once
+([`write_rdz()`](https://pedrobtz.github.io/rdz/reference/write_rdz.md),
+"Native and generic"), and hashes as a reference to its first
+occurrence. So `list(v, v)` and `list(v, v + 0)` are
+[`identical()`](https://rdrr.io/r/base/identical.html) but hash
+differently when `v` is that large; build values the same way to get the
+same hash.
+
 ## Examples
 
 ``` r

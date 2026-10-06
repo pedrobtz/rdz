@@ -14,7 +14,8 @@ rdz_schema(path, recursive = TRUE)
 
 - path:
 
-  A single, non-missing path to inspect.
+  A path, or a raw vector holding an rdz file
+  ([`rdz_serialize()`](https://pedrobtz.github.io/rdz/reference/rdz_serialize.md)).
 
 - recursive:
 
@@ -23,7 +24,31 @@ rdz_schema(path, recursive = TRUE)
 
 ## Value
 
-A named schema list.
+A list of class `rdz_schema`: `codec`, `authoritative`,
+`exact_attributes`, `root_type`, `length` and `attribute_names` as in
+[`rdz_info()`](https://pedrobtz.github.io/rdz/reference/rdz_info.md);
+`data_blocks_read`, always `FALSE`; and `objects`, for a native file a
+data frame with a row per part, depth first (`NULL` for a generic file):
+
+- `path`: the part's place, such as `"$sales$day"` or `"$models[[2]]"`
+  (`""` for the root).
+
+- `depth`: 0 for the root.
+
+- `type`: its native type; `class`: its classes, joined by `/`.
+
+- `length`: elements (a list's parts, a data frame's rows); `columns`: a
+  data frame's columns, else `NA`; `shape`: its dimensions as text.
+
+- `attributes`: its attributes' names, joined by `, `.
+
+- `stored_bytes`: the bytes its blocks take in the file, its parts'
+  included.
+
+- `shared_with`: for a part stored once and met again (a shared large
+  vector), the path of its first occurrence, else `NA`.
+
+- `id`: its object ID in the directory.
 
 ## Details
 
