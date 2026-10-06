@@ -410,8 +410,9 @@ rdz_select_generic <- function(value, select) {
 #' Inspect an rdz Container Without Reading Its Payload
 #'
 #' `rdz_info()` reads the fixed header, closing trailer, and bounded directory.
-#' For the transitional R-serialization codec, `synopsis` is informative and
-#' exact attribute values still require [read_rdz()]. Data block checksums are
+#' For a file written through R serialization (the generic codec),
+#' `synopsis` is informative and exact attribute values still require
+#' [read_rdz()]. Data block checksums are
 #' validated by [read_rdz()], not by this metadata-only operation. `writer` names
 #' the implementation and version that wrote the file, or is `""` when the file
 #' does not record one.

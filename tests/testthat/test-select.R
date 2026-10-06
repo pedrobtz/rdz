@@ -3,17 +3,6 @@
 # subset. Either way the value is the selected parts with their names (and a
 # data frame's row names and class).
 
-select_both <- function(x, select) {
-  path <- tempfile(fileext = ".rdz")
-  on.exit(unlink(path), add = TRUE)
-  write_rdz(x, path, mode = "native")
-  native <- read_rdz(path, select = select)
-  write_rdz(x, path, mode = "r")
-  generic <- read_rdz(path, select = select)
-  expect_identical(native, generic)
-  native
-}
-
 test_that("data frame columns are selected by name and position, in order", {
   df <- data.frame(
     id = c(1L, 2L, 3L), score = c(1.5, NA, -0), name = c("a", NA, "c"),

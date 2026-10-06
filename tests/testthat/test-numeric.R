@@ -1,21 +1,5 @@
 # The native integer and double codecs (plan-c Stage F).
 
-native_roundtrip <- function(x, ..., expect_encodings = NULL) {
-  path <- tempfile(fileext = ".rdz")
-  on.exit(unlink(path), add = TRUE)
-  old <- options(...)
-  on.exit(options(old), add = TRUE)
-  write_rdz(x, path, mode = "native")
-  expect_identical(rdz_info(path)$codec, "native_v1")
-  if (!is.null(expect_encodings)) {
-    expect_true(all(expect_encodings %in% rdz_block_encodings(path)$encoding),
-                label = paste(deparse(expect_encodings), collapse = ""))
-  }
-  read_rdz(path)
-}
-
-double_bits <- function(x) writeBin(x, raw(), endian = "little")
-
 test_that("integers round-trip at every block boundary", {
   per <- 262144L
   for (n in c(0L, 1L, per - 1L, per, per + 1L, 3L * per + 5L)) {

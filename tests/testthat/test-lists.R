@@ -1,13 +1,5 @@
 # Native lists and data frames (plan-c Stage H).
 
-roundtrip_native <- function(x) {
-  path <- tempfile(fileext = ".rdz")
-  on.exit(unlink(path), add = TRUE)
-  write_rdz(x, path, mode = "native")
-  expect_identical(rdz_info(path)$codec, "native_v1")
-  read_rdz(path)
-}
-
 test_that("lists round-trip: empty, nested, heterogeneous, named, with NULL", {
   cases <- list(
     empty = list(),
@@ -18,21 +10,21 @@ test_that("lists round-trip: empty, nested, heterogeneous, named, with NULL", {
     factors = list(factor(c("a", NA)), factor("z", levels = c("y", "z"), ordered = TRUE))
   )
   for (name in names(cases)) {
-    expect_identical(roundtrip_native(cases[[name]]), cases[[name]], label = name)
+    expect_identical(roundtrip_list(cases[[name]]), cases[[name]], label = name)
   }
 })
 
 test_that("a vector shared within a list is written as the copies R serializes", {
   v <- runif(10)
   x <- list(v, v, list(v))
-  y <- roundtrip_native(x)
+  y <- roundtrip_list(x)
   expect_identical(y, x)
 })
 
 test_that("nesting is bounded and deeper objects stay generic", {
   deep <- list(1)
   for (i in seq_len(999)) deep <- list(deep)
-  expect_identical(roundtrip_native(deep), deep) # 1000 levels below the root
+  expect_identical(roundtrip_list(deep), deep) # 1000 levels below the root
   deeper <- list(deep)
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
@@ -80,23 +72,23 @@ test_that("data frames round-trip in every supported shape", {
     })
   )
   for (name in names(cases)) {
-    expect_identical(roundtrip_native(cases[[name]]), cases[[name]], label = name)
+    expect_identical(roundtrip_list(cases[[name]]), cases[[name]], label = name)
   }
   big <- data.frame(x = runif(5e5), y = sample.int(100L, 5e5, TRUE),
                     z = sample(letters, 5e5, TRUE), stringsAsFactors = FALSE)
   old <- options(rdz.threads = test_threads(4L))
   on.exit(options(old), add = TRUE)
-  expect_identical(roundtrip_native(big), big)
-  expect_identical(.row_names_info(roundtrip_native(big)), .row_names_info(big))
+  expect_identical(roundtrip_list(big), big)
+  expect_identical(.row_names_info(roundtrip_list(big)), .row_names_info(big))
 })
 
 test_that("tibbles and data.tables keep their class and work", {
   skip_if_not_installed("tibble")
   tb <- tibble::tibble(a = 1:3 * 1L, b = c("x", "y", "z"))
-  expect_identical(roundtrip_native(tb), tb)
+  expect_identical(roundtrip_list(tb), tb)
   skip_if_not_installed("data.table")
   dt <- data.table::data.table(a = 1:3 * 1L, b = c("x", "y", "z"))
-  got <- roundtrip_native(dt)
+  got <- roundtrip_list(dt)
   expect_identical(class(got), c("data.table", "data.frame"))
   expect_true(data.table::is.data.table(got))
   expect_equal(as.data.frame(got), as.data.frame(dt))

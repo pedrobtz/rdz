@@ -172,3 +172,9 @@ write_frozen_fixture <- function(spec, path) {
   mode <- if (identical(spec$codec, "native_v1")) "native" else "r"
   rdz::write_rdz(spec$value(), path, mode = mode, metadata = spec$metadata)
 }
+
+frozen_dir <- function() testthat::test_path("fixtures", "v0.1.0")
+frozen_manifest <- function() {
+  utils::read.delim(file.path(frozen_dir(), "manifest.tsv"), colClasses = "character",
+                    quote = "")
+}

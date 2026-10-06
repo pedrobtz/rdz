@@ -1,18 +1,6 @@
 # The generic codec, streamed (plan-c Stage C): R_Serialize() into blocks and
 # R_Unserialize() out of them, in every build.
 
-roundtrip_generic <- function(x) {
-  path <- tempfile(fileext = ".rdz")
-  on.exit(unlink(path), add = TRUE)
-  write_rdz(x, path, mode = "r")
-  expect_identical(rdz_info(path)$codec, "r_serial_v3")
-  read_rdz(path)
-}
-
-leftover_temporaries <- function(dir) {
-  list.files(dir, pattern = "-rdz-.*\\.(tmp|backup)$", all.files = TRUE)
-}
-
 test_that("every kind of R object round-trips through the generic codec", {
   f <- function(x, y = 2) x + y
   objects <- list(

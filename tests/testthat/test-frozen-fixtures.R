@@ -5,13 +5,6 @@
 # are generic files: R's serialization header records the R version that
 # wrote the stream.
 
-frozen_dir <- function() testthat::test_path("fixtures", "v0.1.0")
-
-frozen_manifest <- function() {
-  utils::read.delim(file.path(frozen_dir(), "manifest.tsv"), colClasses = "character",
-                    quote = "")
-}
-
 test_that("the frozen corpus is complete and unmodified", {
   manifest <- frozen_manifest()
   specs <- frozen_fixture_specs()

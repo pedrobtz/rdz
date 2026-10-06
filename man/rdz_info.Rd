@@ -49,8 +49,9 @@ Block checksums are checked by \code{\link[=read_rdz]{read_rdz()}} and \code{\li
 }
 \description{
 \code{rdz_info()} reads the fixed header, closing trailer, and bounded directory.
-For the transitional R-serialization codec, \code{synopsis} is informative and
-exact attribute values still require \code{\link[=read_rdz]{read_rdz()}}. Data block checksums are
+For a file written through R serialization (the generic codec),
+\code{synopsis} is informative and exact attribute values still require
+\code{\link[=read_rdz]{read_rdz()}}. Data block checksums are
 validated by \code{\link[=read_rdz]{read_rdz()}}, not by this metadata-only operation. \code{writer} names
 the implementation and version that wrote the file, or is \code{""} when the file
 does not record one.

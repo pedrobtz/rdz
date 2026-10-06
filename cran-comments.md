@@ -14,8 +14,9 @@ are submitted to CRAN first; this submission follows their acceptance.
 * New submission.
 * Files which contain pragma(s) suppressing diagnostics:
   src/vendor/zstd/zstd.c and zstd.h. These are the Zstandard release's own
-  pragmas, in its unmodified amalgamation (below); editing them would make
-  the vendored library differ from the release its checksums pin.
+  pragmas, in the amalgamation generated from its unmodified sources (below);
+  editing them would make the vendored library differ from the release its
+  checksums pin.
 
 ## Test environments
 
@@ -24,7 +25,7 @@ In GitHub Actions, through R CMD check --as-cran:
 * Linux: R-devel with clang 23 and with GCC 16 (R-hub's CRAN-like images,
   compiling with CRAN's flags); R-release and R-oldrel-1 on Ubuntu 24.04.
 * macOS (arm64): R-release.
-* Windows (Server 2022): R-devel, R-release.
+* Windows (GitHub's windows-latest): R-devel, R-release.
 * Address and undefined-behaviour sanitizers, valgrind, LTO, rchk and
   gctorture, with the package's own tests.
 

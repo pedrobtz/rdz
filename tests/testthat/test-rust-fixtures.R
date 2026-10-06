@@ -2,13 +2,6 @@
 # commit in manifest.tsv. Whatever implements rdz must read every one of them
 # to the value its spec constructs and report the same rdz_info().
 
-rust_fixture_manifest <- function() {
-  utils::read.delim(
-    file.path(rust_fixture_dir(), "manifest.tsv"),
-    colClasses = "character", quote = ""
-  )
-}
-
 test_that("the Rust reference corpus is complete and unmodified", {
   manifest <- rust_fixture_manifest()
   specs <- rust_fixture_specs()

@@ -2,22 +2,6 @@
 # Rust implementation's, byte for byte, whichever classifier kernel runs --
 # with blocks stored raw (level 0), as the Rust writer stored them.
 
-with_dictionary_policy <- function(policy, code) {
-  old <- Sys.getenv("RDZ_STRING_DICT", unset = NA)
-  Sys.setenv(RDZ_STRING_DICT = policy)
-  on.exit(if (is.na(old)) Sys.unsetenv("RDZ_STRING_DICT") else Sys.setenv(RDZ_STRING_DICT = old))
-  force(code)
-}
-
-native_specs <- function() {
-  manifest <- utils::read.delim(
-    file.path(rust_fixture_dir(), "manifest.tsv"),
-    colClasses = "character", quote = ""
-  )
-  Filter(function(spec) manifest$codec[manifest$name == spec$name] == "native_v1",
-         rust_fixture_specs())
-}
-
 test_that("every native fixture is reproduced byte for byte, with every kernel", {
   old <- options(rdz.compress = 0)
   on.exit(options(old), add = TRUE)
