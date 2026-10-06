@@ -98,8 +98,23 @@ static int rdz_replace(const char *from, const char *to)
 {
     wchar_t *a = rdz_widen(from), *b = rdz_widen(to);
     int r = -1;
-    if (a && b && MoveFileExW(a, b, MOVEFILE_REPLACE_EXISTING)) r = 0;
-    else errno = EACCES;
+    if (a && b && MoveFileExW(a, b, MOVEFILE_REPLACE_EXISTING)) {
+        r = 0;
+    } else {
+        switch (GetLastError()) {
+        case ERROR_FILE_NOT_FOUND:
+        case ERROR_PATH_NOT_FOUND: errno = ENOENT; break;
+        case ERROR_NOT_SAME_DEVICE: errno = EXDEV; break;
+        case ERROR_DISK_FULL:
+        case ERROR_HANDLE_DISK_FULL: errno = ENOSPC; break;
+        case ERROR_NOT_ENOUGH_MEMORY:
+        case ERROR_OUTOFMEMORY: errno = ENOMEM; break;
+        case ERROR_ACCESS_DENIED:
+        case ERROR_SHARING_VIOLATION:
+        case ERROR_LOCK_VIOLATION: errno = EACCES; break;
+        default: errno = EIO; break;
+        }
+    }
     free(a);
     free(b);
     return r;
@@ -150,6 +165,14 @@ static unsigned long rdz_pid(void)
 {
     return (unsigned long)_getpid();
 }
+
+/* A symbolic link's target, to write in its place: not on Windows, where
+   rdz replaces what the path names. */
+static char *rdz_link_target(const char *path)
+{
+    (void)path;
+    return NULL;
+}
 #else
 static FILE *rdz_fopen_read(const char *path)
 {
@@ -181,6 +204,16 @@ static int rdz_rename(const char *from, const char *to)
 static int rdz_replace(const char *from, const char *to)
 {
     return rename(from, to);
+}
+
+/* A symbolic link's target, so that writing through the link replaces the
+   file it names, not the link (malloc()ed; NULL for anything else, or a
+   link whose target does not resolve). */
+static char *rdz_link_target(const char *path)
+{
+    struct stat st;
+    if (lstat(path, &st) != 0 || !S_ISLNK(st.st_mode)) return NULL;
+    return realpath(path, NULL);
 }
 
 static int rdz_exists(const char *path, int *is_dir, unsigned *mode)
@@ -300,13 +333,20 @@ static char *rdz_sibling(const char *path, const char *suffix)
 
 int rdz_outfile_open(rdz_outfile *f, const char *path, rdz_error *e)
 {
-    int is_dir = 0, attempt, exists;
+    int is_dir = 0, attempt, exists, failed;
     unsigned mode = 0;
     size_t n;
+    char *target;
     if (!path) {
         f->to_memory = 1;
         if (zb_buf_alloc(&f->memory, 0, 0)) return rdz_memory(e, "the output");
         return 0;
+    }
+    target = rdz_link_target(path);
+    if (target) {
+        failed = rdz_outfile_open(f, target, e);
+        free(target);
+        return failed;
     }
     exists = rdz_exists(path, &is_dir, &mode);
     n = strlen(path);

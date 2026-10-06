@@ -94,7 +94,8 @@ add to the format without locking 0.1.0 readers out of every new file:
   version.
 - **Block sizes are the writer's policy.** A block holds from 1 value to its
   type's maximum (65,536 logicals, which the `u16` sparse positions require;
-  262,144 integers; 131,072 doubles); only an empty object has one block of 0.
+  262,144 integers; 131,072 doubles); only an empty object has one block of 0
+  (for a logical, an encoding-4 block of its 4-byte header; never encoding 1).
   Today's writer fills every block but an object's last.
 - **The writer is recorded** (file header bytes 20 to 23, below), so readers can
   work around a writer's bugs in files already written.

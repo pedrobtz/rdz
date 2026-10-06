@@ -47,12 +47,21 @@ static void *rdz_worker(void *arg)
     return NULL;
 }
 
-int rdz_pipeline_init(rdz_pipeline *p, int threads, rdz_job_fn job, size_t max, rdz_error *e)
+#define RDZ_PIPELINE_BYTES ((uint64_t)1 << 30) /* 1 GiB */
+
+int rdz_pipeline_init(rdz_pipeline *p, int threads, rdz_job_fn job, size_t max, size_t block,
+                      rdz_error *e)
 {
     uint32_t i;
     memset(p, 0, sizeof *p);
     p->nthreads = threads < 1 ? 1 : threads;
+    /* two blocks a thread, but at most RDZ_PIPELINE_BYTES of blocks in
+       flight (and at least two slots) */
     p->nslots = (uint32_t)(2 * p->nthreads);
+    if (block && p->nslots > 2 && (uint64_t)p->nslots * block > RDZ_PIPELINE_BYTES) {
+        uint64_t fit = RDZ_PIPELINE_BYTES / block;
+        p->nslots = fit < 2 ? 2u : (uint32_t)fit;
+    }
     p->job = job;
     p->slots = (rdz_slot *)calloc(p->nslots, sizeof *p->slots);
     p->ncodecs = p->nthreads + 1;

@@ -117,7 +117,8 @@ int rdz_graph_write(rdz_vec *v, const char *path, const rdz_node *nodes, uint32_
         return rdz_memory(e, "the object directory");
     }
     o = (rdz_object *)(void *)objects.data;
-    if (rdz_pipeline_init(&v->pipe, threads, rdz_job_vector, (size_t)RDZ_MAX_BLOCK_SIZE, e)) {
+    if (rdz_pipeline_init(&v->pipe, threads, rdz_job_vector, (size_t)RDZ_MAX_BLOCK_SIZE,
+                          (size_t)RDZ_BLOCK_SIZE, e)) {
         goto done;
     }
     v->have_pipe = 1;
@@ -333,7 +334,7 @@ int rdz_graph_read_window(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sink
         v->have_pipe = 0;
     }
     if (rdz_pipeline_init(&v->pipe, r->nblocks > 1 ? threads : 1, rdz_job_decode,
-                          (size_t)RDZ_MAX_BLOCK_SIZE, e)) {
+                          (size_t)RDZ_MAX_BLOCK_SIZE, (size_t)r->block_size, e)) {
         return 1;
     }
     v->have_pipe = 1;
