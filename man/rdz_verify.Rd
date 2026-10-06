@@ -7,7 +7,7 @@
 rdz_verify(path, content = FALSE)
 }
 \arguments{
-\item{path}{A single, non-missing path to verify.}
+\item{path}{A path, or a raw vector holding an rdz file (\code{\link[=rdz_serialize]{rdz_serialize()}}).}
 
 \item{content}{Whether to read the value and compare its \code{\link[=rdz_hash]{rdz_hash()}} with
 the stored one.}

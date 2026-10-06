@@ -46,3 +46,9 @@ test_that("damaged bytes are format errors", {
   expect_error(rdz_unserialize(raw()), class = "rdz_format_error")
   expect_error(rdz_unserialize("not raw"), "raw vector")
 })
+
+test_that("rdz_unserialize() takes rows as read_rdz() does", {
+  df <- data.frame(a = 1:6, b = letters[1:6])
+  got <- rdz_unserialize(rdz_serialize(df), select = "b", rows = 5:6)
+  expect_identical(got, data.frame(b = c("e", "f")))
+})
