@@ -4,7 +4,13 @@
 # of the rest.
 
 rdz_type_names <- c("NULL", "logical", "integer", "double", "character", "factor", "list",
-                    "data.frame")
+                    "data.frame", "reference")
+
+# What object id stands for: a shared object's target, else itself.
+rdz_resolve <- function(dir, id) {
+  o <- dir$objects[id + 1L, ]
+  if (o$type_name == "reference") o$first_child else id
+}
 
 # The directory of a native file: objects and attributes, as data frames.
 rdz_directory <- function(path) {
@@ -58,7 +64,7 @@ rdz_object_id <- function(path, dir, object) {
       }
       where <- paste0(where, "[[", at, "]]")
     }
-    id <- o$first_child + at - 1L
+    id <- rdz_resolve(dir, o$first_child + at - 1L)
   }
   id
 }
@@ -66,6 +72,7 @@ rdz_object_id <- function(path, dir, object) {
 # An object's attributes as R lists them, each with the object holding its
 # value or, for those the codecs imply, the value itself.
 rdz_attribute_entries <- function(dir, id) {
+  id <- rdz_resolve(dir, id)
   o <- dir$objects[id + 1L, ]
   a <- dir$attributes[dir$attributes$owner == id, , drop = FALSE]
   entries <- list()
@@ -162,11 +169,13 @@ rdz_schema_objects <- function(path, recursive) {
     v <- attrs$value_object[attrs$owner == id & attrs$kind == 1L]
     if (length(v)) v else NA_integer_
   }, integer(1L))
-  class_at <- vapply(keep - 1L, function(id) {
+  # a shared part is described by its target
+  src <- vapply(keep - 1L, function(id) rdz_resolve(dir, id), integer(1L)) + 1L
+  class_at <- vapply(src - 1L, function(id) {
     v <- attrs$value_object[attrs$owner == id & (attrs$kind == 4L | (attrs$kind == 8L & attrs$name == "class"))]
     if (length(v)) v else NA_integer_
   }, integer(1L))
-  dim_at <- vapply(keep - 1L, function(id) {
+  dim_at <- vapply(src - 1L, function(id) {
     v <- attrs$value_object[attrs$owner == id & attrs$kind == 8L & attrs$name == "dim"]
     if (length(v)) v else NA_integer_
   }, integer(1L))
@@ -187,7 +196,7 @@ rdz_schema_objects <- function(path, recursive) {
     path_of[i] <- paste0(path_of[p + 1L], step)
   }
   class_of <- vapply(seq_along(keep), function(k) {
-    i <- keep[k]
+    i <- src[k]
     if (!is.na(class_at[k])) return(paste(read[[as.character(class_at[k])]], collapse = "/"))
     if (!is.na(dim_at[k])) {
       return(if (length(read[[as.character(dim_at[k])]]) == 2L) "matrix/array" else "array")
@@ -199,27 +208,31 @@ rdz_schema_objects <- function(path, recursive) {
       objects$type_name[i]
     )
   }, character(1L))
-  attr_names <- vapply(keep - 1L, function(id) {
+  attr_names <- vapply(src - 1L, function(id) {
     paste(names(rdz_attribute_entries(dir, id)), collapse = ", ")
   }, character(1L))
   shape <- vapply(seq_along(keep), function(k) {
-    i <- keep[k]
+    i <- src[k]
     if (objects$type_name[i] == "data.frame") {
       return(paste(objects$length[i], "x", objects$child_count[i]))
     }
     if (!is.na(dim_at[k])) return(paste(read[[as.character(dim_at[k])]], collapse = " x "))
-    format(if (objects$type_name[i] == "list") objects$child_count[i] else objects$length[i])
+    format(if (objects$type_name[i] == "list") objects$child_count[i] else objects$length[i],
+           scientific = FALSE)
   }, character(1L))
+  shared_with <- ifelse(src == keep, NA_character_,
+                        ifelse(nzchar(path_of[src]) | src == 1L, path_of[src], paste0("#", src - 1L)))
   data.frame(
     path = path_of[keep],
     depth = depth[keep],
-    type = objects$type_name[keep],
+    type = objects$type_name[src],
     class = class_of,
-    length = ifelse(objects$type_name[keep] == "list", objects$child_count[keep], objects$length[keep]),
-    columns = ifelse(objects$type_name[keep] == "data.frame", objects$child_count[keep], NA_integer_),
+    length = ifelse(objects$type_name[src] == "list", objects$child_count[src], objects$length[src]),
+    columns = ifelse(objects$type_name[src] == "data.frame", objects$child_count[src], NA_integer_),
     shape = shape,
     attributes = attr_names,
     stored_bytes = total[keep],
+    shared_with = shared_with,
     id = keep - 1L,
     stringsAsFactors = FALSE
   )
@@ -237,6 +250,7 @@ print.rdz_schema <- function(x, ...) {
     label <- if (o$depth[i] == 0L) "<root>" else sub("^.*(\\$[^$\\[]*|\\[\\[[0-9]+\\]\\])$", "\\1", o$path[i])
     shape <- o$shape[i]
     attrs <- if (nzchar(o$attributes[i])) paste0("  [", o$attributes[i], "]") else ""
+    if (!is.na(o$shared_with[i])) attrs <- paste0(attrs, "  = ", o$shared_with[i])
     cat(strrep("  ", o$depth[i] + 1L), label, ": ", o$class[i], " ", shape,
         "  (", format(o$stored_bytes[i], big.mark = ","), " B)", attrs, "\n", sep = "")
   }

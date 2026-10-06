@@ -215,6 +215,17 @@ static int rdz_check_generic_schema(const rdz_reader *r, rdz_error *e)
    or an attribute's name or value; attributes contiguous per owner in owner
    order; nesting at most RDZ_MAX_DEPTH deep; every object's blocks in object
    order, covering every block. Containers and NULL have no blocks. */
+/* What a reference stands for, for the checks of its owner (which come
+   before the reference's own): its target when that is in range; the
+   reference's own visit rejects every other target. */
+static const rdz_object *rdz_resolved(const rdz_reader *r, const rdz_object *o)
+{
+    if (o->type_tag == RDZ_TYPE_REFERENCE && o->first_child < r->nobjects) {
+        return &r->objects[o->first_child];
+    }
+    return o;
+}
+
 static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
 {
     zb_buf scratch;
@@ -240,10 +251,35 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
         uint16_t t = o->type_tag;
         int container = t == RDZ_TYPE_LIST || t == RDZ_TYPE_DATA_FRAME;
         uint32_t k, last;
-        if (o->object_id != i || t > RDZ_TYPE_DATA_FRAME ||
+        if (o->object_id != i || t > RDZ_TYPE_REFERENCE ||
             (o->flags & ~(t == RDZ_TYPE_FACTOR ? RDZ_OBJECT_FLAG_ORDERED : 0u))) {
             rdz_invalid(e, "invalid native object descriptor");
             goto done;
+        }
+        /* a shared object: an earlier object, neither a reference, an
+           attribute's name nor an ancestor (R values have no cycles) */
+        if (t == RDZ_TYPE_REFERENCE) {
+            uint32_t target = o->first_child, up;
+            if (i == 0 || o->logical_len || o->child_count || o->attribute_count) {
+                rdz_invalid(e, "invalid shared object");
+                goto done;
+            }
+            if (target >= i) { /* GUARD: reference-target */
+                rdz_invalid(e, "a shared object refers to a later object");
+                goto done;
+            }
+            if (r->objects[target].type_tag == RDZ_TYPE_REFERENCE ||
+                r->objects[target].role == RDZ_ROLE_ATTRIBUTE_NAME) {
+                rdz_invalid(e, "invalid shared object");
+                goto done;
+            }
+            /* parents come before their objects, so this ends at the root */
+            for (up = o->parent_id; up != RDZ_ROOT_PARENT_ID && up < i; up = r->objects[up].parent_id) {
+                if (up == target) {
+                    rdz_invalid(e, "a shared object refers to its own ancestor");
+                    goto done;
+                }
+            }
         }
         if (i == 0) {
             if (o->parent_id != RDZ_ROOT_PARENT_ID || o->role != RDZ_ROLE_ROOT) {
@@ -265,7 +301,7 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
                 goto done;
             }
             column = o->role == RDZ_ROLE_CHILD && pa->type_tag == RDZ_TYPE_DATA_FRAME;
-            if (column && o->logical_len != pa->logical_len) { /* GUARD: frame-rows */
+            if (column && rdz_resolved(r, o)->logical_len != pa->logical_len) { /* GUARD: frame-rows */
                 rdz_invalid(e, "a data frame column's length differs from its rows");
                 goto done;
             }
@@ -283,17 +319,17 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
                 goto done;
             }
             for (k = o->first_child; k < o->first_child + o->child_count; k++) {
-                const rdz_object *c = &r->objects[k];
+                const rdz_object *c = &r->objects[k], *cr = rdz_resolved(r, c);
                 uint16_t want = t == RDZ_TYPE_FACTOR ? RDZ_ROLE_LEVELS : RDZ_ROLE_CHILD;
                 if (c->parent_id != i || c->role != want || referenced[k] ||
-                    (t == RDZ_TYPE_FACTOR && (c->type_tag != RDZ_TYPE_CHARACTER || c->child_count ||
-                                              c->attribute_count))) {
+                    (t == RDZ_TYPE_FACTOR && (cr->type_tag != RDZ_TYPE_CHARACTER || cr->child_count ||
+                                              cr->attribute_count))) {
                     rdz_invalid(e, "invalid native object children");
                     goto done;
                 }
                 referenced[k] = 1;
             }
-        } else if (o->first_child != 0 || o->child_count != 0) {
+        } else if (t != RDZ_TYPE_REFERENCE && (o->first_child != 0 || o->child_count != 0)) {
             rdz_invalid(e, "invalid logical root references");
             goto done;
         }
@@ -312,7 +348,7 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
         }
         for (k = 0; k < o->attribute_count; k++) {
             const rdz_attribute *a = &r->attributes[next_attribute + k];
-            const rdz_object *nm, *val;
+            const rdz_object *nm, *val, *vr;
             uint64_t want_len;
             if (a->name_object_id >= r->nobjects || a->value_object_id >= r->nobjects) { /* GUARD: attribute-range */
                 rdz_invalid(e, "an attribute refers to a missing object");
@@ -326,6 +362,7 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
             }
             nm = &r->objects[a->name_object_id];
             val = &r->objects[a->value_object_id];
+            vr = rdz_resolved(r, val); /* a shared value: its target's type and length */
             /* only a general attribute's value may be a container or carry
                attributes of its own */
             if (nm->parent_id != i || nm->role != RDZ_ROLE_ATTRIBUTE_NAME ||
@@ -333,36 +370,36 @@ static int rdz_check_native_logical_schema(const rdz_reader *r, rdz_error *e)
                 val->parent_id != i || val->role != RDZ_ROLE_ATTRIBUTE_VALUE ||
                 nm->child_count || nm->attribute_count ||
                 (a->flags != RDZ_ATTRIBUTE_FLAG_OTHER &&
-                 (val->child_count || val->attribute_count))) {
+                 (vr->child_count || vr->attribute_count))) {
                 rdz_invalid(e, "invalid native object descriptor");
                 goto done;
             }
             switch (a->flags) {
             case RDZ_ATTRIBUTE_FLAG_NAMES:
                 want_len = container ? o->child_count : o->logical_len;
-                if (val->type_tag != RDZ_TYPE_CHARACTER || val->logical_len != want_len ||
+                if (vr->type_tag != RDZ_TYPE_CHARACTER || vr->logical_len != want_len ||
                     t == RDZ_TYPE_FACTOR || t == RDZ_TYPE_NULL) {
                     rdz_invalid(e, "names object length mismatch");
                     goto done;
                 }
                 break;
             case RDZ_ATTRIBUTE_FLAG_ROW_NAMES:
-                if (t != RDZ_TYPE_DATA_FRAME || val->logical_len != o->logical_len ||
-                    (val->type_tag != RDZ_TYPE_CHARACTER && val->type_tag != RDZ_TYPE_INTEGER)) {
+                if (t != RDZ_TYPE_DATA_FRAME || vr->logical_len != o->logical_len ||
+                    (vr->type_tag != RDZ_TYPE_CHARACTER && vr->type_tag != RDZ_TYPE_INTEGER)) {
                     rdz_invalid(e, "invalid row names attribute");
                     goto done;
                 }
                 break;
             case RDZ_ATTRIBUTE_FLAG_CLASS:
-                if (t != RDZ_TYPE_DATA_FRAME || val->type_tag != RDZ_TYPE_CHARACTER ||
-                    val->logical_len == 0) {
+                if (t != RDZ_TYPE_DATA_FRAME || vr->type_tag != RDZ_TYPE_CHARACTER ||
+                    vr->logical_len == 0) {
                     rdz_invalid(e, "invalid class attribute");
                     goto done;
                 }
                 break;
             case RDZ_ATTRIBUTE_FLAG_OTHER:
                 /* R has no NULL attribute value; NULL itself has none */
-                if (t == RDZ_TYPE_NULL || val->type_tag == RDZ_TYPE_NULL) {
+                if (t == RDZ_TYPE_NULL || vr->type_tag == RDZ_TYPE_NULL) {
                     rdz_invalid(e, "invalid attribute");
                     goto done;
                 }

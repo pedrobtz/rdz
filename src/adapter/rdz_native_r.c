@@ -185,6 +185,8 @@ typedef struct {
     zb_buf attrs;   /* rdz_attribute */
     zb_buf sources; /* rdz_str_source per node, filled after planning */
     zb_buf pairs;   /* scratch: the attributes of the node being visited */
+    zb_buf shared;  /* rdz_shared_slot: large vectors met, by address (open addressing) */
+    size_t shared_len;
 } rdz_plan;
 
 static void rdz_plan_free(rdz_plan *p)
@@ -197,6 +199,7 @@ static void rdz_plan_free(rdz_plan *p)
     zb_buf_release(&p->attrs);
     zb_buf_release(&p->sources);
     zb_buf_release(&p->pairs);
+    zb_buf_release(&p->shared);
 }
 
 static void rdz_plan_finalize(SEXP ptr)
@@ -225,12 +228,73 @@ static SEXP rdz_plan_object(rdz_plan *p, uint32_t i)
 }
 
 /* Appends a node; NULL with *why set when the plan cannot grow. */
+/* ---- shared objects (Stage O): a large vector met twice is written once ---- */
+
+typedef struct {
+    SEXP x;
+    uint32_t id;
+} rdz_shared_slot;
+
+/* Shared when its data is at least 4 KiB: smaller objects are not worth a
+   reference, and R's byte compiler shares small literal constants, which
+   would make a value's representation (and hash) depend on compilation. */
+static int rdz_shareable(SEXP x)
+{
+    switch (TYPEOF(x)) {
+    case LGLSXP:
+    case INTSXP: return XLENGTH(x) >= 1024;
+    case REALSXP:
+    case STRSXP: return XLENGTH(x) >= 512;
+    default: return 0;
+    }
+}
+
+/* The node id x was planned as, or UINT32_MAX; with `insert`, records it
+   as `id` when absent. 0 on success, 1 when the table cannot grow. */
+static int rdz_shared_find(rdz_plan *p, SEXP x, uint32_t id, int insert, uint32_t *found)
+{
+    size_t cap = p->shared.len / sizeof(rdz_shared_slot), at;
+    rdz_shared_slot *t;
+    *found = UINT32_MAX;
+    if (insert && 2 * (p->shared_len + 1) > cap) { /* grow to keep it under half full */
+        size_t ncap = cap ? 2 * cap : 64, k;
+        zb_buf bigger;
+        rdz_shared_slot *old = (rdz_shared_slot *)(void *)p->shared.data, *nt;
+        if (zb_buf_alloc(&bigger, 0, 0) || zb_put_zeros(&bigger, ncap * sizeof(rdz_shared_slot))) {
+            zb_buf_release(&bigger);
+            return 1;
+        }
+        nt = (rdz_shared_slot *)(void *)bigger.data;
+        for (k = 0; k < cap; k++) {
+            if (!old[k].x) continue;
+            at = ((uintptr_t)old[k].x >> 4) & (ncap - 1);
+            while (nt[at].x) at = (at + 1) & (ncap - 1);
+            nt[at] = old[k];
+        }
+        zb_buf_release(&p->shared);
+        p->shared = bigger;
+        cap = ncap;
+    }
+    if (!cap) return 0;
+    t = (rdz_shared_slot *)(void *)p->shared.data;
+    at = ((uintptr_t)x >> 4) & (cap - 1);
+    while (t[at].x && t[at].x != x) at = (at + 1) & (cap - 1);
+    if (t[at].x) {
+        *found = t[at].id;
+    } else if (insert) {
+        t[at].x = x;
+        t[at].id = id;
+        p->shared_len++;
+    }
+    return 0;
+}
+
 static rdz_node *rdz_plan_add(rdz_plan *p, SEXP x, const char *name, uint16_t role,
                               uint32_t parent, const char **why)
 {
     rdz_node *n;
     SEXP *slot;
-    uint32_t d;
+    uint32_t d, target = UINT32_MAX, id = rdz_plan_count(p);
     if (rdz_plan_count(p) >= RDZ_MAX_OBJECTS) {
         *why = "an object of more than a million native parts";
         return NULL;
@@ -251,6 +315,16 @@ static rdz_node *rdz_plan_add(rdz_plan *p, SEXP x, const char *name, uint16_t ro
     memset(n, 0, sizeof *n);
     n->role = role;
     n->parent = parent;
+    if (rdz_shareable(x)) {
+        if (rdz_shared_find(p, x, id, 1, &target)) {
+            *why = "an object too large to plan";
+            return NULL;
+        }
+        if (target != UINT32_MAX) { /* met before: a reference to it */
+            n->type = RDZ_TYPE_REFERENCE;
+            n->first_child = target;
+        }
+    }
     return n;
 }
 
@@ -346,6 +420,7 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
     const char *why = NULL;
 
     if (n->role == RDZ_ROLE_ATTRIBUTE_NAME) return NULL; /* filled when added */
+    if (n->type == RDZ_TYPE_REFERENCE) return NULL;       /* filled when added */
     if (type == NILSXP) {
         if (i == 0) return "NULL";
         n->type = RDZ_TYPE_NULL;
@@ -681,6 +756,7 @@ static SEXP rdz_plan_start(SEXP x, int strict, rdz_plan **out, const char **why)
     zb_buf_alloc(&p->attrs, 0, 0);
     zb_buf_alloc(&p->sources, 0, 0);
     zb_buf_alloc(&p->pairs, 0, 0);
+    zb_buf_alloc(&p->shared, 0, 0);
     R_SetExternalPtrAddr(ptr, p);
     *out = p;
     *why = rdz_plan_build(p, x);
@@ -856,14 +932,27 @@ typedef struct {
 static void rdz_mark_below(const rdz_reader *r, uint8_t *want, uint32_t from)
 {
     uint32_t i, c, a;
-    for (i = from; i < r->nobjects; i++) {
-        const rdz_object *o = &r->objects[i];
-        if (!want[i]) continue;
-        for (c = 0; c < o->child_count; c++) want[o->first_child + c] = 1;
-        for (a = 0; a < o->attribute_count; a++) {
-            const rdz_attribute *at = &r->attributes[o->first_attribute + a];
-            want[at->name_object_id] = 1;
-            want[at->value_object_id] = 1;
+    int again = 1;
+    /* a wanted reference wants its (earlier) target and what is below that:
+       repeat until nothing new is marked */
+    while (again) {
+        again = 0;
+        for (i = from; i < r->nobjects; i++) {
+            const rdz_object *o = &r->objects[i];
+            if (!want[i]) continue;
+            if (o->type_tag == RDZ_TYPE_REFERENCE) {
+                if (!want[o->first_child]) {
+                    want[o->first_child] = 1;
+                    again = 1;
+                }
+                continue;
+            }
+            for (c = 0; c < o->child_count; c++) want[o->first_child + c] = 1;
+            for (a = 0; a < o->attribute_count; a++) {
+                const rdz_attribute *at = &r->attributes[o->first_attribute + a];
+                want[at->name_object_id] = 1;
+                want[at->value_object_id] = 1;
+            }
         }
     }
 }
@@ -999,6 +1088,10 @@ static SEXP rdz_graph_body(void *data)
             SET_VECTOR_ELT(g->holder, 0, Rf_allocVector(VECSXP, XLENGTH(g->select)));
             continue;
         }
+        if (o->type_tag == RDZ_TYPE_REFERENCE) { /* validation: an earlier, non-reference object */
+            SET_VECTOR_ELT(g->holder, i, VECTOR_ELT(g->holder, o->first_child));
+            continue;
+        }
         switch (o->type_tag) {
         case RDZ_TYPE_LOGICAL: x = Rf_allocVector(LGLSXP, (R_xlen_t)o->logical_len); break;
         case RDZ_TYPE_INTEGER:
@@ -1044,6 +1137,7 @@ static SEXP rdz_graph_body(void *data)
         SEXP x = VECTOR_ELT(g->holder, i);
         int have_rn = 0, have_class = 0, root_selection = i == 0 && selecting;
         if (want && !want[i]) continue;
+        if (o->type_tag == RDZ_TYPE_REFERENCE) continue; /* its target is assembled in its turn */
         if (o->type_tag == RDZ_TYPE_CHARACTER && names[i].filled != names[i].length) {
             rdz_invalid(&g->e, "character object length mismatch");
             return R_NilValue;
