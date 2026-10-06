@@ -132,6 +132,18 @@ static uint64_t rdz_column_rows(SEXP col)
     return UINT64_MAX;
 }
 
+/* Whether every code is NA or from 1 to nlev: one branch-free pass, which
+   compilers vectorize (code - 1, unsigned, is below nlev exactly then). */
+static int rdz_factor_codes_ok(const int *codes, R_xlen_t n, R_xlen_t nlev)
+{
+    uint32_t bad = 0, top = nlev > (R_xlen_t)INT_MAX ? (uint32_t)INT_MAX : (uint32_t)nlev;
+    R_xlen_t k;
+    for (k = 0; k < n; k++) {
+        bad |= (uint32_t)(codes[k] != NA_INTEGER) & (uint32_t)((uint32_t)codes[k] - 1u >= top);
+    }
+    return !bad;
+}
+
 /* ---- strings ---------------------------------------------------------------------- */
 
 /* Rf_charIsASCII() entered R's API after the 4.1 floor: scan instead. */
@@ -487,7 +499,7 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
     /* a factor: levels and class are the codec's */
     if (type == INTSXP && rdz_has_class(a.cls, "factor")) {
         SEXP levels = a.levels;
-        R_xlen_t k, nlev;
+        R_xlen_t nlev;
         const int *codes;
         int ordered = rdz_is_class(a.cls, "ordered", "factor");
         if (!ordered && !rdz_is_class(a.cls, "factor", NULL)) {
@@ -499,10 +511,8 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
         }
         nlev = XLENGTH(levels);
         codes = INTEGER_RO(x);
-        for (k = 0; k < XLENGTH(x); k++) {
-            if (codes[k] != NA_INTEGER && (codes[k] < 1 || codes[k] > nlev)) {
-                return "a factor with codes outside its levels";
-            }
+        if (!rdz_factor_codes_ok(codes, XLENGTH(x), nlev)) {
+            return "a factor with codes outside its levels";
         }
         n->type = RDZ_TYPE_FACTOR;
         n->flags = ordered ? RDZ_OBJECT_FLAG_ORDERED : 0;
@@ -1348,13 +1358,9 @@ static SEXP rdz_graph_body(void *data)
         }
         if (o->type_tag == RDZ_TYPE_FACTOR) {
             SEXP levels = VECTOR_ELT(g->holder, o->first_child), cls;
-            R_xlen_t j, nlev = XLENGTH(levels);
-            const int *c = INTEGER_RO(x);
-            for (j = 0; j < XLENGTH(x); j++) {
-                if (c[j] != NA_INTEGER && (c[j] < 1 || c[j] > nlev)) {
-                    rdz_invalid(&g->e, "factor code outside its levels");
-                    return R_NilValue;
-                }
+            if (!rdz_factor_codes_ok(INTEGER_RO(x), XLENGTH(x), XLENGTH(levels))) {
+                rdz_invalid(&g->e, "factor code outside its levels");
+                return R_NilValue;
             }
             if (o->flags & RDZ_OBJECT_FLAG_ORDERED) {
                 cls = PROTECT(Rf_allocVector(STRSXP, 2));
