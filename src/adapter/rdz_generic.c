@@ -240,7 +240,10 @@ SEXP rdz_c_hash_generic(SEXP x)
     return rdz_hash_text(digest);
 }
 
-SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, int fail_after)
+/* metadata: R_NilValue, or a metadata section (a raw vector; R builds it,
+   the writer checks it) */
+SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP metadata,
+                       int fail_after)
 {
     const char *p = rdz_path(path);
     rdz_settings set = rdz_settings_of(settings);
@@ -270,6 +273,10 @@ SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, int fail
         /* the content hash first: the directory the write ends with holds it */
         rdz_generic_hash(x, g->w.content_hash);
         g->w.hash_scheme = RDZ_CONTENT_HASH_V1;
+        if (TYPEOF(metadata) == RAWSXP) { /* held by the caller for the whole call */
+            g->w.metadata = RAW(metadata);
+            g->w.metadata_len = (uint32_t)XLENGTH(metadata);
+        }
         g->pipe.level = set.level;
         g->cur = rdz_gen_next(g);
         R_UnwindProtect(rdz_gen_serialize, g, rdz_gen_out_cleanup, ptr, cont);

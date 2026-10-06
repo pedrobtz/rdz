@@ -717,7 +717,8 @@ SEXP rdz_c_hash_native(SEXP x, SEXP strict)
     return rdz_hash_text(digest);
 }
 
-SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy, SEXP settings)
+SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy, SEXP settings,
+                            SEXP metadata)
 {
     const char *p = rdz_path(path);
     SEXP ptr, cont;
@@ -730,6 +731,10 @@ SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy, SEXP se
     cont = PROTECT(R_MakeUnwindCont());
     /* the writer computes the content hash as it goes */
     call.p->v.hash_content = 1;
+    if (TYPEOF(metadata) == RAWSXP) { /* held by the caller for the whole call */
+        call.p->v.metadata = RAW(metadata);
+        call.p->v.metadata_len = (uint32_t)XLENGTH(metadata);
+    }
     if (why) {
         rdz_plan_finalize(ptr);
         UNPROTECT(2);

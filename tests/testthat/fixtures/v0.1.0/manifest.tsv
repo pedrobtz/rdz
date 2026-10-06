@@ -39,6 +39,8 @@ frame_classed_speed	speed	native_v1	1672	32c1ee46e1cbf55a7a507bfa57ebef476351396
 frame_classed_balanced	balanced	native_v1	1672	32c1ee46e1cbf55a7a507bfa57ebef4763513964c13e3e4341a5543513b5311e	2 12	0	rdz 0.0.0 (development)	994a0be2093745a884d52082cacff857
 attributes_speed	speed	native_v1	5341	e41fa91e934058cf22053de417d452f9f6b479436c4f9d195bc96dbe57e82da4	2 10 12 20	0	rdz 0.0.0 (development)	dd8fdef98e6830a883403f157de6df70
 attributes_balanced	balanced	native_v1	5341	4d34ab07bb423b5c02b1b0205c01545955c5a1d3598572263e7aeaf385d4679f	2 11 12 21	0	rdz 0.0.0 (development)	dd8fdef98e6830a883403f157de6df70
+metadata_speed	speed	native_v1	344	df9c458c70910ed4a4dda9f9f65e07293beac1090829f729e353e0aebec6c540	12	0	rdz 0.0.0 (development)	f18b0e82da60f96a6ae096834a0c2157
+metadata_balanced	balanced	native_v1	344	df9c458c70910ed4a4dda9f9f65e07293beac1090829f729e353e0aebec6c540	12	0	rdz 0.0.0 (development)	f18b0e82da60f96a6ae096834a0c2157
 gen_rare_speed	speed	r_serial_v3	860	314f69cdd26cd3cce614ce69f5d1a52f4f654ca3984555a55f3b434a50bc656e	0	0	rdz 0.0.0 (development)	bc2685483568f554268e7d64b6d496d9
 gen_rare_balanced	balanced	r_serial_v3	784	b86443c2ea7c3c9200fcaa783511754560c49700865e043e5e33028e3bc81bcf	0	1	rdz 0.0.0 (development)	bc2685483568f554268e7d64b6d496d9
 gen_large_speed	speed	r_serial_v3	1100828	833420328bcc91c3de372d4a0c7a7885735a857e03077122aa2e12d68c18a1fd	0	0	rdz 0.0.0 (development)	fd53939c436d4a3d0ea91bfd9d43477a

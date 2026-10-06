@@ -15,6 +15,8 @@
 #include <R.h>
 #include <Rinternals.h>
 
+#include <zubin/rw.h>
+
 #include "core/rdz_logical.h"
 #include "rdz_r.h"
 
@@ -115,8 +117,8 @@ SEXP rdz_c_info(SEXP path)
     if (r->codec_id == RDZ_CODEC_R_SERIAL_V3) codec = "r_serial_v3";
     if (r->codec_id == RDZ_CODEC_NATIVE_V1) codec = "native_v1";
 
-    out = PROTECT(Rf_allocVector(VECSXP, 16));
-    names = PROTECT(Rf_allocVector(STRSXP, 16));
+    out = PROTECT(Rf_allocVector(VECSXP, 17));
+    names = PROTECT(Rf_allocVector(STRSXP, 17));
     rdz_set(out, names, 0, "container_version", Rf_ScalarInteger(r->container_version));
     rdz_set(out, names, 1, "codec", Rf_mkString(codec));
     rdz_set(out, names, 2, "codec_id", Rf_ScalarInteger(r->codec_id));
@@ -179,6 +181,24 @@ SEXP rdz_c_info(SEXP path)
     } else {
         rdz_set(out, names, 15, "content_hash", Rf_ScalarString(NA_STRING));
     }
+    {
+        /* the metadata as a named UTF-8 character vector (checked on opening) */
+        SEXP md = PROTECT(Rf_allocVector(STRSXP, r->metadata_count));
+        SEXP mn = PROTECT(Rf_allocVector(STRSXP, r->metadata_count));
+        size_t at = 4;
+        uint32_t k;
+        for (k = 0; k < r->metadata_count; k++) {
+            uint32_t n = zb_rd_u32le(r->metadata + at);
+            SET_STRING_ELT(mn, k, Rf_mkCharLenCE((const char *)r->metadata + at + 4, (int)n, CE_UTF8));
+            at += 4 + n;
+            n = zb_rd_u32le(r->metadata + at);
+            SET_STRING_ELT(md, k, Rf_mkCharLenCE((const char *)r->metadata + at + 4, (int)n, CE_UTF8));
+            at += 4 + n;
+        }
+        Rf_setAttrib(md, R_NamesSymbol, mn);
+        rdz_set(out, names, 16, "metadata", md);
+        UNPROTECT(2);
+    }
     Rf_setAttrib(out, R_NamesSymbol, names);
 
     rdz_reader_finalize(ptr);
@@ -186,12 +206,13 @@ SEXP rdz_c_info(SEXP path)
     return out;
 }
 
-SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, int fail_after);
+SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP metadata,
+                       int fail_after);
 SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, int *native);
 
-SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path, SEXP settings)
+SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP metadata)
 {
-    return rdz_generic_write(x, synopsis, path, settings, -1);
+    return rdz_generic_write(x, synopsis, path, settings, metadata, -1);
 }
 
 /* list(value, native): whether the file was native, so R knows what is
@@ -231,7 +252,7 @@ SEXP rdz_c_zstd_version(void)
 SEXP rdz_test_write_generic_unwind(SEXP x, SEXP path, SEXP blocks, SEXP settings)
 {
     SEXP synopsis = PROTECT(Rf_allocVector(RAWSXP, 0));
-    SEXP out = rdz_generic_write(x, synopsis, path, settings, Rf_asInteger(blocks));
+    SEXP out = rdz_generic_write(x, synopsis, path, settings, R_NilValue, Rf_asInteger(blocks));
     UNPROTECT(1);
     return out;
 }

@@ -126,6 +126,8 @@ int rdz_graph_write(rdz_vec *v, const char *path, const rdz_node *nodes, uint32_
                         e)) {
         goto done;
     }
+    v->w.metadata = v->metadata;
+    v->w.metadata_len = v->metadata_len;
     if (v->hash_content) {
         if (!v->content) {
             /* malloc() aligns to 16 at most; the hasher needs 64 */

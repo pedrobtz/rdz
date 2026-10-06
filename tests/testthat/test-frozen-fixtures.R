@@ -36,6 +36,9 @@ test_that("every frozen file reads to its spec's value", {
     expect_identical(info$codec, spec$codec, label = spec$name)
     expect_identical(info$writer, manifest$writer[manifest$name == spec$name], label = spec$name)
     expect_identical(read_rdz(path), spec$value(), label = spec$name)
+    if (!is.null(spec$metadata)) {
+      expect_identical(rdz_info(path)$metadata, enc2utf8(spec$metadata), label = spec$name)
+    }
   }
 })
 

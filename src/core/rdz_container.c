@@ -1,6 +1,7 @@
 #include <string.h>
 
 #include <zubin/rw.h>
+#include <zufast/utf8.h>
 
 #include "rdz_container.h"
 #include "rdz_numeric.h"
@@ -422,6 +423,50 @@ done:
     return failed;
 }
 
+/* ---- user metadata ----------------------------------------------------------------- */
+
+/* the next u32-length-prefixed UTF-8 string at *at, within len */
+static int metadata_string(const uint8_t *data, size_t len, size_t *at, const uint8_t **s,
+                           size_t *n, rdz_error *e)
+{
+    if (len - *at < 4) return rdz_invalid(e, "truncated metadata");
+    *n = zb_rd_u32le(data + *at);
+    *at += 4;
+    if (*n > len - *at) return rdz_invalid(e, "truncated metadata"); /* GUARD: metadata-length */
+    *s = data + *at;
+    if (!zuf_utf8_valid((const char *)*s, *n)) return rdz_invalid(e, "metadata is not UTF-8");
+    *at += *n;
+    return 0;
+}
+
+int rdz_metadata_check(const uint8_t *data, size_t len, uint32_t *count, rdz_error *e)
+{
+    size_t at = 4, i, j;
+    uint32_t n;
+    const uint8_t *keys[RDZ_MAX_METADATA_ENTRIES];
+    size_t key_len[RDZ_MAX_METADATA_ENTRIES];
+    if (len < 4) return rdz_invalid(e, "truncated metadata");
+    n = zb_rd_u32le(data);
+    if (n > RDZ_MAX_METADATA_ENTRIES) return rdz_limit(e, "metadata entries");
+    for (i = 0; i < n; i++) {
+        const uint8_t *v;
+        size_t vn;
+        if (metadata_string(data, len, &at, &keys[i], &key_len[i], e) ||
+            metadata_string(data, len, &at, &v, &vn, e)) {
+            return 1;
+        }
+        if (key_len[i] == 0) return rdz_invalid(e, "an empty metadata key");
+        for (j = 0; j < i; j++) {
+            if (key_len[j] == key_len[i] && memcmp(keys[j], keys[i], key_len[i]) == 0) {
+                return rdz_invalid(e, "a repeated metadata key");
+            }
+        }
+    }
+    if (at != len) return rdz_invalid(e, "metadata has trailing bytes");
+    *count = n;
+    return 0;
+}
+
 /* ---- reader ------------------------------------------------------------------------ */
 
 void rdz_reader_init(rdz_reader *r)
@@ -470,7 +515,7 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
     size_t len = r->directory.len, offset, tables_len;
     uint64_t expected;
     uint32_t nobj, natt, nblk, i, header_len, object_width, attribute_width, block_width;
-    uint64_t synopsis_len, next_block = RDZ_HEADER_LEN;
+    uint64_t synopsis_len, metadata_len = 0, next_block = RDZ_HEADER_LEN;
     rdz_block *blocks;
     rdz_object *objects;
     rdz_attribute *attributes;
@@ -497,10 +542,13 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
     /* the content hash, when the header is long enough and its scheme known
        (len >= header_len is checked below with the rest of the lengths) */
     r->hash_scheme = 0;
-    if (header_len >= RDZ_DIRECTORY_HEADER_HASHED_LEN && len >= header_len &&
-        zb_rd_u16le(d + RDZ_DH_CONTENT_HASH_SCHEME) == RDZ_CONTENT_HASH_V1) {
-        r->hash_scheme = RDZ_CONTENT_HASH_V1;
-        memcpy(r->content_hash, d + RDZ_DH_CONTENT_HASH, 16);
+    if (header_len >= RDZ_DIRECTORY_HEADER_HASHED_LEN && len >= header_len) {
+        if (zb_rd_u16le(d + RDZ_DH_CONTENT_HASH_SCHEME) == RDZ_CONTENT_HASH_V1) {
+            r->hash_scheme = RDZ_CONTENT_HASH_V1;
+            memcpy(r->content_hash, d + RDZ_DH_CONTENT_HASH, 16);
+        }
+        metadata_len = zb_rd_u32le(d + RDZ_DH_METADATA_LEN);
+        if (metadata_len > RDZ_MAX_METADATA_LEN) return rdz_limit(e, "metadata");
     }
     nobj = zb_rd_u32le(d + RDZ_DH_OBJECTS);
     natt = zb_rd_u32le(d + RDZ_DH_ATTRIBUTES);
@@ -519,7 +567,8 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
     /* The counts and widths are bounded above, so none of these sizes can
        wrap 64 bits. */
     expected = (uint64_t)header_len + (uint64_t)nobj * object_width +
-               (uint64_t)natt * attribute_width + (uint64_t)nblk * block_width + synopsis_len;
+               (uint64_t)natt * attribute_width + (uint64_t)nblk * block_width + synopsis_len +
+               metadata_len;
     if (expected != (uint64_t)len) return rdz_invalid(e, "directory length mismatch"); /* GUARD: directory-length */
 
     tables_len = (size_t)nblk * sizeof(rdz_block) + (size_t)nobj * sizeof(rdz_object) +
@@ -593,6 +642,13 @@ static int rdz_parse_directory(rdz_reader *r, rdz_error *e)
     r->blocks = blocks;
     r->synopsis = d + offset;
     r->synopsis_len = (uint32_t)synopsis_len;
+    r->metadata = d + offset + (size_t)synopsis_len;
+    r->metadata_len = (uint32_t)metadata_len;
+    r->metadata_count = 0;
+    if (metadata_len &&
+        rdz_metadata_check(r->metadata, (size_t)metadata_len, &r->metadata_count, e)) {
+        return 1;
+    }
     switch (r->codec_id) {
     case RDZ_CODEC_R_SERIAL_V3:
         return rdz_check_generic_schema(r, e);
@@ -778,6 +834,8 @@ void rdz_writer_init(rdz_writer *w)
     w->block_size = RDZ_BLOCK_SIZE;
     w->hash_scheme = 0;
     memset(w->content_hash, 0, sizeof w->content_hash);
+    w->metadata = NULL;
+    w->metadata_len = 0;
     w->open = 0;
 }
 
@@ -873,9 +931,16 @@ int rdz_writer_finish(rdz_writer *w, const rdz_object *objects, uint32_t nobject
     if (synopsis_len > RDZ_MAX_SYNOPSIS_LEN) return rdz_limit(e, "generic synopsis");
     if (nobjects > RDZ_MAX_OBJECTS) return rdz_limit(e, "object count");
     if (nattributes > RDZ_MAX_ATTRIBUTES) return rdz_limit(e, "attribute count");
-    header_len = w->hash_scheme ? RDZ_DIRECTORY_HEADER_HASHED_LEN : RDZ_DIRECTORY_HEADER_LEN;
+    if (w->metadata_len) {
+        uint32_t count;
+        if (w->metadata_len > RDZ_MAX_METADATA_LEN) return rdz_limit(e, "metadata");
+        if (rdz_metadata_check(w->metadata, w->metadata_len, &count, e)) return 1;
+    }
+    header_len = w->hash_scheme || w->metadata_len ? RDZ_DIRECTORY_HEADER_HASHED_LEN
+                                                    : RDZ_DIRECTORY_HEADER_LEN;
     len = header_len + (size_t)nobjects * RDZ_OBJECT_ENTRY_LEN +
-          (size_t)nattributes * RDZ_ATTRIBUTE_ENTRY_LEN + w->entries.len + synopsis_len;
+          (size_t)nattributes * RDZ_ATTRIBUTE_ENTRY_LEN + w->entries.len + synopsis_len +
+          w->metadata_len;
     if (zb_buf_alloc(&dir, len, 0) || !(p = zb_put_raw(&dir, len))) {
         zb_buf_release(&dir);
         return rdz_memory(e, "the directory");
@@ -897,6 +962,7 @@ int rdz_writer_finish(rdz_writer *w, const rdz_object *objects, uint32_t nobject
         memcpy(p + RDZ_DH_CONTENT_HASH, w->content_hash, 16);
         zb_wr_u16le(p + RDZ_DH_CONTENT_HASH_SCHEME, w->hash_scheme);
     }
+    if (w->metadata_len) zb_wr_u32le(p + RDZ_DH_METADATA_LEN, w->metadata_len);
     p += header_len;
     for (i = 0; i < nobjects; i++, p += RDZ_OBJECT_ENTRY_LEN) rdz_object_encode(p, &objects[i]);
     for (i = 0; i < nattributes; i++, p += RDZ_ATTRIBUTE_ENTRY_LEN) {
@@ -905,6 +971,7 @@ int rdz_writer_finish(rdz_writer *w, const rdz_object *objects, uint32_t nobject
     if (w->entries.len) memcpy(p, w->entries.data, w->entries.len);
     p += w->entries.len;
     if (synopsis_len) memcpy(p, synopsis, synopsis_len);
+    if (w->metadata_len) memcpy(p + synopsis_len, w->metadata, w->metadata_len);
 
     memset(t, 0, sizeof t);
     memcpy(t + RDZ_TR_MAGIC, RDZ_TRAILER_MAGIC, 4);

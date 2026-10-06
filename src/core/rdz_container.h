@@ -31,6 +31,8 @@ typedef struct {
     uint32_t block_size;
     uint8_t writer[4];       /* the header's writer field, as stored */
     uint16_t hash_scheme;    /* the content hash's scheme; 0: none (or unknown) */
+    const uint8_t *metadata; /* the user metadata section, into the directory */
+    uint32_t metadata_len, metadata_count;
     uint8_t content_hash[16]; /* XXH3-128, low then high u64, little-endian */
     uint32_t nobjects, nattributes, nblocks;
     uint64_t payload_bytes, file_bytes, directory_offset;
@@ -74,8 +76,14 @@ typedef struct {
     uint32_t block_size; /* the largest decoded block, recorded in the header */
     uint16_t hash_scheme;      /* set before rdz_writer_finish(): 0, no hash */
     uint8_t content_hash[16];
+    const uint8_t *metadata;   /* set before rdz_writer_finish(): a metadata section */
+    uint32_t metadata_len;
     int open;
 } rdz_writer;
+
+/* A metadata section's structure (count, lengths, UTF-8, distinct keys);
+   *count its entries. */
+int rdz_metadata_check(const uint8_t *data, size_t len, uint32_t *count, rdz_error *e);
 
 void rdz_writer_init(rdz_writer *w);
 /* Creates the temporary file and writes the file header, which records

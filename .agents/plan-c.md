@@ -346,6 +346,17 @@ tree read with that part's data corrupt.
 `rdz_verify()`. **Exit:** the same hash from object and file on every platform, preset and
 thread count.
 
+### Stages N–R — From other serialisers · M
+
+**Status:** N done 2026-10-06; O to R in progress (current-state.md).
+
+**Do:**
+- **N:** user metadata (Arrow schema metadata, HDF5 attributes).
+- **O:** a shared object written once (pickle's memo, Kryo's references).
+- **P:** raw vectors (pickle.dumps, Arrow buffers, `qs_serialize`).
+- **Q:** `rdz_save()` and `rdz_load()` (npz, JLD2, `save()`).
+- **R:** row ranges (Arrow's batch readers, fst's `from`/`to`).
+
 ## 7. Gates
 
 - **Differential against the oracle.** Every Rust fixture is read to an `identical()`

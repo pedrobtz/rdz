@@ -1,5 +1,22 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-06: plan-c Stage N
+
+User metadata. `write_rdz(metadata = )` takes named strings: up to 1,024
+entries and 64 KiB, stored as UTF-8. They go in a directory section whose
+length sits in the hash extension's bytes 60 to 63. The core reader
+validates the section: lengths, UTF-8, and distinct, non-empty keys.
+
+- `rdz_info()$metadata` reads it back without the value; a test reads it with
+  the data block corrupt.
+- It is not part of the content hash, but `skip_unchanged` rewrites a file
+  whose metadata differs.
+- A 24th mutation-checked guard covers its length check.
+- The frozen corpus gains `metadata_*`; its existing files are untouched.
+
+It changes the directory's length equation, which was acceptable only because
+0.1.0 is not released.
+
 ## Checkpoint 2026-10-06: plan-c Stage M
 
 Content hashes for caches and build tools (container-format.md, "Content

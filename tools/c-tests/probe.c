@@ -33,6 +33,8 @@ typedef struct {
     rdz_attribute attributes[2];
     uint32_t nattributes;
     uint32_t block_size;
+    const uint8_t *metadata;
+    uint32_t metadata_len;
 } spec;
 
 static rdz_object object(uint32_t id, uint32_t parent, uint16_t role, uint16_t type,
@@ -89,6 +91,8 @@ static int write_spec(const char *path, const spec *s, rdz_error *e)
             return 1;
         }
     }
+    w.metadata = s->metadata;
+    w.metadata_len = s->metadata_len;
     if (rdz_writer_finish(&w, s->objects, s->nobjects, s->attributes, s->nattributes, NULL, 0,
                           e)) {
         rdz_writer_discard(&w);
@@ -215,7 +219,8 @@ static const char *const cases[] = {
     "directory-length", "block-offsets", "compressed-smaller", "declared-block-size",
     "block-range", "numeric-length", "logical-length", "string-length", "children-range",
     "depth", "frame-rows", "attribute-range", "delta-width", "int-run-end", "logical-run-end",
-    "string-record-length", "dict-index-range", "zstd-length", "alp-exception-position", NULL};
+    "string-record-length", "dict-index-range", "zstd-length", "alp-exception-position",
+    "metadata-length", NULL};
 
 static int is(const char *a, const char *b) { return strcmp(a, b) == 0; }
 
@@ -234,7 +239,13 @@ static int run(const char *dir, const char *name)
     memset(o, 0, sizeof o);
     snprintf(path, sizeof path, "%s/%s.rdz", dir, name);
 
-    if (is(name, "header-checksum") || is(name, "directory-checksum") ||
+    if (is(name, "metadata-length")) {
+        /* one entry, "k" = "v"; its value's length is raised past the section */
+        static const uint8_t md[14] = {1, 0, 0, 0, 1, 0, 0, 0, 'k', 1, 0, 0, 0, 'v'};
+        int_root(&s, o);
+        s.metadata = md;
+        s.metadata_len = sizeof md;
+    } else if (is(name, "header-checksum") || is(name, "directory-checksum") ||
         is(name, "block-checksum") || is(name, "object-count") ||
         is(name, "directory-length") || is(name, "block-offsets") ||
         is(name, "declared-block-size")) {
@@ -409,6 +420,11 @@ static int run(const char *dir, const char *name)
     } else if (is(name, "declared-block-size")) {
         zb_wr_u32le(f.data + 16, 8); /* the 12-byte block exceeds it */
         reseal_header(&f);
+    } else if (is(name, "metadata-length")) {
+        /* the section ends the directory: its value length is 5 bytes back */
+        size_t value_len_at = f.n - RDZ_TRAILER_LEN - 5;
+        zb_wr_u32le(f.data + value_len_at, 1000);
+        reseal_directory(&f);
     }
 
     failed = read_all(f.data, f.n, &e);

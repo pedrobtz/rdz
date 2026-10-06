@@ -31,6 +31,8 @@ typedef struct {
     struct rdz_content_s *content; /* its accumulator while writing: 64-byte aligned
                                       within content_mem (freed by rdz_vec_free) */
     void *content_mem;
+    const uint8_t *metadata;  /* a metadata section rdz_graph_write() records (or NULL) */
+    uint32_t metadata_len;
 } rdz_vec;
 
 void rdz_vec_init(rdz_vec *v);

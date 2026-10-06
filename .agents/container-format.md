@@ -204,7 +204,7 @@ bit 0 for `names`. All other role, object, and attribute flags are rejected.
 
 A directory header of at least 64 bytes holds, after its 40 known bytes, the
 file's content hash: XXH3-128 (seed 0) as a low then a high `u64`, a
-`scheme:u16` and six zero bytes. Scheme 1 is defined below; readers ignore a
+`scheme:u16`, two zero bytes and `metadata_len:u32` (below). Scheme 1 is defined below; readers ignore a
 hash whose scheme they do not know, and a file without one (the Rust
 reference's, any 40-byte header) is as valid as before. `rdz_info()` reports
 the hash as `content_hash`, 32 hexadecimal digits, high `u64` first (the
@@ -229,6 +229,18 @@ Scheme 1 hashes the value, not its bytes on disk:
 
 `rdz_hash(x, mode)` computes the same hash for an object in memory, the
 native one when `mode` would write `x` natively.
+
+### User metadata (since plan-c Stage N)
+
+A 64-byte directory header's `metadata_len` (bytes 60 to 63, at most 64 KiB)
+is the length of a metadata section that ends the directory, after the
+synopsis: `count:u32` (at most 1,024), then per entry a `u32` length and the
+key's UTF-8 bytes, a `u32` length and the value's. Keys are non-empty and
+distinct; readers reject a section that is truncated, has trailing bytes,
+is not UTF-8 or repeats a key. The directory's length includes it, so the
+directory checksum covers it. It describes the file (source, versions, a
+cache key's inputs) and is not part of the content hash; `rdz_info()` reads
+it as `metadata`, a named character vector.
 
 ## Block directory entry: 64 bytes
 
