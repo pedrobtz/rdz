@@ -96,10 +96,12 @@ objects with explicitly ignored transient metadata. Cover
 missing values, ordinary and custom attributes, encodings, empty objects,
 reference sharing, boundary
 lengths, malformed input, automatic whole-root R-serialization fallback,
-strict-native rejection, and temporary-file cleanup. The format froze at 0.1.0
-(container-format.md, "Compatibility and extension"): every later rdz reads the
-frozen corpus (`fixtures/v0.1.0/`) to its values, which is never regenerated; an
-addition gets new fixtures beside it, and a changed meaning gets a new version. Every on-disk change must satisfy
+strict-native rejection, and temporary-file cleanup. The format is frozen as of
+rdz 0.1.0 (container-format.md, "Compatibility and extension"; `?rdz`): every
+later rdz reads the frozen corpus (`fixtures/v0.1.0/`, written by rdz 0.1.0) to
+its values. A fixture a release wrote is never regenerated (corpus.yaml runs
+`tools/check-frozen-corpus.R`); an addition gets new fixtures beside it, and a
+changed meaning gets a new version. Every on-disk change must satisfy
 `.agents/portability.md`, update cross-OS fixtures where bytes change, and remain
 readable on the Windows, macOS, and Linux CI matrix.
 

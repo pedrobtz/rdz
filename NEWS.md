@@ -1,6 +1,9 @@
 # rdz 0.1.0
 
-* First release. `write_rdz()` and `read_rdz()` write and read R objects in
+* First release. The file format is frozen as of this version: every later
+  rdz reads the files it writes (`?rdz`, "Compatibility"). Files written by
+  development builds before 0.1.0 have no compatibility guarantee.
+* `write_rdz()` and `read_rdz()` write and read R objects in
   a versioned, checksummed block container: logical, integer, double and
   character vectors, factors, lists and data frames natively, everything
   else through R serialization.

@@ -1,9 +1,13 @@
-# RDZ Pre-0.1 Container Format
+# RDZ Container Format
 
 ## Status
 
-This document is the wire contract implemented by Phase 0B. It is intentionally
-pre-release: files may still be replaced until `rdz` 0.1.0. The current
+This document is the wire contract, frozen as of rdz 0.1.0: every later rdz
+reads every file rdz 0.1.0 or later wrote, under the rules of "Compatibility
+and extension". Files written by development builds before 0.1.0 (writer
+`rdz 0.0.0 (development)`, or none) have no guarantee. The corpus in
+`tests/testthat/fixtures/v0.1.0/` was written by rdz 0.1.0 and only grows
+(`tools/check-frozen-corpus.R`). The current
 container version is 3 (2026-10-05, plan-c.md §3): every checksum is an
 eight-byte XXH3-64 with seed 0, bit-identical to the reference xxHash and to
 zufast's `zuf_hash64()`, in place of version 2's four-byte IEEE CRC32. Readers

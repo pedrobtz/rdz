@@ -1,8 +1,10 @@
 # Writes the frozen 0.1.0 corpus (tests/testthat/fixtures/v0.1.0/) from the
 # specs in tests/testthat/helper-frozen-fixtures.R, with the installed rdz,
-# and its manifest. A file once written is data: this writes only the specs
-# that have no file yet (an addition, such as Stage J's decimals) and keeps
-# every existing file and manifest row as it is. From the package root:
+# and its manifest. The corpus was written by rdz 0.1.0; a file once written
+# by a release is data: this writes only the specs that have no file yet (an
+# addition) and keeps every existing file and manifest row as it is, and
+# tools/check-frozen-corpus.R (corpus.yaml) fails a change that does not.
+# From the package root:
 #
 #   Rscript tools/make-frozen-fixtures.R
 

@@ -79,10 +79,10 @@
    of the release it follows. Readers never reject it. 0: not recorded. */
 #define RDZ_WRITER_RDZ   1u    /* this package */
 #define RDZ_WRITER_DEV   0x80u /* or-ed into the implementation byte */
-#define RDZ_WRITER_MAJOR 0u    /* the package version; test-format.R checks it */
-#define RDZ_WRITER_MINOR 0u
+#define RDZ_WRITER_MAJOR 0u    /* the package version; test-c-container.R checks it */
+#define RDZ_WRITER_MINOR 1u
 #define RDZ_WRITER_PATCH 0u
-#define RDZ_WRITER_IS_DEV 1
+#define RDZ_WRITER_IS_DEV 0
 
 /* The content hash (Stage M): a directory header of at least 64 bytes
    holds, after the 40 known ones, the XXH3-128 of the value (low u64, high
