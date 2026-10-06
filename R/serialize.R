@@ -173,7 +173,8 @@ read_rdz <- function(path, select = NULL, rows = NULL) {
   )
   value <- read[[1L]]
   if (!read[[2L]] && !is.null(select)) value <- rdz_select_generic(value, select)
-  if (!is.null(rows)) value <- rdz_rows_take(value, rows, if (is.null(window)) 0 else window[[1L]])
+  # a native read starts after row window[1]; a generic file is read whole
+  if (!is.null(rows)) value <- rdz_rows_take(value, rows, if (read[[2L]]) window[[1L]] else 0)
   value
 }
 
@@ -201,23 +202,23 @@ rdz_rows_check <- function(rows) {
 
 # The rows of a value read whole or over a window starting after row `lo`:
 # a vector's elements (through `[`, so its class's method applies), or a
-# data frame's rows, each column taken the same way. A column read over the
-# window (a vector) is shorter than the frame's rows was; a column read
-# whole (a list, a data frame) is not. Row names: stored ones are taken
-# too; automatic ones stay automatic.
+# data frame's rows, each column taken the same way. A native read windows
+# the row names and the vector columns; a column read whole (a list) is
+# longer. Row names: stored ones are taken too; automatic ones stay
+# automatic.
 rdz_rows_take <- function(value, rows, lo) {
   if (!is.data.frame(value)) {
     if (is.list(value) && !is.object(value)) {
       stop("`rows` needs a data frame or a vector; use `select` for a list's elements.",
            call. = FALSE)
     }
-    if (max(c(rows, 0)) > length(value) + lo) stop("`rows` must be at most ", length(value), ".", call. = FALSE)
+    if (max(c(rows, 0)) > length(value) + lo) stop("`rows` must be at most ", length(value) + lo, ".", call. = FALSE)
     return(value[rows - lo])
   }
-  n <- .row_names_info(value, 2L) # rows read
+  n <- .row_names_info(value, 2L) # rows read: the window's, or all of them
+  if (max(c(rows, 0)) > n + lo) stop("`rows` must be at most ", n + lo, ".", call. = FALSE)
   cols <- lapply(unclass(value), function(col) {
-    whole <- (is.list(col) && !is.object(col)) || is.data.frame(col) || NROW(col) != n
-    if (whole) col[rows] else col[rows - lo]
+    rdz_rows_of(col, if (NROW(col) == n) rows - lo else rows)
   })
   stored <- .row_names_info(value, 0L)
   out <- cols
@@ -232,6 +233,13 @@ rdz_rows_take <- function(value, rows, lo) {
     attr(out, ".internal.selfref") <- attr(value, ".internal.selfref", exact = TRUE)
   }
   out
+}
+
+# Rows `i` of a column, as `[.data.frame` takes them: a matrix's or a data
+# frame's rows, anything else's elements (an array of three or more
+# dimensions included).
+rdz_rows_of <- function(col, i) {
+  if (length(dim(col)) == 2L) col[i, , drop = FALSE] else col[i]
 }
 
 # User metadata as rdz_info() returns it: a named UTF-8 character vector

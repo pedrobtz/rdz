@@ -127,3 +127,47 @@ test_that("rows from raw vectors and generic files match too; bad rows are error
   write_rdz(list(1, 2), path)
   expect_error(read_rdz(path, rows = 1L), "use `select`")
 })
+
+test_that("generic files take the rows asked for, not ones shifted by the window", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  df <- data.frame(id = 1:6, x = c(1.5, 2, NA, 4, 5, 6))
+  write_rdz(df, path, mode = "r")
+  for (rows in list(2:3, 4:6, c(6L, 2L), 6L)) {
+    expect_identical(read_rdz(path, rows = rows), rows_ref(df, rows), label = deparse(rows))
+  }
+  expect_error(read_rdz(path, rows = 7L), "at most 6")
+  v <- c(10, 20, 30, 40, 50, 60)
+  write_rdz(v, path, mode = "r")
+  expect_identical(read_rdz(path, rows = 4:6), v[4:6])
+  expect_error(read_rdz(path, rows = 7L), "at most 6")
+  # an automatic fallback (a complex column) is a generic file too
+  cx <- data.frame(id = 1:4, z = complex(real = 1:4, imaginary = -1))
+  write_rdz(cx, path)
+  expect_identical(rdz_info(path)$codec, "r_serial_v3")
+  expect_identical(read_rdz(path, rows = 3:4), rows_ref(cx, 3:4))
+})
+
+test_that("matrix and data frame columns give their rows, as `[` does", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  df <- data.frame(id = 1:5)
+  df$m <- matrix(1:10, 5)
+  write_rdz(df, path)
+  got <- read_rdz(path, rows = 2:3)
+  expect_identical(got, rows_ref(df, 2:3))
+  expect_identical(got$m, matrix(c(2L, 3L, 7L, 8L), 2))
+  df$s <- data.frame(b = 11:15, c = letters[1:5])
+  write_rdz(df, path, mode = "r")
+  expect_identical(read_rdz(path, rows = c(5L, 1L)), rows_ref(df, c(5L, 1L)))
+  # a nested frame with as many columns as rows: its rows, not its columns
+  sq <- data.frame(id = 1:2)
+  sq$s <- data.frame(p = c("a", "b"), q = c("c", "d"))
+  write_rdz(sq, path, mode = "r")
+  expect_identical(read_rdz(path, rows = 2L), rows_ref(sq, 2L))
+  # an array of three dimensions: `[.data.frame` takes its elements
+  ar <- data.frame(id = 1:4)
+  ar$a <- array(1:24, c(4, 3, 2))
+  write_rdz(ar, path)
+  expect_identical(read_rdz(path, rows = 3:4), rows_ref(ar, 3:4))
+})
