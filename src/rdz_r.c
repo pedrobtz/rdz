@@ -58,6 +58,14 @@ const char *rdz_path(SEXP path)
 #endif
 }
 
+/* Opens what R names: a path, or a raw vector holding a file (read in
+   place: the caller keeps it alive for the call). */
+int rdz_open_source(rdz_reader *r, SEXP src, rdz_error *e)
+{
+    if (TYPEOF(src) == RAWSXP) return rdz_reader_open_memory(r, RAW(src), (size_t)XLENGTH(src), e);
+    return rdz_reader_open(r, rdz_path(src), e);
+}
+
 void rdz_reader_finalize(SEXP ptr)
 {
     rdz_reader *r = (rdz_reader *)R_ExternalPtrAddr(ptr);
@@ -103,14 +111,13 @@ SEXP rdz_native_attribute_names(rdz_reader *r, rdz_error *e); /* adapter/rdz_nat
 
 SEXP rdz_c_info(SEXP path)
 {
-    const char *p = rdz_path(path);
     rdz_reader *r;
     rdz_error e;
     SEXP ptr = PROTECT(rdz_reader_handle(&r));
     SEXP out, names, synopsis;
     const char *codec = "unknown";
 
-    if (rdz_reader_open(r, p, &e)) {
+    if (rdz_open_source(r, path, &e)) {
         UNPROTECT(1);
         return rdz_failure(&e);
     }
@@ -328,13 +335,12 @@ SEXP rdz_test_write_generic(SEXP payload, SEXP synopsis, SEXP path)
    object built. The block and stored byte counts. */
 SEXP rdz_c_verify(SEXP path)
 {
-    const char *p = rdz_path(path);
     rdz_reader *r;
     rdz_error e;
     uint32_t i;
     double bytes = 0;
     SEXP ptr = PROTECT(rdz_reader_handle(&r)), out;
-    if (rdz_reader_open(r, p, &e)) {
+    if (rdz_open_source(r, path, &e)) {
         rdz_reader_finalize(ptr);
         UNPROTECT(1);
         return rdz_failure(&e);

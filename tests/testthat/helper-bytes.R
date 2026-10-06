@@ -57,3 +57,9 @@ bytes_without_hash <- function(path) {
   bytes[21:32] <- as.raw(0L)
   bytes
 }
+
+# A raw vector's bytes but the writer field (bytes_but_writer() of a file).
+bytes_but_writer_raw <- function(bytes) {
+  bytes[21:32] <- as.raw(0L)
+  bytes
+}

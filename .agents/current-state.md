@@ -1,5 +1,26 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-06: plan-c Stage P
+
+Raw vectors. The output file gained a memory mode (open with a NULL path).
+At finish the writer moves the bytes into its `result`, which the adapter
+copies into a raw vector before the plan or writer is freed.
+
+- `rdz_serialize(x, mode, metadata)` returns the file's bytes, identical to
+  `write_rdz()`'s apart from the header's writer field.
+- `rdz_unserialize(bytes, select)` reads them back.
+- Every C entry point that reads opens its input through
+  `rdz_open_source()`, a path or a raw vector read in place. So `read_rdz()`,
+  `rdz_info()`, `rdz_schema()`, `rdz_attributes()` and `rdz_verify()` take raw
+  vectors too.
+
+On a 5e6-row frame, one thread, against qs2's `qs_serialize`:
+
+| Format | Serialize | Unserialize | Size |
+|---|---|---|---|
+| rdz | 121 ms | 61 ms | 28.3 MB |
+| qs2 | 528 ms | 376 ms | 38.0 MB |
+
 ## Checkpoint 2026-10-06: plan-c Stage O
 
 Shared objects. A vector of 4 KiB or more that appears twice in a value is

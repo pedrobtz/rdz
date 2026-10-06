@@ -31,6 +31,7 @@ void rdz_vec_free(rdz_vec *v)
 {
     free(v->content_mem);
     v->content_mem = NULL;
+    zb_buf_release(&v->w.result);
     v->content = NULL;
     if (v->have_pipe) rdz_pipeline_free(&v->pipe); /* joins the workers first */
     v->have_pipe = 0;
