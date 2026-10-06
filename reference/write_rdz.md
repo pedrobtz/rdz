@@ -75,9 +75,11 @@ write_rdz(
 Two options control how blocks are stored and how many threads do the
 work. `options(rdz.preset = )` is `"balanced"` (the default; each block
 is compressed with Zstandard at level 1), `"compact"` (level 6) or
-`"speed"` (no compression). A block is stored compressed only when that
-makes it smaller. `options(rdz.threads = )` sets the threads that
-compress and, in
+`"speed"` (no compression). Under `"balanced"` a block is stored
+compressed only when that saves at least an eighth of it, so data that
+barely compresses reads at memory speed; under `"compact"`, whenever it
+is smaller. `options(rdz.threads = )` sets the threads that compress
+and, in
 [`read_rdz()`](https://pedrobtz.github.io/rdz/reference/read_rdz.md),
 decompress blocks; the default is 1. The file does not depend on either:
 any setting reads any file, and the same object written with any number

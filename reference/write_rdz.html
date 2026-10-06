@@ -119,8 +119,10 @@ and <code>rdz_info()$content_hash</code> (then <code>NA</code>) have nothing to 
     <p>Two options control how blocks are stored and how many threads do the
 work. <code>options(rdz.preset = )</code> is <code>"balanced"</code> (the default; each block is
 compressed with Zstandard at level 1), <code>"compact"</code> (level 6) or <code>"speed"</code>
-(no compression). A block is stored compressed only when that makes it
-smaller. <code>options(rdz.threads = )</code> sets the threads that compress and, in
+(no compression). Under <code>"balanced"</code> a block is stored compressed only
+when that saves at least an eighth of it, so data that barely compresses
+reads at memory speed; under <code>"compact"</code>, whenever it is smaller.
+<code>options(rdz.threads = )</code> sets the threads that compress and, in
 <code><a href="read_rdz.html">read_rdz()</a></code>, decompress blocks; the default is 1. The file does not
 depend on either: any setting reads any file, and the same object written
 with any number of threads gives the same bytes.</p>
