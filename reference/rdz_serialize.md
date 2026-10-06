@@ -16,7 +16,12 @@ and
 ## Usage
 
 ``` r
-rdz_serialize(x, mode = c("auto", "native", "r"), metadata = NULL)
+rdz_serialize(
+  x,
+  mode = c("auto", "native", "r"),
+  metadata = NULL,
+  hash = getOption("rdz.hash", TRUE)
+)
 
 rdz_unserialize(bytes, select = NULL, rows = NULL)
 ```
@@ -42,6 +47,16 @@ rdz_unserialize(bytes, select = NULL, rows = NULL)
   [`rdz_info()`](https://pedrobtz.github.io/rdz/reference/rdz_info.md)
   reads it back, as `metadata`, without reading `x`; it is not part of
   the content hash.
+
+- hash:
+
+  Whether to record the content hash
+  ([`rdz_hash()`](https://pedrobtz.github.io/rdz/reference/rdz_hash.md)),
+  from `options(rdz.hash)`, `TRUE` by default. Computing it reads the
+  value once more (about a tenth of a write's time); without it the file
+  is just as valid and as readable, but `skip_unchanged`,
+  `rdz_verify(content = TRUE)` and `rdz_info()$content_hash` (then `NA`)
+  have nothing to use.
 
 - bytes:
 

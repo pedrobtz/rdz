@@ -64,7 +64,8 @@ blocks of 1 MiB. Every file records the object's content hash
 <span>  <span class="va">path</span>,</span>
 <span>  mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"auto"</span>, <span class="st">"native"</span>, <span class="st">"r"</span><span class="op">)</span>,</span>
 <span>  skip_unchanged <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  metadata <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  metadata <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  hash <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">getOption</a></span><span class="op">(</span><span class="st">"rdz.hash"</span>, <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -99,6 +100,14 @@ character vector (or a named list of single strings), up to 1,024
 distinct non-empty names and 64 KiB in all, such as a source, a code
 version or a cache key's inputs. <code><a href="rdz_info.html">rdz_info()</a></code> reads it back, as
 <code>metadata</code>, without reading <code>x</code>; it is not part of the content hash.</p></dd>
+
+
+<dt id="arg-hash">hash<a class="anchor" aria-label="anchor" href="#arg-hash"></a></dt>
+<dd><p>Whether to record the content hash (<code><a href="rdz_hash.html">rdz_hash()</a></code>), from
+<code>options(rdz.hash)</code>, <code>TRUE</code> by default. Computing it reads the value once
+more (about a tenth of a write's time); without it the file is just as
+valid and as readable, but <code>skip_unchanged</code>, <code>rdz_verify(content = TRUE)</code>
+and <code>rdz_info()$content_hash</code> (then <code>NA</code>) have nothing to use.</p></dd>
 
 </dl></div>
     <div class="section level2">

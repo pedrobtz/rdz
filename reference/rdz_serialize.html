@@ -56,7 +56,12 @@ vector where it takes a path: <code><a href="read_rdz.html">read_rdz()</a></code
 
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">rdz_serialize</span><span class="op">(</span><span class="va">x</span>, mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"auto"</span>, <span class="st">"native"</span>, <span class="st">"r"</span><span class="op">)</span>, metadata <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span></span>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">rdz_serialize</span><span class="op">(</span></span>
+<span>  <span class="va">x</span>,</span>
+<span>  mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"auto"</span>, <span class="st">"native"</span>, <span class="st">"r"</span><span class="op">)</span>,</span>
+<span>  metadata <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  hash <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">getOption</a></span><span class="op">(</span><span class="st">"rdz.hash"</span>, <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu">rdz_unserialize</span><span class="op">(</span><span class="va">bytes</span>, select <span class="op">=</span> <span class="cn">NULL</span>, rows <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -81,6 +86,14 @@ character vector (or a named list of single strings), up to 1,024
 distinct non-empty names and 64 KiB in all, such as a source, a code
 version or a cache key's inputs. <code><a href="rdz_info.html">rdz_info()</a></code> reads it back, as
 <code>metadata</code>, without reading <code>x</code>; it is not part of the content hash.</p></dd>
+
+
+<dt id="arg-hash">hash<a class="anchor" aria-label="anchor" href="#arg-hash"></a></dt>
+<dd><p>Whether to record the content hash (<code><a href="rdz_hash.html">rdz_hash()</a></code>), from
+<code>options(rdz.hash)</code>, <code>TRUE</code> by default. Computing it reads the value once
+more (about a tenth of a write's time); without it the file is just as
+valid and as readable, but <code>skip_unchanged</code>, <code>rdz_verify(content = TRUE)</code>
+and <code>rdz_info()$content_hash</code> (then <code>NA</code>) have nothing to use.</p></dd>
 
 
 <dt id="arg-bytes">bytes<a class="anchor" aria-label="anchor" href="#arg-bytes"></a></dt>

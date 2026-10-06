@@ -27,6 +27,8 @@
   file holding the value untouched, and
   [`rdz_verify()`](https://pedrobtz.github.io/rdz/reference/rdz_verify.md)
   checks a file.
+- `write_rdz(hash = FALSE)` (or `options(rdz.hash = FALSE)`) skips the
+  content hash, for about a tenth less write time.
 - [`rdz_serialize()`](https://pedrobtz.github.io/rdz/reference/rdz_serialize.md)
   and
   [`rdz_unserialize()`](https://pedrobtz.github.io/rdz/reference/rdz_serialize.md)

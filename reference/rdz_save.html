@@ -63,7 +63,8 @@ ordinary rdz file holding a named list: <code><a href="read_rdz.html">read_rdz()
 <span>  envir <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/sys.parent.html" class="external-link">parent.frame</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"auto"</span>, <span class="st">"native"</span>, <span class="st">"r"</span><span class="op">)</span>,</span>
 <span>  skip_unchanged <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  metadata <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  metadata <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  hash <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">getOption</a></span><span class="op">(</span><span class="st">"rdz.hash"</span>, <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu">rdz_load</span><span class="op">(</span><span class="va">file</span>, names <span class="op">=</span> <span class="cn">NULL</span>, envir <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/sys.parent.html" class="external-link">parent.frame</a></span><span class="op">(</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
@@ -91,7 +92,7 @@ from <code><a href="rdz_serialize.html">rdz_serialize()</a></code>).</p></dd>
 <code>rdz_load()</code>, where to assign them.</p></dd>
 
 
-<dt id="arg-mode-skip-unchanged-metadata">mode, skip_unchanged, metadata<a class="anchor" aria-label="anchor" href="#arg-mode-skip-unchanged-metadata"></a></dt>
+<dt id="arg-mode-skip-unchanged-metadata-hash">mode, skip_unchanged, metadata, hash<a class="anchor" aria-label="anchor" href="#arg-mode-skip-unchanged-metadata-hash"></a></dt>
 <dd><p>As for <code><a href="write_rdz.html">write_rdz()</a></code>.</p></dd>
 
 

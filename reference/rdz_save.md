@@ -20,7 +20,8 @@ rdz_save(
   envir = parent.frame(),
   mode = c("auto", "native", "r"),
   skip_unchanged = FALSE,
-  metadata = NULL
+  metadata = NULL,
+  hash = getOption("rdz.hash", TRUE)
 )
 
 rdz_load(file, names = NULL, envir = parent.frame())
@@ -47,7 +48,7 @@ rdz_load(file, names = NULL, envir = parent.frame())
   For `rdz_save()`, where to find the objects; for `rdz_load()`, where
   to assign them.
 
-- mode, skip_unchanged, metadata:
+- mode, skip_unchanged, metadata, hash:
 
   As for
   [`write_rdz()`](https://pedrobtz.github.io/rdz/reference/write_rdz.md).
