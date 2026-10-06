@@ -386,13 +386,24 @@ int rdz_int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, 
             /* the codes into out, then base added in place, branch-free
                (NA codes are common and unpredictable) */
             uint32_t *c = (uint32_t *)(void *)out;
-            int bad = 0;
+            /* in 32-bit lanes: base + code overflows exactly when the code
+               exceeds INT32_MAX - base, and lands on NA only as code 0 on a
+               base of INT32_MIN */
+            uint32_t limit = (uint32_t)(INT32_MAX - base), ubase = (uint32_t)base,
+                     zero_bad = base == INT32_MIN, bad = 0;
             unpack_codes(enc + RDZ_INT_FOR_HEADER, len - RDZ_INT_FOR_HEADER, n, width, c);
-            for (i = 0; i < n; i++) {
-                int na = has_na && c[i] == na_code;
-                int64_t value = base + (int64_t)c[i];
-                bad |= !na & (value <= INT32_MIN || value > INT32_MAX);
-                out[i] = na ? INT_NA : (int32_t)value;
+            if (has_na) {
+                for (i = 0; i < n; i++) {
+                    uint32_t ci = c[i], na = ci == na_code;
+                    bad |= (na ^ 1u) & ((ci > limit) | (zero_bad & (ci == 0)));
+                    c[i] = na ? (uint32_t)INT_NA : ubase + ci;
+                }
+            } else {
+                for (i = 0; i < n; i++) {
+                    uint32_t ci = c[i];
+                    bad |= (ci > limit) | (zero_bad & (ci == 0));
+                    c[i] = ubase + ci;
+                }
             }
             if (bad) return bad_int(e);
         }

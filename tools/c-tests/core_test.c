@@ -604,6 +604,36 @@ static void test_numeric(const char *tmpdir)
             numeric_case(RDZ_TYPE_DOUBLE, dv, 0, level, threads, path, 0);
         }
     }
+    /* frame of reference at the edges of int32: a code past INT32_MAX, and
+       code 0 on a base of INT32_MIN (it would read as NA), are refused,
+       with or without the NA code */
+    {
+        static const struct {
+            int32_t base;
+            uint8_t code, has_na;
+            int ok;
+        } edges[] = {{INT32_MAX - 1, 1, 0, 1}, {INT32_MAX - 1, 2, 0, 0}, {INT32_MAX - 1, 2, 1, 0},
+                     {INT32_MIN, 0, 0, 0},     {INT32_MIN, 0, 1, 0},     {INT32_MIN, 1, 0, 1},
+                     {INT32_MIN, 3, 1, 1}};
+        size_t k;
+        for (k = 0; k < sizeof edges / sizeof *edges; k++) {
+            /* one value, width 2: header (width, has_na, 0, 0, base), one byte */
+            uint8_t rec[RDZ_INT_FOR_HEADER + 1] = {2, 0, 0, 0};
+            int32_t got = 0;
+            rdz_error e;
+            int ok;
+            rec[1] = edges[k].has_na;
+            zb_wr_u32le(rec + 4, (uint32_t)edges[k].base);
+            rec[RDZ_INT_FOR_HEADER] = edges[k].code;
+            ok = rdz_int_decode(rec, sizeof rec, RDZ_ENCODING_INT_FOR, 1, &got, &e) == 0;
+            CHECK(ok == edges[k].ok, "FOR edge %zu: decoded %d", k, ok);
+            if (ok && edges[k].has_na && edges[k].code == 3) {
+                CHECK(got == INT32_MIN, "FOR edge %zu: the NA code reads as NA", k);
+            } else if (ok) {
+                CHECK(got == edges[k].base + edges[k].code, "FOR edge %zu: %d", k, (int)got);
+            }
+        }
+    }
     /* an empty block of no bytes: only raw and shuffled layouts hold nothing
        but values; the others have a header to read (never past `enc`) */
     {
