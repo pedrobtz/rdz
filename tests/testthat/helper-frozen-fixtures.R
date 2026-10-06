@@ -124,7 +124,10 @@ frozen_fixture_specs <- function() {
   )
   # user metadata (Stage N), native and generic
   native[[length(native) + 1L]] <- list(name = "metadata", value = function() 1:3,
-                                        metadata = c(source = "frozen", "cl\u00e9" = "\u2713"))
+                                        # names from strings, not symbols: the
+                                        # parser turns a symbol native (C locale)
+                                        metadata = stats::setNames(c("frozen", "\u2713"),
+                                                                   c("source", "cl\u00e9")))
   generic <- list(
     list(name = "gen_rare", value = function() {
       list(complex = complex(real = 1, imaginary = -2), raw = as.raw(c(0, 255)),

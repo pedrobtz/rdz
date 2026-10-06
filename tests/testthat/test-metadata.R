@@ -4,7 +4,9 @@
 test_that("metadata round-trips, natively and generically, as UTF-8", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  md <- c(source = "datasets::mtcars", "versão" = "1.2 ✓", empty = "")
+  # names from strings, not symbols: the parser turns a symbol native (C locale)
+  md <- stats::setNames(c("datasets::mtcars", "1.2 \u2713", ""),
+                        c("source", "vers\u00e3o", "empty"))
   for (mode in c("native", "r")) {
     write_rdz(mtcars, path, mode = mode, metadata = md)
     got <- rdz_info(path)$metadata
