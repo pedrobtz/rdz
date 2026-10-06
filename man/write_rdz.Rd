@@ -54,8 +54,10 @@ blocks of 1 MiB. Every file records the object's content hash
 Two options control how blocks are stored and how many threads do the
 work. \code{options(rdz.preset = )} is \code{"balanced"} (the default; each block is
 compressed with Zstandard at level 1), \code{"compact"} (level 6) or \code{"speed"}
-(no compression). A block is stored compressed only when that makes it
-smaller. \code{options(rdz.threads = )} sets the threads that compress and, in
+(no compression). Under \code{"balanced"} a block is stored compressed only
+when that saves at least an eighth of it, so data that barely compresses
+reads at memory speed; under \code{"compact"}, whenever it is smaller.
+\code{options(rdz.threads = )} sets the threads that compress and, in
 \code{\link[=read_rdz]{read_rdz()}}, decompress blocks; the default is 1. The file does not
 depend on either: any setting reads any file, and the same object written
 with any number of threads gives the same bytes.

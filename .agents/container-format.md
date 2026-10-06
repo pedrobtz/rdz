@@ -171,9 +171,11 @@ checksum that readers verify (it covers the decoded bytes, which the block
 checksum does not). The frame fills the stored bytes and decompresses to exactly
 the decoded length,
 and the checksum covers the stored (compressed) bytes, so a reader verifies a
-block before it decompresses it. A block is compressed only when that makes it
-smaller, and readers reject a compressed block whose stored length is not less
-than its decoded length; an incompressible block is therefore always raw. The
+block before it decompresses it. Readers reject a compressed block whose stored
+length is not less than its decoded length, so an incompressible block is
+always raw. The 0.1.0 writer compresses a block only when that saves at least an eighth
+of it, or under the compact preset any saving (writer policy), so a block
+that barely compresses is read without decompression. The
 writer's presets choose the level (`rdz.preset`: level 1 by default, 6 for
 `"compact"`, no compression for `"speed"`); the level is not recorded and no
 reader needs it. Neither the preset nor the thread count changes a reader's

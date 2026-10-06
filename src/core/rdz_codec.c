@@ -35,7 +35,9 @@ int rdz_codec_compress(rdz_codec *c, int level, const uint8_t *src, size_t n, zb
     if (zb_buf_reserve(out, bound)) return rdz_memory(e, "a compressed block");
     got = ZSTD_compressCCtx((ZSTD_CCtx *)c->cctx, out->data, bound, src, n, level);
     if (ZSTD_isError(got)) return rdz_memory(e, "a compressed block");
-    if (got < n) {
+    /* worth a decompression on every read only if it saves an eighth; the
+       compact levels (6 and up) keep any saving */
+    if (level >= 6 ? got < n : got <= n - n / 8) {
         out->len = got;
         *compression = RDZ_COMPRESSION_ZSTD;
     }
