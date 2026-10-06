@@ -1,7 +1,5 @@
 <urlset xmlns = 'http://www.sitemaps.org/schemas/sitemap/0.9'>
 <url><loc>https://pedrobtz.github.io/rdz/404.html</loc></url>
-<url><loc>https://pedrobtz.github.io/rdz/AGENTS.html</loc></url>
-<url><loc>https://pedrobtz.github.io/rdz/CLAUDE.html</loc></url>
 <url><loc>https://pedrobtz.github.io/rdz/LICENSE-text.html</loc></url>
 <url><loc>https://pedrobtz.github.io/rdz/LICENSE.html</loc></url>
 <url><loc>https://pedrobtz.github.io/rdz/articles/index.html</loc></url>
@@ -19,6 +17,5 @@
 <url><loc>https://pedrobtz.github.io/rdz/reference/rdz_verify.html</loc></url>
 <url><loc>https://pedrobtz.github.io/rdz/reference/read_rdz.html</loc></url>
 <url><loc>https://pedrobtz.github.io/rdz/reference/write_rdz.html</loc></url>
-<url><loc>https://pedrobtz.github.io/rdz/review.html</loc></url>
 </urlset>
 
