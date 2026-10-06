@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rdz</a>
 
-    <small class="nav-text text-danger me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Unreleased version">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -43,6 +43,21 @@
     </div>
 
 
+    <div class="section level2">
+    <h2 id="compatibility">Compatibility<a class="anchor" aria-label="anchor" href="#compatibility"></a></h2>
+
+
+<p>The file format is frozen as of rdz 0.1.0: every later rdz reads every file
+that rdz 0.1.0 or later wrote, to the same value. A later writer may add
+block encodings, attribute kinds or directory fields, each under an
+identifier of its own, but never changes what an existing one means; a
+reader refuses, rather than misreads, a file that uses one it does not
+know. A version number in the file changes only if an existing meaning
+ever does. The tests read a corpus of files written by rdz 0.1.0, which is
+never rewritten. Files written by development builds before 0.1.0 (whose
+writer <code><a href="rdz_info.html">rdz_info()</a></code> reports as <code>"rdz 0.0.0 (development)"</code>, or does not
+report) have no compatibility guarantee.</p>
+    </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
     <div class="dont-index"><p>Useful links:</p><ul><li><p><a href="https://pedrobtz.github.io/rdz/">https://pedrobtz.github.io/rdz/</a></p></li>

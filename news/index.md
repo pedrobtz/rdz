@@ -2,8 +2,12 @@
 
 ## rdz 0.1.0
 
-- First release.
-  [`write_rdz()`](https://pedrobtz.github.io/rdz/reference/write_rdz.md)
+- First release. The file format is frozen as of this version: every
+  later rdz reads the files it writes
+  ([`?rdz`](https://pedrobtz.github.io/rdz/reference/rdz-package.md),
+  “Compatibility”). Files written by development builds before 0.1.0
+  have no compatibility guarantee.
+- [`write_rdz()`](https://pedrobtz.github.io/rdz/reference/write_rdz.md)
   and
   [`read_rdz()`](https://pedrobtz.github.io/rdz/reference/read_rdz.md)
   write and read R objects in a versioned, checksummed block container:

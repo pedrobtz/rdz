@@ -48,7 +48,7 @@ rdz_info(path)
 #> <rdz_info>
 #>   codec: native_v1 (version 1)
 #>   container version: 3
-#>   written by: rdz 0.0.0 (development)
+#>   written by: rdz 0.1.0
 #>   blocks: 3 (maximum 1048576 bytes)
 #>   payload: 29 bytes
 #>   metadata: authoritative native directory

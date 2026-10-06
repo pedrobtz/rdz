@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">rdz</a>
 
-    <small class="nav-text text-danger me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Unreleased version">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -116,7 +116,7 @@
 <div class="section level2">
 <h2 id="compatibility">Compatibility<a class="anchor" aria-label="anchor" href="#compatibility"></a>
 </h2>
-<p>The file format froze at 0.1.0. Every later rdz reads 0.1.0 files, and a writer adds new block records or attributes without changing the meaning of existing ones; see the <a href="https://github.com/pedrobtz/rdz/blob/main/.agents/container-format.md" class="external-link">container format</a>. Files written before 0.1.0 have no compatibility guarantee.</p>
+<p>The file format is frozen as of rdz 0.1.0: every later rdz reads every file that rdz 0.1.0 or later wrote. A later writer adds block encodings or attributes under new identifiers, never changing the meaning of existing ones, and a reader refuses, rather than misreads, what it does not know. The tests read a corpus written by rdz 0.1.0, which is never rewritten. <code><a href="reference/rdz-package.html">?rdz</a></code> states this in the package, and the <a href="https://github.com/pedrobtz/rdz/blob/main/.agents/container-format.md" class="external-link">container format</a> gives the details. Files written by development builds before 0.1.0 have no compatibility guarantee.</p>
 </div>
 </div>
   </main><aside class="col-md-3"><div class="links">
@@ -157,12 +157,7 @@
 </ul>
 </div>
 
-<div class="dev-status">
-<h2 data-toc-skip>Dev status</h2>
-<ul class="list-unstyled">
-<li><a href="https://github.com/pedrobtz/rdz/actions/workflows/R-CMD-check.yaml" class="external-link"><img src="https://github.com/pedrobtz/rdz/actions/workflows/R-CMD-check.yaml/badge.svg" alt="R-CMD-check"></a></li>
-</ul>
-</div>
+
 
   </aside>
 </div>

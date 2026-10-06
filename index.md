@@ -98,8 +98,14 @@ write_rdz(mtcars, path, mode = "native")           # fail rather than fall back
 
 ## Compatibility
 
-The file format froze at 0.1.0. Every later rdz reads 0.1.0 files, and a
-writer adds new block records or attributes without changing the meaning
-of existing ones; see the [container
-format](https://github.com/pedrobtz/rdz/blob/main/.agents/container-format.md).
-Files written before 0.1.0 have no compatibility guarantee.
+The file format is frozen as of rdz 0.1.0: every later rdz reads every
+file that rdz 0.1.0 or later wrote. A later writer adds block encodings
+or attributes under new identifiers, never changing the meaning of
+existing ones, and a reader refuses, rather than misreads, what it does
+not know. The tests read a corpus written by rdz 0.1.0, which is never
+rewritten.
+[`?rdz`](https://pedrobtz.github.io/rdz/reference/rdz-package.md) states
+this in the package, and the [container
+format](https://github.com/pedrobtz/rdz/blob/main/.agents/container-format.md)
+gives the details. Files written by development builds before 0.1.0 have
+no compatibility guarantee.

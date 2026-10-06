@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rdz</a>
 
-    <small class="nav-text text-danger me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Unreleased version">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -39,7 +39,9 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.1.0" id="rdz-010">rdz 0.1.0<a class="anchor" aria-label="anchor" href="#rdz-010"></a></h2>
-<ul><li>First release. <code><a href="../reference/write_rdz.html">write_rdz()</a></code> and <code><a href="../reference/read_rdz.html">read_rdz()</a></code> write and read R objects in a versioned, checksummed block container: logical, integer, double and character vectors, factors, lists and data frames natively, everything else through R serialization.</li>
+<ul><li>First release. The file format is frozen as of this version: every later rdz reads the files it writes (<code><a href="../reference/rdz-package.html">?rdz</a></code>, “Compatibility”). Files written by development builds before 0.1.0 have no compatibility guarantee.</li>
+<li>
+<code><a href="../reference/write_rdz.html">write_rdz()</a></code> and <code><a href="../reference/read_rdz.html">read_rdz()</a></code> write and read R objects in a versioned, checksummed block container: logical, integer, double and character vectors, factors, lists and data frames natively, everything else through R serialization.</li>
 <li>Selective reads: <code>read_rdz(select =, rows =)</code> reads some columns or list elements, and some rows or vector elements, decoding only their blocks.</li>
 <li>Inspection without the data: <code><a href="../reference/rdz_info.html">rdz_info()</a></code>, <code><a href="../reference/rdz_schema.html">rdz_schema()</a></code> and <code><a href="../reference/rdz_attributes.html">rdz_attributes()</a></code>.</li>
 <li>Content hashes: every file records one, <code><a href="../reference/rdz_hash.html">rdz_hash()</a></code> computes it for an object, <code>write_rdz(skip_unchanged = TRUE)</code> leaves a file holding the value untouched, and <code><a href="../reference/rdz_verify.html">rdz_verify()</a></code> checks a file.</li>
