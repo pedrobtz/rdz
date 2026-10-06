@@ -63,10 +63,10 @@ static int rdz_ctz64(uint64_t x)
 #endif
 }
 
-static int popcount32(uint32_t x)
+static int popcount64(uint64_t x)
 {
 #if defined(__GNUC__) || defined(__clang__)
-    return __builtin_popcount(x);
+    return __builtin_popcountll(x);
 #else
     int c = 0;
     while (x) {
@@ -88,44 +88,48 @@ static void write_mask(uint8_t *plane, size_t offset, uint32_t bits, size_t widt
     for (k = 0; k < nbytes; k++) plane[offset + k] = (uint8_t)(bits >> (8 * k));
 }
 
-/* Counts and runs accumulated over groups of 32 (logical.rs update_stats).
-   Kernels keep one on their own stack, so it stays in registers: nothing
-   written through the planes' byte pointers can alias it. */
-typedef struct {
-    size_t t, a, f, runs;
-    uint32_t prev_t, prev_a;
-    int have_prev;
-} rdz_acc;
-
-static void acc_group(rdz_acc *c, uint32_t t, uint32_t a, size_t width)
+/* Counts and runs of a block, from its finished planes, 64 values a word:
+   a run starts where a value's state differs from the one before it. Padding
+   bits past n are zero in both planes, and are masked out. */
+static void plane_stats(const uint8_t *tp, const uint8_t *ap, size_t n, rdz_planes *p)
 {
-    uint32_t valid = width == 32 ? 0xffffffffu : ((1u << width) - 1u);
-    uint32_t transitions;
-    size_t tc, ac;
-    t &= valid;
-    a &= valid;
-    tc = (size_t)popcount32(t);
-    ac = (size_t)popcount32(a);
-    c->t += tc;
-    c->a += ac;
-    c->f += width - tc - ac;
-    transitions = (t ^ ((t << 1) | c->prev_t)) | (a ^ ((a << 1) | c->prev_a));
-    if (!c->have_prev) {
-        c->runs = 1;
-        transitions &= ~1u;
-        c->have_prev = 1;
+    size_t words = n / 64, w, t = 0, a = 0, runs = n ? 1 : 0, rest = n % 64;
+    uint64_t prev_t = 0, prev_a = 0;
+    for (w = 0; w <= words; w++) {
+        uint64_t tw, aw, change, valid;
+        if (w == words) {
+            size_t k;
+            if (!rest) break;
+            tw = aw = 0;
+            for (k = 0; k < (rest + 7) / 8; k++) {
+                tw |= (uint64_t)tp[w * 8 + k] << (8 * k);
+                aw |= (uint64_t)ap[w * 8 + k] << (8 * k);
+            }
+            valid = ((uint64_t)1 << rest) - 1;
+        } else {
+            tw = zb_rd_u64le(tp + w * 8);
+            aw = zb_rd_u64le(ap + w * 8);
+            valid = ~(uint64_t)0;
+        }
+        t += (size_t)popcount64(tw);
+        a += (size_t)popcount64(aw);
+        change = ((tw ^ (tw << 1 | prev_t)) | (aw ^ (aw << 1 | prev_a))) & valid;
+        if (w == 0) change &= ~(uint64_t)1; /* the first value starts the first run */
+        runs += (size_t)popcount64(change);
+        prev_t = tw >> 63;
+        prev_a = aw >> 63;
     }
-    c->runs += (size_t)popcount32(transitions & valid);
-    c->prev_t = (t >> (width - 1)) & 1u;
-    c->prev_a = (a >> (width - 1)) & 1u;
+    p->counts[TRUE_STATE] = t;
+    p->counts[NA_STATE] = a;
+    p->counts[FALSE_STATE] = n - t - a;
+    p->runs = runs;
 }
 
 /* The scalar reference for values[from, n), groups of 32 from byte offset
    from / 8 (from is a multiple of 32). */
 static int classify_scalar_from(const int32_t *values, size_t from, size_t n,
-                                uint8_t *tp, uint8_t *ap, rdz_acc *acc, rdz_error *e)
+                                uint8_t *tp, uint8_t *ap, rdz_error *e)
 {
-    rdz_acc c = *acc;
     size_t start;
     for (start = from; start < n; start += 32) {
         size_t width = n - start < 32 ? n - start : 32, lane;
@@ -138,21 +142,18 @@ static int classify_scalar_from(const int32_t *values, size_t from, size_t n,
         }
         write_mask(tp, start / 8, t, width);
         write_mask(ap, start / 8, a, width);
-        acc_group(&c, t, a, width);
     }
-    *acc = c;
     return 0;
 }
 
 #ifdef RDZ_HAVE_AVX2_KERNEL
 __attribute__((target("avx2"))) static int classify_avx2(const int32_t *values, size_t n,
-                                                         uint8_t *tp, uint8_t *ap, rdz_acc *acc,
+                                                         uint8_t *tp, uint8_t *ap,
                                                          size_t *done, rdz_error *e)
 {
     const __m256i zero = _mm256_setzero_si256();
     const __m256i one = _mm256_set1_epi32(1);
     const __m256i na = _mm256_set1_epi32(RDZ_LOGICAL_NA);
-    rdz_acc c = *acc;
     size_t groups = n / 32, g;
     for (g = 0; g < groups; g++) {
         uint32_t t = 0, a = 0;
@@ -170,9 +171,7 @@ __attribute__((target("avx2"))) static int classify_avx2(const int32_t *values, 
         }
         zb_wr_u32le(tp + g * 4, t);
         zb_wr_u32le(ap + g * 4, a);
-        acc_group(&c, t, a, 32);
     }
-    *acc = c;
     *done = groups * 32;
     return 0;
 }
@@ -185,32 +184,56 @@ static int cpu_has_avx2(void)
 #endif
 
 #ifdef RDZ_HAVE_NEON_KERNEL
-static int classify_neon(const int32_t *values, size_t n, uint8_t *tp, uint8_t *ap,
-                         rdz_acc *acc, size_t *done, rdz_error *e)
+/* 16 values' bit 0 (TRUE) and bit 31 (NA) as two vectors of 0 or 1 bytes;
+   or-ing into `bad` any value with another bit set, or both. */
+static void neon_bytes16(const int32_t *values, uint8x16_t *t8, uint8x16_t *a8, uint32x4_t *bad)
 {
-    static const uint32_t weights_init[4] = {1, 2, 4, 8};
-    const uint32x4_t weights = vld1q_u32(weights_init);
-    const int32x4_t zero = vdupq_n_s32(0), one = vdupq_n_s32(1),
-                    na = vdupq_n_s32(RDZ_LOGICAL_NA);
-    rdz_acc c = *acc;
-    size_t groups = n / 32, g;
+    const uint32x4_t other = vdupq_n_u32(0x7ffffffeu);
+    const uint32_t *v = (const uint32_t *)(const void *)values;
+    uint32x4_t v0 = vld1q_u32(v), v1 = vld1q_u32(v + 4), v2 = vld1q_u32(v + 8),
+               v3 = vld1q_u32(v + 12);
+    uint32x4_t b = vorrq_u32(vandq_u32(v0, other), vandq_u32(v0, vshlq_n_u32(v0, 31)));
+    b = vorrq_u32(b, vorrq_u32(vandq_u32(v1, other), vandq_u32(v1, vshlq_n_u32(v1, 31))));
+    b = vorrq_u32(b, vorrq_u32(vandq_u32(v2, other), vandq_u32(v2, vshlq_n_u32(v2, 31))));
+    b = vorrq_u32(b, vorrq_u32(vandq_u32(v3, other), vandq_u32(v3, vshlq_n_u32(v3, 31))));
+    *bad = vorrq_u32(*bad, b);
+    *t8 = vcombine_u8(vmovn_u16(vcombine_u16(vmovn_u32(v0), vmovn_u32(v1))),
+                      vmovn_u16(vcombine_u16(vmovn_u32(v2), vmovn_u32(v3))));
+    *a8 = vshrq_n_u8(
+        vcombine_u8(vshrn_n_u16(vcombine_u16(vshrn_n_u32(v0, 16), vshrn_n_u32(v1, 16)), 8),
+                    vshrn_n_u16(vcombine_u16(vshrn_n_u32(v2, 16), vshrn_n_u32(v3, 16)), 8)),
+        7);
+}
+
+/* Four vectors of 0 or 1 bytes (64 values) to their 64-bit mask, value 0
+   lowest: each byte shifted to its bit, then pairwise sums to one word. */
+static uint64_t neon_bits64(uint8x16_t b0, uint8x16_t b1, uint8x16_t b2, uint8x16_t b3)
+{
+    static const int8_t shifts_init[16] = {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7};
+    const int8x16_t shifts = vld1q_s8(shifts_init);
+    uint8x16_t p = vpaddq_u8(vshlq_u8(b0, shifts), vshlq_u8(b1, shifts));
+    uint8x16_t q = vpaddq_u8(vshlq_u8(b2, shifts), vshlq_u8(b3, shifts));
+    p = vpaddq_u8(p, q);
+    p = vpaddq_u8(p, p);
+    return vgetq_lane_u64(vreinterpretq_u64_u8(p), 0);
+}
+
+/* The valid values are 0, 1 and INT_MIN: TRUE is bit 0 and NA bit 31, so no
+   comparison is needed; groups of 64. */
+static int classify_neon(const int32_t *values, size_t n, uint8_t *tp, uint8_t *ap,
+                         size_t *done, rdz_error *e)
+{
+    size_t groups = n / 64, g;
     for (g = 0; g < groups; g++) {
-        uint32_t t = 0, a = 0;
-        int lane;
-        for (lane = 0; lane < 8; lane++) {
-            int32x4_t in = vld1q_s32(values + g * 32 + (size_t)lane * 4);
-            uint32x4_t is_true = vceqq_s32(in, one), is_na = vceqq_s32(in, na);
-            uint32x4_t ok = vorrq_u32(vorrq_u32(vceqq_s32(in, zero), is_true), is_na);
-            if (vminvq_u32(ok) == 0) return bad_value(e);
-            t |= vaddvq_u32(vandq_u32(is_true, weights)) << (lane * 4);
-            a |= vaddvq_u32(vandq_u32(is_na, weights)) << (lane * 4);
-        }
-        zb_wr_u32le(tp + g * 4, t);
-        zb_wr_u32le(ap + g * 4, a);
-        acc_group(&c, t, a, 32);
+        uint8x16_t t[4], a[4];
+        uint32x4_t bad = vdupq_n_u32(0);
+        int k;
+        for (k = 0; k < 4; k++) neon_bytes16(values + g * 64 + (size_t)k * 16, &t[k], &a[k], &bad);
+        if (vmaxvq_u32(bad) != 0) return bad_value(e);
+        zb_wr_u64le(tp + g * 8, neon_bits64(t[0], t[1], t[2], t[3]));
+        zb_wr_u64le(ap + g * 8, neon_bits64(a[0], a[1], a[2], a[3]));
     }
-    *acc = c;
-    *done = groups * 32;
+    *done = groups * 64;
     return 0;
 }
 #endif
@@ -231,9 +254,7 @@ const char *rdz_logical_kernel(void)
 static int classify(const int32_t *values, size_t n, rdz_planes *p, zb_buf *scratch,
                     rdz_error *e)
 {
-    rdz_acc acc;
     size_t done = 0;
-    memset(&acc, 0, sizeof acc);
     p->plane_len = plane_len(n);
     zb_buf_reset(scratch);
     if (zb_put_zeros(scratch, 2 * p->plane_len)) return rdz_memory(e, "logical bitplanes");
@@ -241,20 +262,16 @@ static int classify(const int32_t *values, size_t n, rdz_planes *p, zb_buf *scra
     p->na_plane = p->plane_len ? scratch->data + p->plane_len : scratch->data; /* NULL + 0 is UB */
     if (!rdz_scalar_only) {
 #ifdef RDZ_HAVE_AVX2_KERNEL
-        if (cpu_has_avx2() &&
-            classify_avx2(values, n, p->true_plane, p->na_plane, &acc, &done, e)) {
+        if (cpu_has_avx2() && classify_avx2(values, n, p->true_plane, p->na_plane, &done, e)) {
             return 1;
         }
 #endif
 #ifdef RDZ_HAVE_NEON_KERNEL
-        if (classify_neon(values, n, p->true_plane, p->na_plane, &acc, &done, e)) return 1;
+        if (classify_neon(values, n, p->true_plane, p->na_plane, &done, e)) return 1;
 #endif
     }
-    if (classify_scalar_from(values, done, n, p->true_plane, p->na_plane, &acc, e)) return 1;
-    p->counts[FALSE_STATE] = acc.f;
-    p->counts[TRUE_STATE] = acc.t;
-    p->counts[NA_STATE] = acc.a;
-    p->runs = acc.runs;
+    if (classify_scalar_from(values, done, n, p->true_plane, p->na_plane, e)) return 1;
+    plane_stats(p->true_plane, p->na_plane, n, p);
     return 0;
 }
 
@@ -394,11 +411,45 @@ static int encode_runs(const rdz_planes *p, size_t n, zb_buf *out, rdz_error *e)
     return 0;
 }
 
-static size_t find_short_period(const int32_t *values, size_t n)
+/* Bits [at, at + 64) of a plane of `len` bytes, little-endian bit order;
+   bits past the plane read as zero. */
+static uint64_t plane_bits64(const uint8_t *plane, size_t len, size_t at)
+{
+    size_t byte = at / 8, k;
+    unsigned shift = (unsigned)(at % 8);
+    uint64_t lo = 0, hi = 0;
+    if (byte + 16 <= len) {
+        lo = zb_rd_u64le(plane + byte);
+        hi = zb_rd_u64le(plane + byte + 8);
+    } else {
+        for (k = 0; k < 8 && byte + k < len; k++) lo |= (uint64_t)plane[byte + k] << (8 * k);
+        for (k = 0; k < 8 && byte + 8 + k < len; k++) hi |= (uint64_t)plane[byte + 8 + k] << (8 * k);
+    }
+    return shift ? lo >> shift | hi << (64 - shift) : lo;
+}
+
+/* Whether a plane's first n bits repeat with this period: bit i equals bit
+   i - period for every i from period on, compared 64 bits at a time. */
+static int plane_periodic(const uint8_t *plane, size_t len, size_t n, size_t period)
+{
+    size_t i;
+    for (i = period; i < n; i += 64) {
+        uint64_t mask = n - i >= 64 ? ~(uint64_t)0 : ((uint64_t)1 << (n - i)) - 1;
+        if ((plane_bits64(plane, len, i) ^ plane_bits64(plane, len, i - period)) & mask) return 0;
+    }
+    return 1;
+}
+
+/* The shortest period (2 to MAX_PERIOD, at most a quarter of the block) of
+   the values' states, from the planes: a sixteenth of the values' bytes. */
+static size_t find_short_period(const rdz_planes *p, size_t n)
 {
     size_t period, limit = n / 4 < MAX_PERIOD ? n / 4 : MAX_PERIOD;
     for (period = 2; period <= limit; period++) {
-        if (memcmp(values + period, values, (n - period) * sizeof *values) == 0) return period;
+        if (plane_periodic(p->true_plane, p->plane_len, n, period) &&
+            plane_periodic(p->na_plane, p->plane_len, n, period)) {
+            return period;
+        }
     }
     return 0;
 }
@@ -439,7 +490,7 @@ int rdz_logical_encode(const int32_t *values, size_t n, zb_buf *out, uint16_t *e
     exceptions = n - p.counts[def];
     sparse_len = SPARSE_HEADER + exceptions * 2;
     run_len = RUN_HEADER + p.runs * RUN_RECORD;
-    if (p.runs > n / 2) period = find_short_period(values, n);
+    if (p.runs > n / 2) period = find_short_period(&p, n);
     if (period) {
         size_t periodic_len = PERIODIC_HEADER + packed_len(period);
         if (periodic_len < dense_len && periodic_len < sparse_len && periodic_len < run_len) {
@@ -502,6 +553,25 @@ static int decode_constant(const uint8_t *enc, size_t len, size_t n, int32_t *ou
     return 0;
 }
 
+/* Eight values from a byte of the TRUE plane and one of the NA plane:
+   1 where TRUE, INT_MIN where NA, 0 elsewhere. */
+static void dense_expand8(uint8_t t, uint8_t a, int32_t *out)
+{
+#ifdef RDZ_HAVE_NEON_KERNEL
+    static const uint32_t lo_init[4] = {1, 2, 4, 8}, hi_init[4] = {16, 32, 64, 128};
+    const uint32x4_t lo = vld1q_u32(lo_init), hi = vld1q_u32(hi_init);
+    const uint32x4_t one = vdupq_n_u32(1), sign = vdupq_n_u32(0x80000000u);
+    const uint32x4_t vt = vdupq_n_u32(t), va = vdupq_n_u32(a);
+    uint32_t *o = (uint32_t *)(void *)out;
+    vst1q_u32(o, vorrq_u32(vandq_u32(vtstq_u32(vt, lo), one), vandq_u32(vtstq_u32(va, lo), sign)));
+    vst1q_u32(o + 4, vorrq_u32(vandq_u32(vtstq_u32(vt, hi), one), vandq_u32(vtstq_u32(va, hi), sign)));
+#else
+    uint32_t *o = (uint32_t *)(void *)out;
+    int k;
+    for (k = 0; k < 8; k++) o[k] = ((uint32_t)(t >> k) & 1u) | ((uint32_t)(a >> k) & 1u) << 31;
+#endif
+}
+
 static int decode_dense(const uint8_t *enc, size_t len, size_t n, int32_t *out, rdz_error *e)
 {
     const uint8_t *planes[3] = {NULL, NULL, NULL};
@@ -540,7 +610,22 @@ static int decode_dense(const uint8_t *enc, size_t len, size_t n, int32_t *out, 
             }
         }
     }
-    for (b = 0; b < bitmap; b++) {
+    /* TRUE is 1 and NA is INT_MIN, bit 0 and bit 31, and the planes never
+       overlap: each value is its TRUE bit or-ed with its NA bit moved up.
+       Whole 64-bit words of the planes first, then the tail byte by byte. */
+    for (b = 0; b + 8 <= bitmap && n - i >= 64; b += 8) {
+        uint64_t f = planes[0] ? zb_rd_u64le(planes[0] + b) : 0,
+                 t = planes[1] ? zb_rd_u64le(planes[1] + b) : 0,
+                 a = planes[2] ? zb_rd_u64le(planes[2] + b) : 0, d;
+        int k;
+        if ((f & t) | (f & a) | (t & a)) return rdz_invalid(e, "overlapping logical dense planes");
+        d = ~(f | t | a);
+        if (def == TRUE_STATE) t |= d;
+        if (def == NA_STATE) a |= d;
+        for (k = 0; k < 8; k++) dense_expand8((uint8_t)(t >> (8 * k)), (uint8_t)(a >> (8 * k)), out + i + 8 * (size_t)k);
+        i += 64;
+    }
+    for (; b < bitmap; b++) {
         uint8_t f = planes[0] ? planes[0][b] : 0, t = planes[1] ? planes[1][b] : 0,
                 a = planes[2] ? planes[2][b] : 0, d;
         int k;
@@ -548,8 +633,13 @@ static int decode_dense(const uint8_t *enc, size_t len, size_t n, int32_t *out, 
         d = (uint8_t)(valid_bits(b, bitmap, n) & ~(f | t | a));
         if (def == TRUE_STATE) t |= d;
         if (def == NA_STATE) a |= d;
-        for (k = 0; k < 8 && i < n; k++, i++) {
-            out[i] = (t >> k) & 1u ? 1 : (a >> k) & 1u ? RDZ_LOGICAL_NA : 0;
+        if (n - i >= 8) {
+            dense_expand8(t, a, out + i);
+            i += 8;
+        } else {
+            for (k = 0; i < n; k++, i++) {
+                out[i] = (int32_t)(((uint32_t)(t >> k) & 1u) | ((uint32_t)(a >> k) & 1u) << 31);
+            }
         }
     }
     return 0;
