@@ -932,6 +932,9 @@ typedef struct {
     SEXP targets; /* R_NilValue, or objects to read alone (0-based ids; held
                      by the caller): the result is the list of them */
     zb_buf want;  /* with a selection: a byte per object, set to read it */
+    SEXP window;  /* R_NilValue, or c(lo, hi): read the root's rows (a data frame's
+                     vector columns and row names) or elements [lo, hi) */
+    zb_buf windows; /* rdz_window per object */
     int threads;
     rdz_error e;
     int failed;
@@ -1068,6 +1071,69 @@ static int rdz_is_data_table(SEXP x)
     return rdz_has_class(Rf_getAttrib(x, R_ClassSymbol), "data.table");
 }
 
+static int rdz_windowable(const rdz_object *o)
+{
+    switch (o->type_tag) {
+    case RDZ_TYPE_LOGICAL:
+    case RDZ_TYPE_INTEGER:
+    case RDZ_TYPE_DOUBLE:
+    case RDZ_TYPE_CHARACTER:
+    case RDZ_TYPE_FACTOR: return 1;
+    default: return 0;
+    }
+}
+
+static void rdz_window_object(const rdz_reader *r, rdz_window *w, uint32_t id, uint64_t lo,
+                              uint64_t hi)
+{
+    const rdz_object *o = &r->objects[id];
+    if (o->type_tag == RDZ_TYPE_REFERENCE) { /* a shared column: its target, read once */
+        id = o->first_child;
+        o = &r->objects[id];
+    }
+    if (!rdz_windowable(o)) return;
+    w[id].lo = lo;
+    w[id].hi = hi;
+    w[id].on = 1;
+}
+
+/* With a window: the root's rows. A data frame's vector columns and its
+   stored row names, or a vector and its names; other columns (lists, data
+   frames) are read whole, for R to subset. */
+static int rdz_window_plan(rdz_graph_in *g)
+{
+    const rdz_reader *r = &g->r;
+    const rdz_object *root = &r->objects[0];
+    double lo = REAL(g->window)[0], hi = REAL(g->window)[1];
+    uint64_t rows = root->logical_len; /* a data frame's rows, a vector's elements */
+    rdz_window *w;
+    uint32_t k, a;
+    if (root->type_tag == RDZ_TYPE_LIST || root->type_tag == RDZ_TYPE_NULL ||
+        root->type_tag == RDZ_TYPE_REFERENCE) {
+        return rdz_unsupported(&g->e, "rows of a root that is not a data frame or a vector");
+    }
+    if (!(lo >= 0 && hi >= lo && hi <= (double)rows)) return rdz_limit(&g->e, "row range");
+    if (zb_put_zeros(&g->windows, (size_t)r->nobjects * sizeof(rdz_window))) {
+        return rdz_memory(&g->e, "the row range");
+    }
+    w = (rdz_window *)(void *)g->windows.data;
+    if (root->type_tag == RDZ_TYPE_DATA_FRAME) {
+        for (k = 0; k < root->child_count; k++) {
+            rdz_window_object(r, w, root->first_child + k, (uint64_t)lo, (uint64_t)hi);
+        }
+    } else {
+        rdz_window_object(r, w, 0, (uint64_t)lo, (uint64_t)hi);
+    }
+    for (a = 0; a < root->attribute_count; a++) { /* names of a vector, row names of a frame */
+        const rdz_attribute *at = &r->attributes[root->first_attribute + a];
+        if ((root->type_tag != RDZ_TYPE_DATA_FRAME && at->flags == RDZ_ATTRIBUTE_FLAG_NAMES) ||
+            at->flags == RDZ_ATTRIBUTE_FLAG_ROW_NAMES) {
+            rdz_window_object(r, w, at->value_object_id, (uint64_t)lo, (uint64_t)hi);
+        }
+    }
+    return 0;
+}
+
 /* Builds the whole value of an open native file. */
 static SEXP rdz_graph_body(void *data)
 {
@@ -1077,6 +1143,7 @@ static SEXP rdz_graph_body(void *data)
     rdz_graph_sinks sinks;
     rdz_r_names *names;
     const uint8_t *want = NULL;
+    const rdz_window *windows;
     int selecting = g->select != R_NilValue, targeting = g->targets != R_NilValue;
     g->failed = 1;
     if (selecting) {
@@ -1086,6 +1153,8 @@ static SEXP rdz_graph_body(void *data)
         if (rdz_target_mask(g)) return R_NilValue;
         want = g->want.data;
     }
+    if (g->window != R_NilValue && rdz_window_plan(g)) return R_NilValue;
+    windows = g->window != R_NilValue ? (const rdz_window *)(const void *)g->windows.data : NULL;
     for (i = 0; i < n; i++) {
         const rdz_object *o = &r->objects[i];
         SEXP x;
@@ -1102,15 +1171,20 @@ static SEXP rdz_graph_body(void *data)
             SET_VECTOR_ELT(g->holder, i, VECTOR_ELT(g->holder, o->first_child));
             continue;
         }
-        switch (o->type_tag) {
-        case RDZ_TYPE_LOGICAL: x = Rf_allocVector(LGLSXP, (R_xlen_t)o->logical_len); break;
-        case RDZ_TYPE_INTEGER:
-        case RDZ_TYPE_FACTOR: x = Rf_allocVector(INTSXP, (R_xlen_t)o->logical_len); break;
-        case RDZ_TYPE_DOUBLE: x = Rf_allocVector(REALSXP, (R_xlen_t)o->logical_len); break;
-        case RDZ_TYPE_CHARACTER: x = Rf_allocVector(STRSXP, (R_xlen_t)o->logical_len); break;
-        case RDZ_TYPE_LIST:
-        case RDZ_TYPE_DATA_FRAME: x = Rf_allocVector(VECSXP, (R_xlen_t)o->child_count); break;
-        default: x = R_NilValue; break;
+        {
+            /* a windowed object holds its window */
+            R_xlen_t len = windows && windows[i].on ? (R_xlen_t)(windows[i].hi - windows[i].lo)
+                                                    : (R_xlen_t)o->logical_len;
+            switch (o->type_tag) {
+            case RDZ_TYPE_LOGICAL: x = Rf_allocVector(LGLSXP, len); break;
+            case RDZ_TYPE_INTEGER:
+            case RDZ_TYPE_FACTOR: x = Rf_allocVector(INTSXP, len); break;
+            case RDZ_TYPE_DOUBLE: x = Rf_allocVector(REALSXP, len); break;
+            case RDZ_TYPE_CHARACTER: x = Rf_allocVector(STRSXP, len); break;
+            case RDZ_TYPE_LIST:
+            case RDZ_TYPE_DATA_FRAME: x = Rf_allocVector(VECSXP, (R_xlen_t)o->child_count); break;
+            default: x = R_NilValue; break;
+            }
         }
         SET_VECTOR_ELT(g->holder, i, x);
         if (o->type_tag == RDZ_TYPE_CHARACTER) {
@@ -1135,7 +1209,8 @@ static SEXP rdz_graph_body(void *data)
     sinks.ctx = g;
     sinks.values = rdz_r_values;
     sinks.strings = rdz_r_sink;
-    if (rdz_graph_read_some(&g->v, r, &sinks, want, g->threads, rdz_tick, NULL, &g->e)) {
+    if (rdz_graph_read_window(&g->v, r, &sinks, want, windows, g->threads, rdz_tick, NULL,
+                              &g->e)) {
         return R_NilValue;
     }
 
@@ -1241,7 +1316,10 @@ static SEXP rdz_graph_body(void *data)
             if (!have_rn) {
                 SEXP rn = PROTECT(Rf_allocVector(INTSXP, 2));
                 INTEGER(rn)[0] = NA_INTEGER;
-                INTEGER(rn)[1] = -(int)o->logical_len;
+                /* a frame read over a window has its rows */
+                INTEGER(rn)[1] = i == 0 && windows
+                                     ? -(int)(REAL(g->window)[1] - REAL(g->window)[0])
+                                     : -(int)o->logical_len;
                 Rf_setAttrib(x, R_RowNamesSymbol, rn);
                 UNPROTECT(1);
             }
@@ -1282,6 +1360,7 @@ static void rdz_graph_in_finalize(SEXP ptr)
         rdz_reader_close(&g->r);
         zb_buf_release(&g->sinks);
         zb_buf_release(&g->want);
+        zb_buf_release(&g->windows);
         free(g);
         R_ClearExternalPtr(ptr);
     }
@@ -1296,15 +1375,16 @@ static void rdz_graph_in_cleanup(void *data, Rboolean jump)
    (its buffers and file) and closes; with `select` (0-based integers, or
    R_NilValue for all), only those children of a list or data frame root. */
 static SEXP rdz_native_read_in(rdz_reader *opened, int threads, SEXP select, SEXP targets,
-                               rdz_error *e, int *failed);
+                               SEXP window, rdz_error *e, int *failed);
 
-SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, rdz_error *e, int *failed)
+SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, SEXP window, rdz_error *e,
+                       int *failed)
 {
-    return rdz_native_read_in(opened, threads, select, R_NilValue, e, failed);
+    return rdz_native_read_in(opened, threads, select, R_NilValue, window, e, failed);
 }
 
 static SEXP rdz_native_read_in(rdz_reader *opened, int threads, SEXP select, SEXP targets,
-                               rdz_error *e, int *failed)
+                               SEXP window, rdz_error *e, int *failed)
 {
     SEXP ptr, cont, out, holder;
     rdz_graph_in *g;
@@ -1322,12 +1402,14 @@ static SEXP rdz_native_read_in(rdz_reader *opened, int threads, SEXP select, SEX
     rdz_vec_init(&g->v);
     g->select = select;
     g->targets = targets;
+    g->window = window;
     g->threads = threads;
     R_SetExternalPtrAddr(ptr, g);
     holder = Rf_allocVector(VECSXP, 2 * (R_xlen_t)g->r.nobjects);
     R_SetExternalPtrProtected(ptr, holder);
     g->holder = holder;
-    if (zb_buf_alloc(&g->want, 0, 0) || zb_buf_alloc(&g->sinks, 0, 0) ||
+    if (zb_buf_alloc(&g->want, 0, 0) || zb_buf_alloc(&g->windows, 0, 0) ||
+        zb_buf_alloc(&g->sinks, 0, 0) ||
         zb_put_zeros(&g->sinks, (size_t)g->r.nobjects * sizeof(rdz_r_names))) {
         rdz_memory(e, "the reader");
         rdz_graph_in_finalize(ptr);
@@ -1448,7 +1530,7 @@ SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
     if (object && (r.objects[object].child_count || r.objects[object].attribute_count)) {
         /* a value with parts of its own: read with the whole object */
         SEXP x, sym = Rf_install(w);
-        x = PROTECT(rdz_native_read_r(&r, 1, R_NilValue, &e, &failed)); /* closes r */
+        x = PROTECT(rdz_native_read_r(&r, 1, R_NilValue, R_NilValue, &e, &failed)); /* closes r */
         if (failed) {
             UNPROTECT(1);
             return rdz_failure(&e);
@@ -1497,7 +1579,7 @@ SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
     view.objects = &only;
     view.nobjects = 1;
     view.nattributes = 0;
-    out = PROTECT(rdz_native_read_r(&view, 1, R_NilValue, &e, &failed)); /* closes the view's buffers */
+    out = PROTECT(rdz_native_read_r(&view, 1, R_NilValue, R_NilValue, &e, &failed)); /* closes the view's buffers */
     UNPROTECT(1);
     if (failed) return rdz_failure(&e);
     return out;
@@ -1645,7 +1727,7 @@ SEXP rdz_c_read_objects(SEXP path, SEXP ids, SEXP settings)
         rdz_reader_close(&r);
         return rdz_failure(&e);
     }
-    out = PROTECT(rdz_native_read_in(&r, threads, R_NilValue, ids, &e, &failed)); /* closes r */
+    out = PROTECT(rdz_native_read_in(&r, threads, R_NilValue, ids, R_NilValue, &e, &failed)); /* closes r */
     UNPROTECT(1);
     return failed ? rdz_failure(&e) : out;
 }

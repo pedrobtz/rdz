@@ -215,7 +215,7 @@ SEXP rdz_c_info(SEXP path)
 
 SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP metadata,
                        int fail_after);
-SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, int *native);
+SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *native);
 
 SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP metadata)
 {
@@ -224,10 +224,10 @@ SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP m
 
 /* list(value, native): whether the file was native, so R knows what is
    left to it (a generic value's selection) */
-SEXP rdz_c_read(SEXP path, SEXP settings, SEXP select)
+SEXP rdz_c_read(SEXP path, SEXP settings, SEXP select, SEXP window)
 {
     int native = 0;
-    SEXP value = PROTECT(rdz_generic_read(path, settings, select, &native)), out;
+    SEXP value = PROTECT(rdz_generic_read(path, settings, select, window, &native)), out;
     if (Rf_inherits(value, "rdz_failure")) {
         UNPROTECT(1);
         return value;

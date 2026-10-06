@@ -138,6 +138,11 @@ rdz_unserialize <- function(bytes, select = NULL) {
 #' @param select `NULL` (everything), or the columns of a data frame or the
 #'   elements of a list to read: distinct names, or distinct positive
 #'   positions.
+#' @param rows `NULL` (all), or the rows of a data frame or elements of a
+#'   vector to read: positive positions, in any order. From a natively
+#'   written file only the blocks covering `range(rows)` are read; each column
+#'   is then taken with `[`, so a Date or factor column keeps its class. Stored
+#'   row names are taken too; automatic ones stay automatic (`1:length(rows)`).
 #' @returns The R object stored in `path`, or its selected part.
 #' @examples
 #' path <- tempfile(fileext = ".rdz")
@@ -147,19 +152,86 @@ rdz_unserialize <- function(bytes, select = NULL) {
 #' read_rdz(path, select = c("mpg", "wt"))
 #' unlink(path)
 #' @export
-read_rdz <- function(path, select = NULL) {
+read_rdz <- function(path, select = NULL, rows = NULL) {
   path <- validate_existing_rdz_path(path)
   index <- NULL
+  window <- NULL
   if (!is.null(select)) {
     info <- rdz_info(path)
-    if (identical(info$codec, "native_v1")) {
-      index <- rdz_select_index(path, info, select)
-    }
+    if (identical(info$codec, "native_v1")) index <- rdz_select_index(path, info, select)
   }
-  read <- rdz_check(.Call(rdz_c_read, path, rdz_settings(), index))
+  if (!is.null(rows)) {
+    # the window covering the rows; the C reader checks it against the root
+    # (a generic file ignores it)
+    rows <- rdz_rows_check(rows)
+    window <- if (length(rows)) c(min(rows) - 1, max(rows)) else c(0, 0)
+  }
+  read <- tryCatch(
+    rdz_check(.Call(rdz_c_read, path, rdz_settings(), index, window)),
+    rdz_limit_error = function(e) rdz_rows_refused(path, rows, e),
+    rdz_unsupported_error = function(e) rdz_rows_refused(path, rows, e)
+  )
   value <- read[[1L]]
   if (!read[[2L]] && !is.null(select)) value <- rdz_select_generic(value, select)
+  if (!is.null(rows)) value <- rdz_rows_take(value, rows, if (is.null(window)) 0 else window[[1L]])
   value
+}
+
+# Words the reader's refusal of `rows` for people (the directory says why).
+rdz_rows_refused <- function(path, rows, e) {
+  if (is.null(rows)) stop(e)
+  root <- rdz_directory(path)$objects[1L, ]
+  if (!root$type_name %in% c("data.frame", "logical", "integer", "double", "character",
+                             "factor")) {
+    stop("`rows` needs a data frame or a vector; use `select` for a list's elements.",
+         call. = FALSE)
+  }
+  if (length(rows) && max(rows) > root$length) {
+    stop("`rows` must be at most ", root$length, ".", call. = FALSE)
+  }
+  stop(e)
+}
+
+rdz_rows_check <- function(rows) {
+  if (!is.numeric(rows) || anyNA(rows) || any(rows < 1) || any(rows != trunc(rows))) {
+    stop("`rows` must be positive whole numbers.", call. = FALSE)
+  }
+  rows
+}
+
+# The rows of a value read whole or over a window starting after row `lo`:
+# a vector's elements (through `[`, so its class's method applies), or a
+# data frame's rows, each column taken the same way. A column read over the
+# window (a vector) is shorter than the frame's rows was; a column read
+# whole (a list, a data frame) is not. Row names: stored ones are taken
+# too; automatic ones stay automatic.
+rdz_rows_take <- function(value, rows, lo) {
+  if (!is.data.frame(value)) {
+    if (is.list(value) && !is.object(value)) {
+      stop("`rows` needs a data frame or a vector; use `select` for a list's elements.",
+           call. = FALSE)
+    }
+    if (max(c(rows, 0)) > length(value) + lo) stop("`rows` must be at most ", length(value), ".", call. = FALSE)
+    return(value[rows - lo])
+  }
+  n <- .row_names_info(value, 2L) # rows read
+  cols <- lapply(unclass(value), function(col) {
+    whole <- (is.list(col) && !is.object(col)) || is.data.frame(col) || NROW(col) != n
+    if (whole) col[rows] else col[rows - lo]
+  })
+  stored <- .row_names_info(value, 0L)
+  out <- cols
+  attributes(out) <- list(names = names(value))
+  attr(out, "row.names") <- if (is.integer(stored) && length(stored) == 2L && is.na(stored[[1L]])) {
+    .set_row_names(length(rows))
+  } else {
+    stored[rows - lo]
+  }
+  class(out) <- class(value)
+  if (inherits(value, "data.table")) {
+    attr(out, ".internal.selfref") <- attr(value, ".internal.selfref", exact = TRUE)
+  }
+  out
 }
 
 # User metadata as rdz_info() returns it: a named UTF-8 character vector

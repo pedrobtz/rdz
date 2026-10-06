@@ -30,8 +30,8 @@
 
 #include "../core/rdz_vector.h"
 
-SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, rdz_error *e,
-                       int *failed);
+SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, SEXP window,
+                       rdz_error *e, int *failed);
 
 /* settings: c(level, threads, block_size); level 0 stores raw, block_size 0
    is the format's 1 MiB. */
@@ -404,7 +404,7 @@ static void rdz_gen_in_cleanup(void *data, Rboolean jump)
 /* select: R_NilValue, or 0-based children of a native list or data frame
    root to read alone (R selects from a generic root after reading it).
    *native: whether the file was native. */
-SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, int *native)
+SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *native)
 {
     rdz_settings set = rdz_settings_of(settings);
     rdz_error e;
@@ -430,7 +430,7 @@ SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, int *native)
     if (g->r.codec_id == RDZ_CODEC_NATIVE_V1) {
         int failed;
         /* the native reader takes the open reader over */
-        out = PROTECT(rdz_native_read_r(&g->r, set.threads, select, &e, &failed));
+        out = PROTECT(rdz_native_read_r(&g->r, set.threads, select, window, &e, &failed));
         rdz_gen_in_finalize(ptr);
         UNPROTECT(3);
         return failed ? rdz_failure(&e) : out;

@@ -33,6 +33,8 @@ typedef struct {
     void *content_mem;
     const uint8_t *metadata;  /* a metadata section rdz_graph_write() records (or NULL) */
     uint32_t metadata_len;
+    zb_buf block_plan;        /* windowed reads: per block, include and start */
+    zb_buf scratch;           /* windowed reads: a block decoded whole */
 } rdz_vec;
 
 void rdz_vec_init(rdz_vec *v);

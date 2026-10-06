@@ -1,5 +1,42 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-06: plan-c Stage R
+
+`read_rdz(rows = )` reads a data frame's rows or a vector's elements. Rows
+are positive positions, in any order, combinable with `select`. No format
+change was needed.
+
+- **Core:** `rdz_graph_read_window()` gives each object an element window.
+  Only overlapping blocks are read, and for strings also the dictionary
+  blocks before the window's end, since indices refer back to them.
+  - A numeric block inside the window decodes in place; a partial one
+    decodes into scratch and its overlap is copied.
+  - String blocks pass only their slice to the sinks.
+  - The block plan and the scratch buffer live in `rdz_vec`, freed by the
+    finalizer.
+- **Adapter:** it windows a data frame's vector columns (shared ones through
+  their target) and its stored row names, or a vector and its names. List and
+  data frame columns are read whole.
+- **R:** it reads the covering span `range(rows)`, then takes each column
+  with `[`, so a column's class method applies. Stored row names are taken
+  too; automatic ones stay automatic.
+- **Generic files** are read whole and subset by the same rule.
+- **Tests:** every type's block boundaries, dictionary chunks, decimal
+  blocks, shared and list columns, tibble and data.table, raw vectors, and a
+  corrupt block outside the rows. The fuzz target also reads every input
+  with windows.
+
+Against fst's `from`/`to` (5e6-row frame, one thread):
+
+| Read | rdz | fst |
+|---|---|---|
+| 100,000 rows, all columns | 9 ms | 5 ms |
+| 100,000 rows, two columns | 5 ms | 5 ms |
+| One row | 3 ms | under 1 ms |
+
+The rest of the gap is block size: rdz decodes whole 1 MiB blocks, fst
+smaller chunks.
+
 ## Checkpoint 2026-10-06: plan-c Stage Q
 
 `rdz_save(..., list =, file =)` and `rdz_load(file, names =, envir =)`, as

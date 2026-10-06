@@ -54,6 +54,21 @@ int rdz_graph_read_some(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sinks,
                         const uint8_t *want, int threads, rdz_tick_fn tick, void *tick_ctx,
                         rdz_error *e);
 
+/* A window of a vector's elements, [lo, hi), for row ranges (Stage R). */
+typedef struct {
+    uint64_t lo, hi;
+    int on;
+} rdz_window;
+
+/* The same, with windows (r->nobjects of them, or NULL): a windowed
+   logical, integer, double, factor or character object is read only over
+   its window, into a destination (and sink) of hi - lo elements; only the
+   blocks overlapping it are read, and for strings the dictionary blocks
+   before its end. */
+int rdz_graph_read_window(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sinks,
+                          const uint8_t *want, const rdz_window *windows, int threads,
+                          rdz_tick_fn tick, void *tick_ctx, rdz_error *e);
+
 /* Validates the object graph of a native file's directory (the container
    reader calls it). */
 int rdz_graph_check(const rdz_reader *r, rdz_error *e);

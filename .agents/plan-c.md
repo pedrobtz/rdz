@@ -348,7 +348,7 @@ thread count.
 
 ### Stages N–R — From other serialisers · M
 
-**Status:** N done 2026-10-06; O to R in progress (current-state.md).
+**Status:** done 2026-10-06 (current-state.md, checkpoints for Stages N to R).
 
 **Do:**
 - **N:** user metadata (Arrow schema metadata, HDF5 attributes).

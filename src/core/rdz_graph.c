@@ -199,8 +199,11 @@ done:
 
 /* ---- reading ---------------------------------------------------------------------- */
 
+/* A string block into the sink; of its elements (not its dictionary
+   entries), only [from, from + take). */
 static int decode_strings(rdz_reader *r, const rdz_block *b, const zb_buf *rec,
-                          const rdz_names_sink *sink, size_t *entries, rdz_error *e)
+                          const rdz_names_sink *sink, size_t *entries, size_t from, size_t take,
+                          rdz_error *e)
 {
     size_t count = (size_t)b->logical_count, bytes;
     switch (b->encoding) {
@@ -218,7 +221,10 @@ static int decode_strings(rdz_reader *r, const rdz_block *b, const zb_buf *rec,
             return sink->entries(sink->ctx, (const rdz_str *)(const void *)r->records.data, count,
                                  e);
         }
-        return sink->plain(sink->ctx, (const rdz_str *)(const void *)r->records.data, count, e);
+        /* an empty block leaves the buffer NULL, and NULL + 0 is undefined */
+        return sink->plain(sink->ctx,
+                           take ? (const rdz_str *)(const void *)r->records.data + from : NULL,
+                           take, e);
     case RDZ_ENCODING_STRING_DICT_INDICES:
         if (zb_size_mul(count, sizeof(uint32_t), &bytes)) return rdz_limit(e, "dictionary indices");
         zb_buf_reset(&r->ids);
@@ -227,7 +233,9 @@ static int decode_strings(rdz_reader *r, const rdz_block *b, const zb_buf *rec,
                                       (uint32_t *)(void *)r->ids.data, e)) {
             return 1;
         }
-        return sink->indices(sink->ctx, (const uint32_t *)(const void *)r->ids.data, count, e);
+        return sink->indices(sink->ctx,
+                             take ? (const uint32_t *)(const void *)r->ids.data + from : NULL,
+                             take, e);
     default:
         return rdz_invalid(e, "unexpected character block encoding");
     }
@@ -258,10 +266,61 @@ int rdz_graph_read_some(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sinks,
                         const uint8_t *want, int threads, rdz_tick_fn tick, void *tick_ctx,
                         rdz_error *e)
 {
+    return rdz_graph_read_window(v, r, sinks, want, NULL, threads, tick, tick_ctx, e);
+}
+
+/* With windows: per block, whether to read it (a window's overlapping
+   blocks, a windowed string object's dictionary blocks before the window's
+   end, every block of an unwindowed object) and the element its values
+   start at. */
+typedef struct {
+    uint64_t start;
+    uint8_t include;
+} rdz_block_plan;
+
+static int plan_blocks(rdz_vec *v, const rdz_reader *r, const rdz_window *windows,
+                       rdz_error *e)
+{
+    rdz_block_plan *bp;
+    uint32_t k, b;
+    zb_buf_reset(&v->block_plan);
+    if (zb_put_zeros(&v->block_plan, (size_t)r->nblocks * sizeof(rdz_block_plan))) {
+        return rdz_memory(e, "the block plan");
+    }
+    bp = (rdz_block_plan *)(void *)v->block_plan.data;
+    for (k = 0; k < r->nobjects; k++) {
+        const rdz_object *o = &r->objects[k];
+        uint64_t pos = 0;
+        for (b = o->first_block; b < o->first_block + o->block_count; b++) {
+            const rdz_block *blk = &r->blocks[b];
+            bp[b].start = pos;
+            if (!windows || !windows[k].on) {
+                bp[b].include = 1;
+            } else if (blk->encoding == RDZ_ENCODING_STRING_DICT_ENTRIES) {
+                bp[b].include = pos < windows[k].hi; /* indices refer back to them */
+                continue;                            /* entries are not elements */
+            } else {
+                bp[b].include = pos < windows[k].hi && pos + blk->logical_count > windows[k].lo;
+            }
+            pos += blk->logical_count;
+        }
+    }
+    return 0;
+}
+
+int rdz_graph_read_window(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sinks,
+                          const uint8_t *want, const rdz_window *windows, int threads,
+                          rdz_tick_fn tick, void *tick_ctx, rdz_error *e)
+{
     uint32_t next = 0, object = 0, owner = 0;
     size_t filled = 0, entries = 0;
     void *dest = NULL;
     const rdz_names_sink *sink = NULL;
+    const rdz_block_plan *bp = NULL;
+    if (windows) {
+        if (plan_blocks(v, r, windows, e)) return 1;
+        bp = (const rdz_block_plan *)(const void *)v->block_plan.data;
+    }
     if (v->have_pipe) {
         rdz_pipeline_free(&v->pipe);
         v->have_pipe = 0;
@@ -289,6 +348,10 @@ int rdz_graph_read_some(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sinks,
                     next = r->objects[owner].first_block + r->objects[owner].block_count;
                     continue;
                 }
+            }
+            if (bp && !bp[next].include) { /* outside its object's window */
+                next++;
+                continue;
             }
             s = rdz_pipeline_next(&v->pipe, &must);
             if (rdz_reader_read_stored(r, next, &s->in, e)) {
@@ -319,9 +382,43 @@ int rdz_graph_read_some(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sinks,
         }
         if (object == r->nobjects) return rdz_invalid(e, "a block belongs to no object");
         o = &r->objects[object];
-        if (o->type_tag == RDZ_TYPE_CHARACTER) {
+        if (windows && windows[object].on) {
+            /* the overlap of the block's elements with the window */
+            uint64_t start = bp[index].start, n = b->logical_count, lo = windows[object].lo,
+                     hi = windows[object].hi, a = start > lo ? start : lo,
+                     z = start + n < hi ? start + n : hi;
+            if (o->type_tag == RDZ_TYPE_CHARACTER) {
+                if (!sink) sink = sinks->strings(sinks->ctx, object);
+                if (b->encoding == RDZ_ENCODING_STRING_DICT_ENTRIES) {
+                    a = start;
+                    z = start; /* none of its elements: its entries go to the sink whole */
+                }
+                if (decode_strings(r, b, s->result, sink, &entries, (size_t)(a - start),
+                                   (size_t)(z - a), e)) {
+                    return 1;
+                }
+            } else {
+                size_t width = o->type_tag == RDZ_TYPE_DOUBLE ? 8 : 4;
+                if (!dest) dest = sinks->values(sinks->ctx, object);
+                if (a == start && z == start + n) {
+                    if (decode_values(o->type_tag, b, s->result, dest, (size_t)(start - lo), e)) {
+                        return 1;
+                    }
+                } else {
+                    zb_buf_reset(&v->scratch);
+                    if (!zb_put_raw(&v->scratch, (size_t)n * width + 8)) {
+                        return rdz_memory(e, "a block");
+                    }
+                    if (decode_values(o->type_tag, b, s->result, v->scratch.data, 0, e)) return 1;
+                    memcpy((uint8_t *)dest + (size_t)(a - lo) * width,
+                           v->scratch.data + (size_t)(a - start) * width, (size_t)(z - a) * width);
+                }
+            }
+        } else if (o->type_tag == RDZ_TYPE_CHARACTER) {
             if (!sink) sink = sinks->strings(sinks->ctx, object);
-            if (decode_strings(r, b, s->result, sink, &entries, e)) return 1;
+            if (decode_strings(r, b, s->result, sink, &entries, 0, (size_t)b->logical_count, e)) {
+                return 1;
+            }
         } else {
             if (!dest) dest = sinks->values(sinks->ctx, object);
             if (b->logical_count > o->logical_len - filled) {

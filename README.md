@@ -18,8 +18,9 @@ through R's own serializer, streamed through the same blocks.
 - **Generic:** anything else, such as environments, closures, calls, complex
   and raw vectors, and S4 objects, goes through R serialization as one whole
   root, so sharing and references are kept.
-- **Selective:** `read_rdz(path, select = )` reads some columns of a data frame
-  or some elements of a list, decoding nothing else.
+- **Selective:** `read_rdz(path, select = , rows = )` reads some columns of a
+  data frame or elements of a list, and some rows of a data frame or
+  elements of a vector, decoding only the blocks they need.
 - **Inspectable:** `rdz_schema()` shows a native file's tree (each part's
   type, class, shape, attributes and size), and `rdz_attributes(path, object =
   c("sales", "date"))` reads any part's attributes, without decoding its data.

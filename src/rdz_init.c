@@ -8,7 +8,7 @@
 #include <R_ext/Visibility.h>
 
 SEXP rdz_c_info(SEXP path);
-SEXP rdz_c_read(SEXP path, SEXP settings, SEXP select);
+SEXP rdz_c_read(SEXP path, SEXP settings, SEXP select, SEXP window);
 SEXP rdz_c_zstd_version(void);
 SEXP rdz_c_try_write_native(SEXP x, SEXP path, SEXP strict, SEXP policy, SEXP settings,
                             SEXP metadata);
@@ -29,7 +29,7 @@ SEXP rdz_test_write_generic(SEXP payload, SEXP synopsis, SEXP path);
 
 static const R_CallMethodDef call_entries[] = {
     {"rdz_c_info", (DL_FUNC)&rdz_c_info, 1},
-    {"rdz_c_read", (DL_FUNC)&rdz_c_read, 3},
+    {"rdz_c_read", (DL_FUNC)&rdz_c_read, 4},
     {"rdz_c_zstd_version", (DL_FUNC)&rdz_c_zstd_version, 0},
     {"rdz_c_try_write_native", (DL_FUNC)&rdz_c_try_write_native, 6},
     {"rdz_c_read_native_attribute", (DL_FUNC)&rdz_c_read_native_attribute, 2},
