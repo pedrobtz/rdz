@@ -165,6 +165,19 @@ static int rdz_slot_state(rdz_pipeline *p, rdz_slot *s)
     return st;
 }
 
+/* Workers scan every slot's state under the lock, so the producer writes
+   it under the lock too once they run (rdz_slot_state() reads it so). */
+static void rdz_slot_set(rdz_pipeline *p, rdz_slot *s, int state)
+{
+    if (!p->started) {
+        s->state = state;
+        return;
+    }
+    pthread_mutex_lock(&p->mu);
+    s->state = state;
+    pthread_mutex_unlock(&p->mu);
+}
+
 rdz_slot *rdz_pipeline_oldest(rdz_pipeline *p, int wait)
 {
     rdz_slot *s;
@@ -188,7 +201,7 @@ rdz_slot *rdz_pipeline_next(rdz_pipeline *p, int *must_consume)
         return rdz_pipeline_oldest(p, 1);
     }
     *must_consume = 0;
-    s->state = RDZ_SLOT_FILLING;
+    rdz_slot_set(p, s, RDZ_SLOT_FILLING);
     s->seq = p->next_submit;
     s->failed = 0;
     zb_buf_reset(&s->in);
@@ -198,8 +211,7 @@ rdz_slot *rdz_pipeline_next(rdz_pipeline *p, int *must_consume)
 
 void rdz_pipeline_unget(rdz_pipeline *p, rdz_slot *s)
 {
-    (void)p;
-    s->state = RDZ_SLOT_FREE; /* FILLING slots are the producer's alone */
+    rdz_slot_set(p, s, RDZ_SLOT_FREE);
 }
 
 int rdz_pipeline_submit(rdz_pipeline *p, rdz_slot *s, rdz_error *e)
@@ -222,9 +234,7 @@ int rdz_pipeline_submit(rdz_pipeline *p, rdz_slot *s, rdz_error *e)
 
 void rdz_pipeline_release(rdz_pipeline *p, rdz_slot *s)
 {
-    if (p->started) pthread_mutex_lock(&p->mu);
-    s->state = RDZ_SLOT_FREE;
-    if (p->started) pthread_mutex_unlock(&p->mu);
+    rdz_slot_set(p, s, RDZ_SLOT_FREE);
     p->next_consume++;
 }
 

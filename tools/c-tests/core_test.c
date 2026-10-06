@@ -602,6 +602,23 @@ static void test_numeric(const char *tmpdir)
             numeric_case(RDZ_TYPE_DOUBLE, dv, 0, level, threads, path, 0);
         }
     }
+    /* an empty block of no bytes: only raw and shuffled layouts hold nothing
+       but values; the others have a header to read (never past `enc`) */
+    {
+        static const uint16_t ints[] = {10, 11, 12, 13, 14}, dbls[] = {20, 21, 22, 23};
+        rdz_error e;
+        size_t k;
+        for (k = 0; k < sizeof ints / sizeof *ints; k++) {
+            int refused = rdz_int_decode(NULL, 0, ints[k], 0, iv, &e) != 0;
+            CHECK(refused == (ints[k] > RDZ_ENCODING_INT_SHUFFLE), "empty integer block, encoding %u",
+                  (unsigned)ints[k]);
+        }
+        for (k = 0; k < sizeof dbls / sizeof *dbls; k++) {
+            int refused = rdz_dbl_decode(NULL, 0, dbls[k], 0, dv, &e) != 0;
+            CHECK(refused == (dbls[k] > RDZ_ENCODING_DBL_SHUFFLE), "empty double block, encoding %u",
+                  (unsigned)dbls[k]);
+        }
+    }
     /* mutations of a small multi-encoding file */
     {
         uint8_t *data;

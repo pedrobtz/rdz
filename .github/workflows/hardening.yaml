@@ -1,7 +1,8 @@
 # The R-free C core (plan-c.md, Stage B), outside R:
 #
 #   c-tests   tools/run-c-tests under gcc and clang: warnings are errors, ASan
-#             and UBSan on, against the Rust reference corpus
+#             and UBSan on, against the Rust reference corpus; and once
+#             under ThreadSanitizer
 #   vendor    tools/vendor/verify: the vendored zstd is what the manifest pins
 #   mutation  tools/run-mutation-check: every marked reader guard is
 #             load-bearing
@@ -39,7 +40,7 @@ jobs:
 
   c-tests:
     runs-on: ubuntu-latest
-    name: c-tests (${{ matrix.cc }}${{ matrix.cflags && ' strtod' || '' }})
+    name: c-tests (${{ matrix.cc }}${{ matrix.label && format(' {0}', matrix.label) || '' }})
     strategy:
       fail-fast: false
       matrix:
@@ -47,7 +48,14 @@ jobs:
         include:
           # the decimal decoder's x87 path (strtod), which i386 builds take
           - cc: clang
+            label: strtod
             cflags: -DRDZ_ALP_STRTOD
+          # the compression and read-ahead pipelines under ThreadSanitizer
+          # (which excludes ASan)
+          - cc: clang
+            label: tsan
+            cflags: -fsanitize=thread
+            sanitize: "0"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/checkout@v6
@@ -62,6 +70,7 @@ jobs:
         env:
           CC: ${{ matrix.cc }}
           RDZ_CFLAGS: ${{ matrix.cflags }}
+          RDZ_SANITIZE: ${{ matrix.sanitize || '1' }}
           ZUBIN_INCLUDE: ${{ github.workspace }}/.deps/zubin/inst/include
           ZUFAST_INCLUDE: ${{ github.workspace }}/.deps/zufast/inst/include
         run: tools/run-c-tests

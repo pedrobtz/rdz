@@ -5,6 +5,7 @@
 
 #include "rdz_container.h"
 #include "rdz_numeric.h"
+#include "rdz_string.h"
 
 /* ---- validation helpers --------------------------------------------------------- */
 
@@ -159,6 +160,13 @@ static int rdz_check_string_blocks(const rdz_object *o, const rdz_block *blocks,
     for (i = o->first_block; i < end; i++) {
         const rdz_block *b = &blocks[i];
         uint64_t count = b->logical_count;
+        /* every record has a header, so a block's bytes bound its strings,
+           and with them what a reader allocates for them */
+        int records = b->encoding == RDZ_ENCODING_STRING_PLAIN ||
+                      b->encoding == RDZ_ENCODING_STRING_DICT_ENTRIES;
+        if (records && count > b->decoded_len / RDZ_STRING_RECORD_HEADER) { /* GUARD: string-count */
+            return rdz_invalid(e, "a string block declares more strings than its bytes hold");
+        }
         switch (b->encoding) {
         case RDZ_ENCODING_STRING_PLAIN:
             if (elements > UINT64_MAX - count) return rdz_limit(e, "object logical length");

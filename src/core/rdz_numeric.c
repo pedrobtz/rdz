@@ -216,7 +216,10 @@ int rdz_int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, 
                    rdz_error *e)
 {
     size_t i;
-    if (!rdz_int_length_ok(encoding, n, len) && !(n == 0 && len == 0)) {
+    /* an empty block: only the layouts that hold nothing but values */
+    if (!rdz_int_length_ok(encoding, n, len) &&
+        !(n == 0 && len == 0 &&
+          (encoding == RDZ_ENCODING_INT_RAW || encoding == RDZ_ENCODING_INT_SHUFFLE))) {
         return rdz_invalid(e, "integer block length mismatch");
     }
     switch (encoding) {
@@ -387,7 +390,10 @@ int rdz_dbl_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, 
                    rdz_error *e)
 {
     size_t i;
-    if (!rdz_dbl_length_ok(encoding, n, len) && !(n == 0 && len == 0)) {
+    /* an empty block: only the layouts that hold nothing but values */
+    if (!rdz_dbl_length_ok(encoding, n, len) &&
+        !(n == 0 && len == 0 &&
+          (encoding == RDZ_ENCODING_DBL_RAW || encoding == RDZ_ENCODING_DBL_SHUFFLE))) {
         return rdz_invalid(e, "double block length mismatch");
     }
     switch (encoding) {
