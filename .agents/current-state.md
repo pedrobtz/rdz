@@ -1,5 +1,13 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-06: plan-c Stage Q
+
+`rdz_save(..., list =, file =)` and `rdz_load(file, names =, envir =)`, as
+`save()`/`load()` (npz, JLD2): a named list as the root; loading some objects
+reads only their blocks (tested with another object's data corrupt); generic
+objects (environments, functions) work through the generic codec; `rdz_load()`
+takes raw vectors too.
+
 ## Checkpoint 2026-10-06: plan-c Stage P
 
 Raw vectors. The output file gained a memory mode (open with a NULL path).
