@@ -71,6 +71,12 @@ write_rdz <- function(x, path, mode = c("auto", "native", "r")) {
 #' may describe the parts left out (a data.table's key), are not kept, and
 #' [rdz_attributes()] still reads them.
 #'
+#' A data.table's `.internal.selfref`, a pointer to the table itself, is never
+#' stored: every data.table comes back as from [readRDS()], marked as loaded
+#' from disk, and data.table rebuilds it by itself at the first change, at
+#' the root or nested in lists. rdz never calls or loads data.table. Tibbles
+#' need nothing rebuilt.
+#'
 #' @param path A single, non-missing path to read.
 #' @param select `NULL` (everything), or the columns of a data frame or the
 #'   elements of a list to read: distinct names, or distinct positive
@@ -93,15 +99,9 @@ read_rdz <- function(path, select = NULL) {
       index <- rdz_select_index(path, info, select)
     }
   }
-  value <- rdz_check(.Call(rdz_c_read, path, rdz_settings(), index))
-  if (!is.null(select) && is.null(index)) {
-    value <- rdz_select_generic(value, select)
-  }
-  # A data.table's .internal.selfref is not stored (it is a pointer to the
-  # object itself); data.table restores it, as it does for every reader.
-  if (inherits(value, "data.table") && requireNamespace("data.table", quietly = TRUE)) {
-    value <- data.table::setalloccol(value)
-  }
+  read <- rdz_check(.Call(rdz_c_read, path, rdz_settings(), index))
+  value <- read[[1L]]
+  if (!read[[2L]] && !is.null(select)) value <- rdz_select_generic(value, select)
   value
 }
 
@@ -152,6 +152,10 @@ rdz_select_generic <- function(value, select) {
   if (is.data.frame(value)) {
     attr(out, "row.names") <- .row_names_info(value, 0L)
     class(out) <- class(value)
+    # a data.table's, as read: data.table rebuilds it at the first change
+    if (inherits(value, "data.table")) {
+      attr(out, ".internal.selfref") <- attr(value, ".internal.selfref", exact = TRUE)
+    }
   }
   out
 }
@@ -234,102 +238,6 @@ print.rdz_info <- function(x, ...) {
     sep = ""
   )
   invisible(x)
-}
-
-#' Inspect an rdz Object Schema
-#'
-#' `rdz_schema()` reads the bounded directory without reading object data
-#' blocks. Native schemas are authoritative; generic schemas are bounded
-#' synopses and are marked non-authoritative.
-#'
-#' @param path A single, non-missing path to inspect.
-#' @returns A named schema list.
-#' @examples
-#' path <- tempfile(fileext = ".rdz")
-#' write_rdz(c(first = TRUE, second = NA), path)
-#' rdz_schema(path)
-#' unlink(path)
-#' @export
-rdz_schema <- function(path) {
-  info <- rdz_info(path)
-  structure(
-    c(
-      list(
-        codec = info$codec,
-        authoritative = info$authoritative,
-        exact_attributes = info$exact_attributes
-      ),
-      info$schema,
-      list(data_blocks_read = FALSE)
-    ),
-    class = "rdz_schema"
-  )
-}
-
-#' Read rdz Object Attributes
-#'
-#' Native supported attributes are independently addressable and can be read
-#' without decoding the root data blocks. Generic files require
-#' `allow_full = TRUE`, which explicitly permits a complete object read.
-#'
-#' @param path A single, non-missing path to inspect.
-#' @param object Object identifier. Phase 1 supports only the root, represented
-#'   by `NULL` or `0`.
-#' @param names Optional character vector selecting attribute names.
-#' @param allow_full Whether generic files may be fully deserialized.
-#' @returns A named list of attribute values.
-#' @examples
-#' path <- tempfile(fileext = ".rdz")
-#' write_rdz(c(first = TRUE, second = FALSE), path)
-#' rdz_attributes(path, names = "names")
-#' unlink(path)
-#' @export
-rdz_attributes <- function(path, object = NULL, names = NULL, allow_full = FALSE) {
-  path <- validate_existing_rdz_path(path)
-  if (!is.null(object) && !identical(object, 0L) && !identical(object, 0)) {
-    stop("Phase 1 supports attribute access only for the root object.", call. = FALSE)
-  }
-  if (!is.null(names) &&
-      (!is.character(names) || anyNA(names) || any(!nzchar(names)))) {
-    stop("`names` must be NULL or a character vector of non-empty names.", call. = FALSE)
-  }
-  if (!is.logical(allow_full) || length(allow_full) != 1L || is.na(allow_full)) {
-    stop("`allow_full` must be TRUE or FALSE.", call. = FALSE)
-  }
-
-  info <- rdz_info(path)
-  if (identical(info$codec, "native_v1")) {
-    available <- info$schema$attribute_names
-    requested <- if (is.null(names)) available else names
-    unknown <- setdiff(requested, available)
-    if (length(unknown)) {
-      stop("Unknown attribute: ", paste(unknown, collapse = ", "), call. = FALSE)
-    }
-    if (!length(requested)) {
-      return(list())
-    }
-    values <- lapply(requested, function(name) {
-      rdz_check(.Call(rdz_c_read_native_attribute, path, name))
-    })
-    return(stats::setNames(values, requested))
-  }
-  if (!allow_full) {
-    stop(
-      "Exact generic attributes require a full read; set `allow_full = TRUE`.",
-      call. = FALSE
-    )
-  }
-  values <- attributes(read_rdz(path))
-  if (is.null(values)) {
-    values <- list()
-  }
-  available <- base::names(values)
-  requested <- if (is.null(names)) available else names
-  unknown <- setdiff(requested, available)
-  if (length(unknown)) {
-    stop("Unknown attribute: ", paste(unknown, collapse = ", "), call. = FALSE)
-  }
-  values[requested]
 }
 
 validate_rdz_path <- function(path) {

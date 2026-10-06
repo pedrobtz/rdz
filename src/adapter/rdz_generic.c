@@ -330,8 +330,9 @@ static void rdz_gen_in_cleanup(void *data, Rboolean jump)
 }
 
 /* select: R_NilValue, or 0-based children of a native list or data frame
-   root to read alone (R selects from a generic root after reading it). */
-SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select)
+   root to read alone (R selects from a generic root after reading it).
+   *native: whether the file was native. */
+SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, int *native)
 {
     const char *p = rdz_path(path);
     rdz_settings set = rdz_settings_of(settings);
@@ -354,6 +355,7 @@ SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select)
         UNPROTECT(2);
         return rdz_failure(&e);
     }
+    *native = g->r.codec_id == RDZ_CODEC_NATIVE_V1;
     if (g->r.codec_id == RDZ_CODEC_NATIVE_V1) {
         int failed;
         /* the native reader takes the open reader over */

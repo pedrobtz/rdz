@@ -1,5 +1,35 @@
 # RDZ Current-State Assessment
 
+## Checkpoint 2026-10-06: plan-c Stage L
+
+Inspection below the root, and tables as written. No format change.
+
+- **Two C primitives.**
+  - `rdz_c_directory()` dumps the directory: every object's type, length,
+    children, attributes, blocks and stored bytes. It reads general attributes'
+    names from their name blocks.
+  - `rdz_c_read_objects()` reads given objects, and everything below them,
+    alone. It uses the block skipping of `select`.
+- **`rdz_attributes(object =)`** takes a path from the root, as for `[[`. It
+  reads only the requested attributes' blocks, implied ones included: a
+  factor's levels and class, a data frame's compact row names and default
+  class.
+- **`rdz_schema()$objects`** is the stored object as a depth-first tree: path,
+  type, class (`matrix/array` from `dim`), shape, attribute names and the stored
+  bytes below each part. It is read from the directory and the parts' names,
+  classes and dims only. A test corrupts a part's data: the full read fails,
+  while the schema and that part's attributes are still read.
+- **data.tables come back as from `readRDS()`.**
+  - Before: a native data.table came back with no `.internal.selfref`, and
+    data.table took it as broken. Its first `:=` warned and changed a shallow
+    copy, so the change was lost, at the root and nested alike.
+  - Now the native reader gives every table the attribute as
+    `R_Unserialize()` would: a NULL external pointer. data.table takes that as
+    "loaded from disk" and rebuilds the table by itself at its first change,
+    as it always has for generic files.
+  - rdz never calls or loads data.table; that is tested in a fresh R.
+  - Tibbles already came back identical.
+
 ## Checkpoint 2026-10-06: plan-c Stage K
 
 `read_rdz(path, select = )` reads columns of a data frame or elements of a

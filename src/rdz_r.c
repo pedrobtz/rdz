@@ -56,7 +56,7 @@ const char *rdz_path(SEXP path)
 #endif
 }
 
-static void rdz_reader_finalize(SEXP ptr)
+void rdz_reader_finalize(SEXP ptr)
 {
     rdz_reader *r = (rdz_reader *)R_ExternalPtrAddr(ptr);
     if (r) {
@@ -67,7 +67,7 @@ static void rdz_reader_finalize(SEXP ptr)
 }
 
 /* An external pointer owning a closed reader, protected by the caller. */
-static SEXP rdz_reader_handle(rdz_reader **out)
+SEXP rdz_reader_handle(rdz_reader **out)
 {
     SEXP ptr = PROTECT(R_MakeExternalPtr(NULL, R_NilValue, R_NilValue));
     rdz_reader *r;
@@ -182,16 +182,28 @@ SEXP rdz_c_info(SEXP path)
 }
 
 SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, int fail_after);
-SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select);
+SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, int *native);
 
 SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path, SEXP settings)
 {
     return rdz_generic_write(x, synopsis, path, settings, -1);
 }
 
+/* list(value, native): whether the file was native, so R knows what is
+   left to it (a generic value's selection) */
 SEXP rdz_c_read(SEXP path, SEXP settings, SEXP select)
 {
-    return rdz_generic_read(path, settings, select);
+    int native = 0;
+    SEXP value = PROTECT(rdz_generic_read(path, settings, select, &native)), out;
+    if (Rf_inherits(value, "rdz_failure")) {
+        UNPROTECT(1);
+        return value;
+    }
+    out = PROTECT(Rf_allocVector(VECSXP, 2));
+    SET_VECTOR_ELT(out, 0, value);
+    SET_VECTOR_ELT(out, 1, Rf_ScalarLogical(native));
+    UNPROTECT(2);
+    return out;
 }
 
 /* The logical classifier in use; force_scalar TRUE or FALSE switches the

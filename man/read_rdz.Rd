@@ -28,6 +28,13 @@ serialization is read whole and then subset. A data frame keeps its row
 names and class, and a list its names; the root's other attributes, which
 may describe the parts left out (a data.table's key), are not kept, and
 \code{\link[=rdz_attributes]{rdz_attributes()}} still reads them.
+
+A data.table's \code{.internal.selfref}, a pointer to the table itself, is never
+stored: \code{read_rdz()} rebuilds it with \code{data.table::setalloccol()} for every
+data.table it reads, at the root or nested in lists, so the tables can be
+changed in place at once. data.table is loaded only for a file that holds
+one; without it, the tables come back as they were stored. Tibbles need
+nothing rebuilt.
 }
 \examples{
 path <- tempfile(fileext = ".rdz")

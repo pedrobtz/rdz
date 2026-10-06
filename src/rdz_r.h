@@ -19,4 +19,9 @@ void rdz_raise(const rdz_error *e);
 /* The bytes of a one-element character path for the core. */
 const char *rdz_path(SEXP path);
 
+/* An external pointer owning a closed reader (protect it), so a longjmp
+   frees the reader; rdz_reader_finalize() frees it at once. */
+SEXP rdz_reader_handle(rdz_reader **out);
+void rdz_reader_finalize(SEXP ptr);
+
 #endif /* RDZ_R_H */
