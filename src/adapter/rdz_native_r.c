@@ -146,15 +146,20 @@ static int rdz_factor_codes_ok(const int *codes, R_xlen_t n, R_xlen_t nlev)
 
 /* ---- strings ---------------------------------------------------------------------- */
 
-/* Rf_charIsASCII() entered R's API after the 4.1 floor: scan instead. */
+/* Whether a string is ASCII: R's own flag where its API has it, else a
+   scan of the bytes. */
 static int rdz_ascii(SEXP c)
 {
+#if R_VERSION >= R_Version(4, 5, 0)
+    return Rf_charIsASCII(c);
+#else
     const unsigned char *p = (const unsigned char *)CHAR(c);
     int i, n = LENGTH(c);
     for (i = 0; i < n; i++) {
         if (p[i] & 0x80u) return 0;
     }
     return 1;
+#endif
 }
 
 static uintptr_t rdz_r_key(void *ctx, size_t i)
