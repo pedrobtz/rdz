@@ -48,10 +48,11 @@ all.equal(read_rdz(path), fit)
 fail instead of falling back, for code that relies on selective reads,
 and `mode = "r"` always uses R’s serializer.
 
-## Presets and threads
+## Compression and threads
 
-Two options choose how blocks are stored, and neither changes what a
-reader needs: any setting reads any file.
+`compress` is the Zstandard level of each block, from `0` (none) to
+`19`, and `options(rdz.threads)` the number of threads; neither changes
+what a reader needs: any setting reads any file.
 
 ``` r
 
@@ -63,24 +64,23 @@ sales <- data.frame(
   price = round(runif(1e5, 1, 100), 2)
 )
 
-sizes <- sapply(c("speed", "balanced", "compact"), function(preset) {
-  old <- options(rdz.preset = preset)
-  on.exit(options(old))
-  write_rdz(sales, path)
+sizes <- sapply(c(none = 0, default = 1, level_9 = 9), function(level) {
+  write_rdz(sales, path, compress = level)
   file.size(path)
 })
 rds <- tempfile(fileext = ".rds")
 saveRDS(sales, rds)
 c(sizes, saveRDS = file.size(rds))
-#>    speed balanced  compact  saveRDS 
-#>   917817   278811   278721   425618
+#>    none default level_9 saveRDS 
+#>  917817  278811  278779  425618
 ```
 
-`"balanced"` (the default) compresses each block with Zstandard at level
-1; `"compact"` uses a higher level; `"speed"` stores blocks
-uncompressed. `options(rdz.threads = 4)` compresses and decompresses
-blocks on four threads, and the file is byte for byte the same whatever
-the number.
+Level 0 is the fastest to write and to read, and the largest; level 1,
+the default, is nearly as fast and much smaller; higher levels spend
+write time for smaller files, and read as fast. `options(rdz.compress)`
+sets the default level. `options(rdz.threads = 4)` compresses and
+decompresses blocks on four threads, and the file is byte for byte the
+same whatever the number.
 
 ## Reading only what you need
 
@@ -166,7 +166,7 @@ rdz_info(path)$metadata
 
 Every file records a 128-bit hash of the value it holds, and
 [`rdz_hash()`](https://pedrobtz.github.io/rdz/reference/rdz_hash.md)
-gives the same hash for an object in memory, whatever the preset, the
+gives the same hash for an object in memory, whatever the level, the
 threads or the platform. That makes a file its own cache key.
 
 ``` r

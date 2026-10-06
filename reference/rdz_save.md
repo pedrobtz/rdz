@@ -21,6 +21,7 @@ rdz_save(
   mode = c("auto", "native", "r"),
   skip_unchanged = FALSE,
   metadata = NULL,
+  compress = getOption("rdz.compress", 1L),
   hash = getOption("rdz.hash", TRUE)
 )
 
@@ -48,7 +49,7 @@ rdz_load(file, names = NULL, envir = parent.frame())
   For `rdz_save()`, where to find the objects; for `rdz_load()`, where
   to assign them.
 
-- mode, skip_unchanged, metadata, hash:
+- mode, skip_unchanged, metadata, compress, hash:
 
   As for
   [`write_rdz()`](https://pedrobtz.github.io/rdz/reference/write_rdz.md).

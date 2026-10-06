@@ -46,6 +46,8 @@
 <li>Inspection without the data: <code><a href="../reference/rdz_info.html">rdz_info()</a></code>, <code><a href="../reference/rdz_schema.html">rdz_schema()</a></code> and <code><a href="../reference/rdz_attributes.html">rdz_attributes()</a></code>.</li>
 <li>Content hashes: every file records one, <code><a href="../reference/rdz_hash.html">rdz_hash()</a></code> computes it for an object, <code>write_rdz(skip_unchanged = TRUE)</code> leaves a file holding the value untouched, and <code><a href="../reference/rdz_verify.html">rdz_verify()</a></code> checks a file.</li>
 <li>
+<code>write_rdz(compress =)</code> (or <code>options(rdz.compress)</code>) is the Zstandard level of each block, from 0 (none: the fastest to write and read) to 19; the default, 1, is fast and already small.</li>
+<li>
 <code>write_rdz(hash = FALSE)</code> (or <code>options(rdz.hash = FALSE)</code>) skips the content hash, for about a tenth less write time.</li>
 <li>
 <code><a href="../reference/rdz_serialize.html">rdz_serialize()</a></code> and <code><a href="../reference/rdz_serialize.html">rdz_unserialize()</a></code> work on raw vectors; <code><a href="../reference/rdz_save.html">rdz_save()</a></code> and <code><a href="../reference/rdz_save.html">rdz_load()</a></code> keep several objects in one file.</li>

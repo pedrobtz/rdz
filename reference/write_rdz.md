@@ -17,6 +17,7 @@ write_rdz(
   mode = c("auto", "native", "r"),
   skip_unchanged = FALSE,
   metadata = NULL,
+  compress = getOption("rdz.compress", 1L),
   hash = getOption("rdz.hash", TRUE)
 )
 ```
@@ -56,6 +57,11 @@ write_rdz(
   reads it back, as `metadata`, without reading `x`; it is not part of
   the content hash.
 
+- compress:
+
+  The Zstandard level of each block, a whole number from `0` (none) to
+  `19`; by default `options(rdz.compress)`, else `1`.
+
 - hash:
 
   Whether to record the content hash
@@ -72,14 +78,14 @@ write_rdz(
 
 ## Details
 
-Two options control how blocks are stored and how many threads do the
-work. `options(rdz.preset = )` is `"balanced"` (the default; each block
-is compressed with Zstandard at level 1), `"compact"` (level 6) or
-`"speed"` (no compression). Under `"balanced"` a block is stored
-compressed only when that saves at least an eighth of it, so data that
-barely compresses reads at memory speed; under `"compact"`, whenever it
-is smaller. `options(rdz.threads = )` sets the threads that compress
-and, in
+`compress` is the Zstandard level each block is compressed at: `0`
+stores every block raw (the fastest to write and read), `1` (the
+default) is fast and already small, and higher levels, up to `19`, trade
+write time for size; reads stay fast at any level. Below level 6 a block
+is stored compressed only when that saves at least an eighth of it, so
+data that barely compresses reads at memory speed; from level 6,
+whenever it is smaller. `options(rdz.threads = )` sets the threads that
+compress and, in
 [`read_rdz()`](https://pedrobtz.github.io/rdz/reference/read_rdz.md),
 decompress blocks; the default is 1. The file does not depend on either:
 any setting reads any file, and the same object written with any number

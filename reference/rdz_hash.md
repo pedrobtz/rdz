@@ -6,7 +6,7 @@ would store it, and every file it writes records that hash in its
 directory, where
 [`rdz_info()`](https://pedrobtz.github.io/rdz/reference/rdz_info.md)
 reads it as `content_hash` without touching the data. A value gives the
-same hash on every platform and R version, whatever the preset, threads,
+same hash on every platform and R version, whatever the level, threads,
 block sizes or encodings chosen, and whether its vectors are ALTREP or
 not; so a cache can key files by it, and compare an object with a file
 without reading the file.

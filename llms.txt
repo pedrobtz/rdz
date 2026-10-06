@@ -25,9 +25,9 @@ same blocks.
   reads any part’s attributes, without decoding its data.
 - **Content-addressed:** every file records a 128-bit hash of the value
   (`rdz_info(path)$content_hash`, read without the data), and
-  `rdz_hash(x)` gives the same hash for an object, whatever preset,
-  threads or platform. `write_rdz(skip_unchanged = TRUE)` leaves a file
-  holding the value as it is, and
+  `rdz_hash(x)` gives the same hash for an object, whatever compression
+  level, threads or platform. `write_rdz(skip_unchanged = TRUE)` leaves
+  a file holding the value as it is, and
   [`rdz_verify()`](https://pedrobtz.github.io/rdz/reference/rdz_verify.md)
   checks a file’s integrity without building it.
 - **Compact graphs:** a large vector that appears twice in an object is
@@ -92,7 +92,8 @@ read_rdz(path, select = c("mpg", "wt"))          # only these columns are read
 rdz_schema(path)                                  # the tree, from the directory
 rdz_attributes(path, names = "names")
 
-options(rdz.preset = "compact", rdz.threads = 4)  # smaller files, more threads
+write_rdz(mtcars, path, compress = 0)             # no compression: fastest
+options(rdz.compress = 9, rdz.threads = 4)        # smaller files, more threads
 write_rdz(mtcars, path, mode = "native")           # fail rather than fall back
 ```
 

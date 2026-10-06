@@ -20,6 +20,7 @@ rdz_serialize(
   x,
   mode = c("auto", "native", "r"),
   metadata = NULL,
+  compress = getOption("rdz.compress", 1L),
   hash = getOption("rdz.hash", TRUE)
 )
 
@@ -47,6 +48,11 @@ rdz_unserialize(bytes, select = NULL, rows = NULL)
   [`rdz_info()`](https://pedrobtz.github.io/rdz/reference/rdz_info.md)
   reads it back, as `metadata`, without reading `x`; it is not part of
   the content hash.
+
+- compress:
+
+  The Zstandard level of each block, a whole number from `0` (none) to
+  `19`; by default `options(rdz.compress)`, else `1`.
 
 - hash:
 

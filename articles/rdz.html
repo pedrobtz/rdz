@@ -101,10 +101,12 @@ instead of falling back, for code that relies on selective reads, and
 <code>mode = "r"</code> always uses R’s serializer.</p>
 </div>
 <div class="section level2">
-<h2 id="presets-and-threads">Presets and threads<a class="anchor" aria-label="anchor" href="#presets-and-threads"></a>
+<h2 id="compression-and-threads">Compression and threads<a class="anchor" aria-label="anchor" href="#compression-and-threads"></a>
 </h2>
-<p>Two options choose how blocks are stored, and neither changes what a
-reader needs: any setting reads any file.</p>
+<p><code>compress</code> is the Zstandard level of each block, from
+<code>0</code> (none) to <code>19</code>, and
+<code>options(rdz.threads)</code> the number of threads; neither changes
+what a reader needs: any setting reads any file.</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">1</span><span class="op">)</span></span>
 <span><span class="va">sales</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
@@ -114,20 +116,19 @@ reader needs: any setting reads any file.</p>
 <span>  price <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">runif</a></span><span class="op">(</span><span class="fl">1e5</span>, <span class="fl">1</span>, <span class="fl">100</span><span class="op">)</span>, <span class="fl">2</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">sizes</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">sapply</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"speed"</span>, <span class="st">"balanced"</span>, <span class="st">"compact"</span><span class="op">)</span>, <span class="kw">function</span><span class="op">(</span><span class="va">preset</span><span class="op">)</span> <span class="op">{</span></span>
-<span>  <span class="va">old</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">options</a></span><span class="op">(</span>rdz.preset <span class="op">=</span> <span class="va">preset</span><span class="op">)</span></span>
-<span>  <span class="fu"><a href="https://rdrr.io/r/base/on.exit.html" class="external-link">on.exit</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">options</a></span><span class="op">(</span><span class="va">old</span><span class="op">)</span><span class="op">)</span></span>
-<span>  <span class="fu"><a href="../reference/write_rdz.html">write_rdz</a></span><span class="op">(</span><span class="va">sales</span>, <span class="va">path</span><span class="op">)</span></span>
+<span><span class="va">sizes</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">sapply</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>none <span class="op">=</span> <span class="fl">0</span>, default <span class="op">=</span> <span class="fl">1</span>, level_9 <span class="op">=</span> <span class="fl">9</span><span class="op">)</span>, <span class="kw">function</span><span class="op">(</span><span class="va">level</span><span class="op">)</span> <span class="op">{</span></span>
+<span>  <span class="fu"><a href="../reference/write_rdz.html">write_rdz</a></span><span class="op">(</span><span class="va">sales</span>, <span class="va">path</span>, compress <span class="op">=</span> <span class="va">level</span><span class="op">)</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/file.info.html" class="external-link">file.size</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span></span>
 <span><span class="op">}</span><span class="op">)</span></span>
 <span><span class="va">rds</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span>fileext <span class="op">=</span> <span class="st">".rds"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/readRDS.html" class="external-link">saveRDS</a></span><span class="op">(</span><span class="va">sales</span>, <span class="va">rds</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">sizes</span>, saveRDS <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/file.info.html" class="external-link">file.size</a></span><span class="op">(</span><span class="va">rds</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt;    speed balanced  compact  saveRDS </span></span>
-<span><span class="co">#&gt;   917817   278811   278721   425618</span></span></code></pre></div>
-<p><code>"balanced"</code> (the default) compresses each block with
-Zstandard at level 1; <code>"compact"</code> uses a higher level;
-<code>"speed"</code> stores blocks uncompressed.
+<span><span class="co">#&gt;    none default level_9 saveRDS </span></span>
+<span><span class="co">#&gt;  917817  278811  278779  425618</span></span></code></pre></div>
+<p>Level 0 is the fastest to write and to read, and the largest; level
+1, the default, is nearly as fast and much smaller; higher levels spend
+write time for smaller files, and read as fast.
+<code>options(rdz.compress)</code> sets the default level.
 <code>options(rdz.threads = 4)</code> compresses and decompresses blocks
 on four threads, and the file is byte for byte the same whatever the
 number.</p>
@@ -203,7 +204,7 @@ the value.</p>
 </h2>
 <p>Every file records a 128-bit hash of the value it holds, and
 <code><a href="../reference/rdz_hash.html">rdz_hash()</a></code> gives the same hash for an object in memory,
-whatever the preset, the threads or the platform. That makes a file its
+whatever the level, the threads or the platform. That makes a file its
 own cache key.</p>
 <div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/rdz_info.html">rdz_info</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span><span class="op">$</span><span class="va">content_hash</span></span>

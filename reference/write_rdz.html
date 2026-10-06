@@ -65,6 +65,7 @@ blocks of 1 MiB. Every file records the object's content hash
 <span>  mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"auto"</span>, <span class="st">"native"</span>, <span class="st">"r"</span><span class="op">)</span>,</span>
 <span>  skip_unchanged <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  metadata <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  compress <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">getOption</a></span><span class="op">(</span><span class="st">"rdz.compress"</span>, <span class="fl">1L</span><span class="op">)</span>,</span>
 <span>  hash <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">getOption</a></span><span class="op">(</span><span class="st">"rdz.hash"</span>, <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -102,6 +103,11 @@ version or a cache key's inputs. <code><a href="rdz_info.html">rdz_info()</a></c
 <code>metadata</code>, without reading <code>x</code>; it is not part of the content hash.</p></dd>
 
 
+<dt id="arg-compress">compress<a class="anchor" aria-label="anchor" href="#arg-compress"></a></dt>
+<dd><p>The Zstandard level of each block, a whole number from <code>0</code>
+(none) to <code>19</code>; by default <code>options(rdz.compress)</code>, else <code>1</code>.</p></dd>
+
+
 <dt id="arg-hash">hash<a class="anchor" aria-label="anchor" href="#arg-hash"></a></dt>
 <dd><p>Whether to record the content hash (<code><a href="rdz_hash.html">rdz_hash()</a></code>), from
 <code>options(rdz.hash)</code>, <code>TRUE</code> by default. Computing it reads the value once
@@ -116,13 +122,13 @@ and <code>rdz_info()$content_hash</code> (then <code>NA</code>) have nothing to 
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>Two options control how blocks are stored and how many threads do the
-work. <code>options(rdz.preset = )</code> is <code>"balanced"</code> (the default; each block is
-compressed with Zstandard at level 1), <code>"compact"</code> (level 6) or <code>"speed"</code>
-(no compression). Under <code>"balanced"</code> a block is stored compressed only
-when that saves at least an eighth of it, so data that barely compresses
-reads at memory speed; under <code>"compact"</code>, whenever it is smaller.
-<code>options(rdz.threads = )</code> sets the threads that compress and, in
+    <p><code>compress</code> is the Zstandard level each block is compressed at: <code>0</code> stores
+every block raw (the fastest to write and read), <code>1</code> (the default) is fast
+and already small, and higher levels, up to <code>19</code>, trade write time for
+size; reads stay fast at any level. Below level 6 a block is stored
+compressed only when that saves at least an eighth of it, so data that
+barely compresses reads at memory speed; from level 6, whenever it is
+smaller. <code>options(rdz.threads = )</code> sets the threads that compress and, in
 <code><a href="read_rdz.html">read_rdz()</a></code>, decompress blocks; the default is 1. The file does not
 depend on either: any setting reads any file, and the same object written
 with any number of threads gives the same bytes.</p>

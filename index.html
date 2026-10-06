@@ -69,7 +69,7 @@
 <li>
 <strong>Inspectable:</strong> <code><a href="reference/rdz_schema.html">rdz_schema()</a></code> shows a native file’s tree (each part’s type, class, shape, attributes and size), and <code>rdz_attributes(path, object = c("sales", "date"))</code> reads any part’s attributes, without decoding its data.</li>
 <li>
-<strong>Content-addressed:</strong> every file records a 128-bit hash of the value (<code>rdz_info(path)$content_hash</code>, read without the data), and <code>rdz_hash(x)</code> gives the same hash for an object, whatever preset, threads or platform. <code>write_rdz(skip_unchanged = TRUE)</code> leaves a file holding the value as it is, and <code><a href="reference/rdz_verify.html">rdz_verify()</a></code> checks a file’s integrity without building it.</li>
+<strong>Content-addressed:</strong> every file records a 128-bit hash of the value (<code>rdz_info(path)$content_hash</code>, read without the data), and <code>rdz_hash(x)</code> gives the same hash for an object, whatever compression level, threads or platform. <code>write_rdz(skip_unchanged = TRUE)</code> leaves a file holding the value as it is, and <code><a href="reference/rdz_verify.html">rdz_verify()</a></code> checks a file’s integrity without building it.</li>
 <li>
 <strong>Compact graphs:</strong> a large vector that appears twice in an object is stored once and read back shared, as pickle and Kryo do.</li>
 <li>
@@ -110,7 +110,8 @@
 <span><span class="fu"><a href="reference/rdz_schema.html">rdz_schema</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span>                                  <span class="co"># the tree, from the directory</span></span>
 <span><span class="fu"><a href="reference/rdz_attributes.html">rdz_attributes</a></span><span class="op">(</span><span class="va">path</span>, names <span class="op">=</span> <span class="st">"names"</span><span class="op">)</span></span>
 <span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">options</a></span><span class="op">(</span>rdz.preset <span class="op">=</span> <span class="st">"compact"</span>, rdz.threads <span class="op">=</span> <span class="fl">4</span><span class="op">)</span>  <span class="co"># smaller files, more threads</span></span>
+<span><span class="fu"><a href="reference/write_rdz.html">write_rdz</a></span><span class="op">(</span><span class="va">mtcars</span>, <span class="va">path</span>, compress <span class="op">=</span> <span class="fl">0</span><span class="op">)</span>             <span class="co"># no compression: fastest</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">options</a></span><span class="op">(</span>rdz.compress <span class="op">=</span> <span class="fl">9</span>, rdz.threads <span class="op">=</span> <span class="fl">4</span><span class="op">)</span>        <span class="co"># smaller files, more threads</span></span>
 <span><span class="fu"><a href="reference/write_rdz.html">write_rdz</a></span><span class="op">(</span><span class="va">mtcars</span>, <span class="va">path</span>, mode <span class="op">=</span> <span class="st">"native"</span><span class="op">)</span>           <span class="co"># fail rather than fall back</span></span></code></pre></div>
 </div>
 <div class="section level2">
