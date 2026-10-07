@@ -49,6 +49,18 @@ ms <- function(f) { # a function, so that every iteration runs it
   b <- bench::mark(f(), iterations = iterations, check = FALSE, filter_gc = FALSE)
   round(as.numeric(stats::median(b$time[[1L]])) * 1000, 1)
 }
+# An untimed round first: the first column measured otherwise pays for
+# loading code and growing the heap (lgl_random read 4.6 ms at level 0
+# against 2.3 at level 1, the same bytes).
+local({
+  df <- data.frame(x = cols$lgl_random())
+  for (i in 1:3) {
+    write_rdz(df, p, compress = 1L)
+    read_rdz(p)
+    write_fst(df, q, compress = 50L)
+    read_fst(q)
+  }
+})
 rows <- list()
 for (setting in list(c(0L, 0L), c(1L, 50L))) {
   level <- setting[[1L]]
