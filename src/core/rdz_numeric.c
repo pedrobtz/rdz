@@ -185,6 +185,15 @@ static inline void v4_widen16x(const uint8_t *src, rdz_v4 out[2])
 }
 #endif
 
+#ifdef RDZ_VEC_INT
+/* Four values' frame-of-reference codes: NA to na_code, else value - base. */
+static inline rdz_v4 for_code4(const int32_t *p, rdz_v4 na4, rdz_v4 code4, rdz_v4 base4)
+{
+    rdz_v4 x = v4_load(p);
+    return v4_sel(v4_eq(x, na4), code4, v4_sub(x, base4));
+}
+#endif
+
 /* AVX2 (eight lanes, chosen at run time) for the integer codec's hottest
    loops on x86-64, where SSE2 lacks 32-bit min and max. Each returns how far
    it got; the four-lane and scalar loops finish the rest. */
@@ -833,10 +842,12 @@ int rdz_int_encode_range(const int32_t *v, size_t n, int compressing, zb_buf *ou
         *encoding = RDZ_ENCODING_INT_DELTA;
         return 0;
     }
-    if (n && for_len < raw_len && !compressing && for_width && for_width <= 16) {
-        /* level 0 stores codes of up to 16 bits as bytes or halfwords, which
-           a pass narrows to and widens from as fast as it copies them; the
-           encoding was chosen by the smallest width, which only grows here */
+    /* level 0 stores codes of up to 16 bits as bytes or halfwords, which a
+       pass narrows to and widens from as fast as it copies them; the
+       encoding was chosen by the smallest width, which only grows here, and
+       only while the wider record still beats raw (else the exact width) */
+    if (n && for_len < raw_len && !compressing && for_width && for_width <= 16 &&
+        RDZ_INT_FOR_HEADER + packed_bytes(n, for_width <= 8 ? 8 : 16) < raw_len) {
         unsigned width = for_width <= 8 ? 8 : 16;
         uint32_t na_code = (1u << width) - 1u, base = nas == n ? 0 : (uint32_t)(int32_t)lo;
         size_t len = RDZ_INT_FOR_HEADER + packed_bytes(n, width);
@@ -852,16 +863,18 @@ int rdz_int_encode_range(const int32_t *v, size_t n, int compressing, zb_buf *ou
         {
             const rdz_v4 na4 = v4_dup((uint32_t)INT_NA), code4 = v4_dup(na_code),
                          base4 = v4_dup(base);
-#define RDZ_CODE4(k) v4_sel(v4_eq(v4_load(v + i + (k)), na4), code4, v4_sub(v4_load(v + i + (k)), base4))
             for (; i + 16 <= n; i += 16) {
+                rdz_v4 a = for_code4(v + i, na4, code4, base4),
+                       b = for_code4(v + i + 4, na4, code4, base4),
+                       c = for_code4(v + i + 8, na4, code4, base4),
+                       d = for_code4(v + i + 12, na4, code4, base4);
                 if (width == 8) {
-                    v4_narrow8(RDZ_CODE4(0), RDZ_CODE4(4), RDZ_CODE4(8), RDZ_CODE4(12), codes + i);
+                    v4_narrow8(a, b, c, d, codes + i);
                 } else {
-                    v4_narrow16(RDZ_CODE4(0), RDZ_CODE4(4), codes + 2 * i);
-                    v4_narrow16(RDZ_CODE4(8), RDZ_CODE4(12), codes + 2 * i + 16);
+                    v4_narrow16(a, b, codes + 2 * i);
+                    v4_narrow16(c, d, codes + 2 * i + 16);
                 }
             }
-#undef RDZ_CODE4
         }
 #endif
         for (; i < n; i++) {

@@ -1,10 +1,10 @@
 # The frozen 0.1.0 corpus (helper-frozen-fixtures.R): every later rdz reads
 # each file to its spec's value, and writes a native `speed` file's bytes
 # again (but the writer field, and frame-of-reference codes of up to 16
-# bits, which level 0 now stores as bytes or halfwords). Compressed files are compared by value only:
-# zstd's output may change between its versions (container-format.md). So
-# are generic files: R's serialization header records the R version that
-# wrote the stream.
+# bits, which level 0 now stores as bytes or halfwords). Compressed files
+# are compared by value only: zstd's output may change between its versions
+# (container-format.md). So are generic files: R's serialization header
+# records the R version that wrote the stream.
 
 test_that("the frozen corpus is complete and unmodified", {
   manifest <- frozen_manifest()

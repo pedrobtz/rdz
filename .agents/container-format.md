@@ -415,7 +415,8 @@ block's record, before any compression:
 
 Every decoded value is checked: an integer record cannot produce `INT32_MIN`
 except through its `NA` code. The writer chooses the smallest record from one
-pass of block statistics; between raw and shuffled raw (the same size) it
+pass of block statistics (except that level 0 widens frame-of-reference codes
+of up to 16 bits to 8 or 16, above); between raw and shuffled raw (the same size) it
 stores shuffled planes when the block will be compressed, unless a sample of
 4,096 values is under half distinct, when plain bytes keep the repeats zstd
 finds. Neither choice is recorded beyond the encoding ID, and readers accept
