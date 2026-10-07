@@ -1459,6 +1459,65 @@ static void test_extensions(const char *tmpdir)
     remove(path);
 }
 
+/* FOR decode against a 64-bit reference, code by code: every code of
+   widths 0 to 6, on bases at and near each end of int32, as integers and
+   as factors of 1 to 40 levels, with and without an NA code. Each block
+   repeats one code 21 times (the 8- and 4-lane loops and a scalar tail),
+   and a last block mixes them all. */
+static void test_for_ranges(void)
+{
+    static const int64_t bases[] = {-3, -1, 0, 1, 2, 7, INT32_MIN, INT32_MIN + 1, INT32_MAX - 5,
+                                    INT32_MAX};
+    static const uint32_t tops[] = {0, 1, 5, 26, 40};
+    enum { REPS = 21 };
+    uint8_t rec[RDZ_INT_FOR_HEADER + 64 * REPS];
+    int32_t got[64 * REPS];
+    unsigned width, has_na;
+    size_t b, t;
+    for (width = 0; width <= 6; width++) {
+        for (has_na = 0; has_na <= (width > 0); has_na++) {
+            for (b = 0; b < sizeof bases / sizeof *bases; b++) {
+                for (t = 0; t < sizeof tops / sizeof *tops; t++) {
+                    uint32_t codes = 1u << width, code, top = tops[t];
+                    int all_ok = 1, ok;
+                    rdz_error e;
+                    for (code = 0; code <= codes; code++) {
+                        /* code == codes: the mixed block of every code */
+                        size_t n = code < codes ? REPS : (size_t)codes * REPS, i, len;
+                        int64_t value = bases[b] + code;
+                        int na = has_na && code == codes - 1, want;
+                        memset(rec, 0, sizeof rec);
+                        rec[0] = (uint8_t)width;
+                        rec[1] = (uint8_t)has_na;
+                        zb_wr_u32le(rec + 4, (uint32_t)(int32_t)bases[b]);
+                        for (i = 0; i < n; i++) {
+                            uint32_t c = code < codes ? code : (uint32_t)(i % codes);
+                            size_t bit = i * width, k;
+                            for (k = 0; k < width; k++, bit++) {
+                                if (c >> k & 1u) rec[RDZ_INT_FOR_HEADER + bit / 8] |= (uint8_t)(1u << bit % 8);
+                            }
+                        }
+                        len = RDZ_INT_FOR_HEADER + (n * width + 7) / 8;
+                        want = code < codes ? na || (value > INT32_MIN && value <= INT32_MAX &&
+                                                     (!top || (value >= 1 && value <= top)))
+                                            : all_ok;
+                        ok = (top ? rdz_factor_decode(rec, len, RDZ_ENCODING_INT_FOR, n, got, top, &e)
+                                  : rdz_int_decode(rec, len, RDZ_ENCODING_INT_FOR, n, got, &e)) == 0;
+                        CHECK(ok == want, "FOR range: width %u, NA %u, base %lld, top %u, code %u: %d",
+                              width, has_na, (long long)bases[b], top, code, ok);
+                        if (ok && code < codes) {
+                            CHECK(got[0] == (na ? INT32_MIN : (int32_t)value) && got[REPS - 1] == got[0],
+                                  "FOR range: width %u, base %lld, code %u: value", width,
+                                  (long long)bases[b], code);
+                        }
+                        if (code < codes) all_ok &= want;
+                    }
+                }
+            }
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     const char *tmpdir = argc > 1 ? argv[1] : ".";
@@ -1486,6 +1545,7 @@ int main(int argc, char **argv)
     test_alp(tmpdir);
     test_extensions(tmpdir);
     test_empty_logical(tmpdir);
+    test_for_ranges();
     test_bit_exact_ints();
     test_bit_exact_logical();
     printf("logical kernel: %s\n", rdz_logical_kernel());
