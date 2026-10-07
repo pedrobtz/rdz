@@ -29,6 +29,19 @@ measured first and dropped: it could remove only the per-string
 zstd's (about 245 of 367 ms): no further string-write work is planned
 without a change of compression level.
 
+The content hash streams through zufast's vendored xxHash, which under clang
+kept XXH3's streaming accumulators in its state struct: 10.6 GB/s against
+23 GB/s one shot. rdz builds with `-DXXH3_STREAM_USE_STACK=1` (what gcc and
+MSVC get anyway): 20.5 GB/s, `rdz_hash()` about twice as fast, hashed
+logical and factor writes 12 to 20% faster, the same hash values; the
+define belongs in zufast's `vendor_config.h`, the maintainer's call. Two
+gaps left alone: reading 5e6 unique strings is R's own string creation
+(`Rf_mkCharLenCE()` and the garbage collector, about 70% for rdz and fst
+alike; rdz's own extras, the NUL check that keeps a NUL a format error and
+record decoding, are about 2.5%); and gcc 16 on arm64 runs xxHash at about
+7 GB/s even in one shot, its NEON code generation, which no flag here
+changes.
+
 ## Checkpoint 2026-10-07: one call for `rdz_schema()`
 
 `rdz_schema()` opens the file once (it opened it three times: `rdz_info()`,

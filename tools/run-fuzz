@@ -29,8 +29,9 @@ SRCS="src/core/rdz_container.c src/core/rdz_records.c src/core/rdz_io.c src/core
       src/core/rdz_codec.c src/core/rdz_logical.c src/core/rdz_native.c src/core/rdz_string.c
       src/core/rdz_pipeline.c src/core/rdz_numeric.c src/core/rdz_alp.c src/core/rdz_content.c src/core/rdz_vector.c src/core/rdz_graph.c
       src/vendor/zstd/zstd.c"
+# XXH3_STREAM_USE_STACK=1 as src/Makevars has it: the same hash code path.
 FLAGS="-std=c99 -g -O1 -pthread -fno-omit-frame-pointer -fno-sanitize-recover=undefined -UNDEBUG
-       -DRDZ_STANDALONE -DRDZ_FUZZ_SKIP_CHECKSUMS -DZSTDLIB_VISIBLE= -DZSTDERRORLIB_VISIBLE= -Isrc/core -I$ZUBIN -I$ZUFAST"
+       -DRDZ_STANDALONE -DRDZ_FUZZ_SKIP_CHECKSUMS -DXXH3_STREAM_USE_STACK=1 -DZSTDLIB_VISIBLE= -DZSTDERRORLIB_VISIBLE= -Isrc/core -I$ZUBIN -I$ZUFAST"
 
 mkdir -p "$WORK/seeds" "$CORPUS" "$WORK/artifacts"
 for f in tests/testthat/fixtures/rust/*.rdz tests/testthat/fixtures/v0.1.0/*.rdz fuzz/seeds/*.rdz; do

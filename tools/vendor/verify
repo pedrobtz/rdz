@@ -46,12 +46,18 @@ for src in $(awk 'NR > 1 { print $1 }' FS='\t' "$MANIFEST"); do
 done
 
 # 3. both Makevars templates and the manifest agree on the define set, read
-#    with comments stripped (what reaches the compiler, not the prose)
+#    with comments stripped (what reaches the compiler, not the prose). The
+#    one other define allowed configures code rdz does not vendor: zufast's
+#    header-only xxHash (XXH3_STREAM_USE_STACK; the reason is at the define
+#    in src/Makevars). It must be in both templates too.
+own="XXH3_STREAM_USE_STACK"
 declared=$(
     for src in $(awk 'NR > 1 { print $1 }' FS='\t' "$MANIFEST"); do
         manifest_field "$src" defines | tr ',' '\n'
-    done | LC_ALL=C sort -u
+    done
+    printf '%s\n' $own
 )
+declared=$(printf '%s\n' "$declared" | LC_ALL=C sort -u)
 for mv in src/Makevars src/Makevars.win; do
     flags=$(sed 's/#.*//' "$mv")
     for d in $declared; do
