@@ -1525,11 +1525,12 @@ static SEXP rdz_native_read_in(rdz_reader *opened, int threads, SEXP select, SEX
 
 /* ---- read_rdz(): select and rows resolved against the open file ------------------ */
 
-/* The root's names, from the open reader alone (it stays open): their
-   strings, or R_NilValue when the root has none; *failed on a read error. */
-static SEXP rdz_root_names(rdz_reader *r, rdz_error *e, int *failed)
+/* The names of object `owner` (a list or a data frame), from the open
+   reader alone (it stays open): their strings, or R_NilValue when it has
+   none; *failed on a read error. */
+static SEXP rdz_object_names(rdz_reader *r, uint32_t owner, rdz_error *e, int *failed)
 {
-    const rdz_object *root = &r->objects[0];
+    const rdz_object *root = &r->objects[owner];
     uint32_t a, object = 0;
     int found = 0;
     rdz_r_names s;
@@ -1619,7 +1620,7 @@ static SEXP rdz_select_children(rdz_reader *r, SEXP select, rdz_error *e, int *f
             ids[j] = (int)x - 1;
         }
     } else {
-        names = PROTECT(rdz_root_names(r, e, failed));
+        names = PROTECT(rdz_object_names(r, 0, e, failed));
         nprot++;
         if (*failed) goto done;
         for (j = 0; j < k; j++) {
@@ -1716,6 +1717,252 @@ SEXP rdz_native_read_request(rdz_reader *opened, int threads, SEXP select, SEXP 
     }
     out = rdz_native_read_in(opened, threads, index, R_NilValue, window, e, failed);
     UNPROTECT(1);
+    return out;
+}
+
+/* ---- rdz_attributes(): an object's attributes from one open of the file ----------- */
+
+/* What an object's attributes are, in the order R lists them
+   (rdz_attribute_entries() in R/inspect.R does the same for rdz_schema()):
+   a factor's levels and class, implied; a data frame's names, row.names
+   (stored, or 1..n) and class (stored, or "data.frame"); then the stored
+   attributes in directory order, each appended or, under a name already
+   listed, replacing that entry in place (a data frame's own kinds are
+   listed above, so only its general attributes are met there). */
+typedef struct {
+    SEXP names;    /* STRSXP: the entries' names */
+    SEXP values;   /* VECSXP: an implied value, or NULL where stored */
+    int *object;   /* the object holding a stored value, or -1 */
+    R_xlen_t n;
+} rdz_entries;
+
+static void rdz_entry_add(rdz_entries *t, const char *name, int object, SEXP value)
+{
+    R_xlen_t j;
+    for (j = 0; j < t->n; j++) {
+        if (!strcmp(CHAR(STRING_ELT(t->names, j)), name)) break;
+    }
+    if (j == t->n) {
+        SET_STRING_ELT(t->names, j, Rf_mkChar(name));
+        t->n++;
+    }
+    t->object[j] = object;
+    SET_VECTOR_ELT(t->values, j, object < 0 ? value : R_NilValue);
+}
+
+static int rdz_entries_of(rdz_reader *r, uint32_t id, rdz_entries *t, rdz_error *e)
+{
+    const rdz_object *o = &r->objects[id];
+    uint32_t a;
+    if (o->type_tag == RDZ_TYPE_FACTOR) {
+        SEXP cls;
+        rdz_entry_add(t, "levels", (int)o->first_child, R_NilValue);
+        if (o->flags & RDZ_OBJECT_FLAG_ORDERED) {
+            cls = PROTECT(Rf_allocVector(STRSXP, 2));
+            SET_STRING_ELT(cls, 0, Rf_mkChar("ordered"));
+            SET_STRING_ELT(cls, 1, Rf_mkChar("factor"));
+        } else {
+            cls = PROTECT(Rf_mkString("factor"));
+        }
+        rdz_entry_add(t, "class", -1, cls);
+        UNPROTECT(1);
+    } else if (o->type_tag == RDZ_TYPE_DATA_FRAME) {
+        int names = -1, rows = -1, cls = -1;
+        for (a = 0; a < o->attribute_count; a++) {
+            const rdz_attribute *at = &r->attributes[o->first_attribute + a];
+            if (at->flags == RDZ_ATTRIBUTE_FLAG_NAMES) names = (int)at->value_object_id;
+            if (at->flags == RDZ_ATTRIBUTE_FLAG_ROW_NAMES) rows = (int)at->value_object_id;
+            if (at->flags == RDZ_ATTRIBUTE_FLAG_CLASS) cls = (int)at->value_object_id;
+        }
+        if (names >= 0) rdz_entry_add(t, "names", names, R_NilValue);
+        if (rows >= 0) {
+            rdz_entry_add(t, "row.names", rows, R_NilValue);
+        } else {
+            SEXP seq;
+            R_xlen_t k;
+            if (o->logical_len > (uint64_t)INT_MAX) return rdz_limit(e, "row names");
+            seq = PROTECT(Rf_allocVector(INTSXP, (R_xlen_t)o->logical_len));
+            for (k = 0; k < XLENGTH(seq); k++) INTEGER(seq)[k] = (int)(k + 1);
+            rdz_entry_add(t, "row.names", -1, seq);
+            UNPROTECT(1);
+        }
+        if (cls >= 0) {
+            rdz_entry_add(t, "class", cls, R_NilValue);
+        } else {
+            rdz_entry_add(t, "class", -1, PROTECT(Rf_mkString("data.frame")));
+            UNPROTECT(1);
+        }
+    }
+    for (a = 0; a < o->attribute_count; a++) {
+        const rdz_attribute *at = &r->attributes[o->first_attribute + a];
+        char name[10001]; /* R caps a symbol at 10,000 bytes */
+        if (o->type_tag == RDZ_TYPE_DATA_FRAME && at->flags != RDZ_ATTRIBUTE_FLAG_OTHER) continue;
+        if (rdz_read_attr_name(r, at, name, sizeof name, e)) return 1;
+        rdz_entry_add(t, name, (int)at->value_object_id, R_NilValue);
+    }
+    return 0;
+}
+
+/* The object `steps` leads to from the root (a list of strings and
+   doubles; R checked their shape), through containers' names and
+   positions, a shared part standing for its target; or a request failure
+   naming the step (1-based) that leads nowhere. */
+static uint32_t rdz_resolve_id(const rdz_reader *r, uint32_t id)
+{
+    return r->objects[id].type_tag == RDZ_TYPE_REFERENCE ? r->objects[id].first_child : id;
+}
+
+static int rdz_walk(rdz_reader *r, SEXP steps, uint32_t *id, SEXP *request, rdz_error *e)
+{
+    R_xlen_t k, nsteps = steps == R_NilValue ? 0 : XLENGTH(steps);
+    *id = 0;
+    *request = R_NilValue;
+    for (k = 0; k < nsteps; k++) {
+        const rdz_object *o = &r->objects[*id];
+        SEXP s = VECTOR_ELT(steps, k);
+        double at;
+        if (o->type_tag != RDZ_TYPE_LIST && o->type_tag != RDZ_TYPE_DATA_FRAME) {
+            *request = rdz_req("object_below", Rf_ScalarReal((double)(k + 1)));
+            return 0;
+        }
+        if (TYPEOF(s) == STRSXP) {
+            int failed = 0, m;
+            SEXP names = PROTECT(rdz_object_names(r, *id, e, &failed));
+            if (failed) {
+                UNPROTECT(1);
+                return 1;
+            }
+            /* match(s, NULL) is NA: an unnamed container holds no name */
+            m = names == R_NilValue ? 0 : INTEGER(Rf_match(names, s, 0))[0];
+            UNPROTECT(1);
+            if (m == 0) {
+                *request = rdz_req("object_unknown", Rf_ScalarReal((double)(k + 1)));
+                return 0;
+            }
+            at = m;
+        } else {
+            at = REAL(s)[0];
+            if (at > (double)o->child_count) {
+                SEXP d = PROTECT(Rf_allocVector(REALSXP, 2));
+                REAL(d)[0] = (double)(k + 1);
+                REAL(d)[1] = (double)o->child_count;
+                *request = rdz_req("object_position", d);
+                UNPROTECT(1);
+                return 0;
+            }
+        }
+        *id = rdz_resolve_id(r, o->first_child + (uint32_t)at - 1u);
+    }
+    return 0;
+}
+
+/* rdz_attributes()' read of an open native file: the object `steps` leads
+   to, its attributes `names` (all when R_NilValue; one value per requested
+   name, repeats included, in that order), the stored ones read with one
+   pass of the reader, which it takes over. steps FALSE: R found the path
+   malformed and raises that once it knows the file is native. *failed: 0,
+   1 (e), or 2 (the value is a request failure). */
+SEXP rdz_native_read_attributes(rdz_reader *opened, int threads, SEXP steps, SEXP names,
+                                rdz_error *e, int *failed)
+{
+    rdz_entries t;
+    SEXP request, requested, out, ids, missing;
+    uint32_t id;
+    R_xlen_t j, k, cap, nreq, nunknown = 0, nids = 0;
+    int nprot = 0, *slot;
+    *failed = 0;
+    if (TYPEOF(steps) == LGLSXP) {
+        *failed = 2;
+        return rdz_req("object_shape", R_NilValue);
+    }
+    if (rdz_walk(opened, steps, &id, &request, e)) {
+        *failed = 1;
+        return R_NilValue;
+    }
+    if (request != R_NilValue) {
+        *failed = 2;
+        return request;
+    }
+    id = rdz_resolve_id(opened, id);
+    /* every stored attribute plus five implied ones at most */
+    cap = (R_xlen_t)opened->objects[id].attribute_count + 5;
+    t.names = PROTECT(Rf_allocVector(STRSXP, cap));
+    t.values = PROTECT(Rf_allocVector(VECSXP, cap));
+    nprot += 2;
+    t.object = (int *)R_alloc((size_t)cap, sizeof(int));
+    t.n = 0;
+    if (rdz_entries_of(opened, id, &t, e)) {
+        UNPROTECT(nprot);
+        *failed = 1;
+        return R_NilValue;
+    }
+    requested = names == R_NilValue ? Rf_lengthgets(t.names, t.n) : names;
+    PROTECT(requested);
+    nprot++;
+    nreq = XLENGTH(requested);
+    slot = (int *)R_alloc((size_t)(nreq ? nreq : 1), sizeof(int));
+    for (j = 0; j < nreq; j++) {
+        const char *want = CHAR(STRING_ELT(requested, j));
+        slot[j] = -1;
+        for (k = 0; k < t.n; k++) {
+            if (!strcmp(CHAR(STRING_ELT(t.names, k)), want)) {
+                slot[j] = (int)k;
+                break;
+            }
+        }
+        if (slot[j] < 0) {
+            /* setdiff(): each unknown name once, in requested order */
+            R_xlen_t i;
+            int seen = 0;
+            for (i = 0; i < j && !seen; i++) seen = slot[i] < 0 && !strcmp(CHAR(STRING_ELT(requested, i)), want);
+            if (!seen) nunknown++;
+        } else if (t.object[slot[j]] >= 0) {
+            nids++;
+        }
+    }
+    if (nunknown) {
+        R_xlen_t u = 0;
+        missing = PROTECT(Rf_allocVector(STRSXP, nunknown));
+        nprot++;
+        for (j = 0; j < nreq; j++) {
+            R_xlen_t i;
+            int seen = 0;
+            if (slot[j] >= 0) continue;
+            for (i = 0; i < j && !seen; i++) {
+                seen = slot[i] < 0 && !strcmp(CHAR(STRING_ELT(requested, i)), CHAR(STRING_ELT(requested, j)));
+            }
+            if (!seen) SET_STRING_ELT(missing, u++, STRING_ELT(requested, j));
+        }
+        out = rdz_req("attribute_unknown", missing);
+        UNPROTECT(nprot);
+        *failed = 2;
+        return out;
+    }
+    /* the stored values, one read: an id per requested stored entry */
+    ids = PROTECT(Rf_allocVector(INTSXP, nids));
+    nprot++;
+    for (j = 0, k = 0; j < nreq; j++) {
+        if (t.object[slot[j]] >= 0) INTEGER(ids)[k++] = t.object[slot[j]];
+    }
+    out = PROTECT(Rf_allocVector(VECSXP, nreq));
+    nprot++;
+    if (nids) {
+        SEXP read = PROTECT(rdz_native_read_in(opened, threads, R_NilValue, ids, R_NilValue, e, failed));
+        nprot++;
+        if (*failed) {
+            UNPROTECT(nprot);
+            return R_NilValue;
+        }
+        for (j = 0, k = 0; j < nreq; j++) {
+            if (t.object[slot[j]] >= 0) SET_VECTOR_ELT(out, j, VECTOR_ELT(read, k++));
+        }
+    }
+    for (j = 0; j < nreq; j++) {
+        if (t.object[slot[j]] < 0) SET_VECTOR_ELT(out, j, VECTOR_ELT(t.values, slot[j]));
+    }
+    /* setNames(list(), NULL) for an object without attributes, as R had it */
+    if (names != R_NilValue || nreq) Rf_setAttrib(out, R_NamesSymbol, requested);
+    UNPROTECT(nprot);
     return out;
 }
 

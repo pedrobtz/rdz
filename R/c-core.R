@@ -64,6 +64,12 @@ rdz_request_stop <- function(result) {
       call. = FALSE
     ),
     rows_range = rdz_stop("`rows` must be at most ", data, ".", call. = FALSE),
+    attribute_unknown = rdz_stop("Unknown attribute: ", paste(data, collapse = ", "),
+                                 call. = FALSE),
+    attributes_full = rdz_stop(
+      "Exact generic attributes require a full read; set `allow_full = TRUE`.",
+      call. = FALSE
+    ),
     rdz_stop("rdz cannot serve this request.", call. = FALSE)
   )
 }

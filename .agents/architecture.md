@@ -119,12 +119,22 @@ the settings the C layer takes, and does what is simplest over R values:
   `rdz_check()` words as R's argument checks did (`rdz_request_stop()`,
   `rdz_argument_error`). R then takes the rows as `[` does
   (`rdz_rows_take()`), and selects from a generic file's whole value;
-- `rdz_schema()` builds its tree from the directory dump;
-- `rdz_attributes(object =)`, `rdz_save()`/`rdz_load()`, `skip_unchanged`.
+- `rdz_attributes(object =, names =)`: one `.Call` (`rdz_c_attributes`)
+  opens the file once. For a native file C walks `object` (a container's
+  names through `Rf_match()`, read from the open reader; positions against
+  its children), lists the object's attributes as R does (implied first,
+  then stored ones in directory order, a stored one replacing an implied
+  one of the same name in place) and reads the stored values asked for in
+  one pass; refusals come back as kind `request`, and R words them with the
+  path rebuilt from the user's steps. A generic file is read whole in the
+  same call when `allow_full`, for R to take the attributes from;
+- `rdz_schema()` builds its tree from the directory dump (its attribute
+  names by `rdz_attribute_entries()`, which a test keeps in step with
+  `rdz_attributes()`);
+- `rdz_save()`/`rdz_load()`, `skip_unchanged`.
 
-`rdz_attributes(object =)` still opens the file once per step of its path
-(the directory, each step's names, the attributes); serving it from one
-call is the follow-up to #27 F.1.
+`rdz_schema()` still opens the file three times (`rdz_info()`, the
+directory, the parts' names and classes); one call for it is a candidate.
 
 ## Writing
 
