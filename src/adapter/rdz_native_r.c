@@ -2190,7 +2190,7 @@ SEXP rdz_native_read_schema(rdz_reader *opened, int threads, int recursive, rdz_
                             int *failed)
 {
     uint32_t n = opened->nobjects, i;
-    SEXP out, info, dir, entries, ids, values = R_NilValue;
+    SEXP out, info, dir, entries, hold, ids, values = R_NilValue;
     int *depth, *want, nwant = 0, nprot = 0;
     *failed = 1;
     if (!(info = rdz_info_list(opened, e))) return R_NilValue;
@@ -2203,6 +2203,10 @@ SEXP rdz_native_read_schema(rdz_reader *opened, int threads, int recursive, rdz_
     PROTECT(dir);
     nprot++;
     entries = PROTECT(Rf_allocVector(VECSXP, n));
+    nprot++;
+    /* each object's entry tables while they are filled: held here, so the
+       loop protects nothing itself (rchk follows a counter that only grows) */
+    hold = PROTECT(Rf_allocVector(VECSXP, 2));
     nprot++;
     depth = (int *)R_alloc(n ? n : 1, sizeof(int));
     want = (int *)R_alloc(n ? n : 1, sizeof(int));
@@ -2223,9 +2227,10 @@ SEXP rdz_native_read_schema(rdz_reader *opened, int threads, int recursive, rdz_
         if (VECTOR_ELT(entries, src) == R_NilValue) {
             rdz_entries t;
             R_xlen_t cap = (R_xlen_t)opened->objects[src].attribute_count + 5;
-            t.names = PROTECT(Rf_allocVector(STRSXP, cap));
-            t.values = PROTECT(Rf_allocVector(VECSXP, cap));
-            nprot += 2;
+            t.names = Rf_allocVector(STRSXP, cap);
+            SET_VECTOR_ELT(hold, 0, t.names);
+            t.values = Rf_allocVector(VECSXP, cap);
+            SET_VECTOR_ELT(hold, 1, t.values);
             t.object = (int *)R_alloc((size_t)cap, sizeof(int));
             t.n = 0;
             if (rdz_entries_of(opened, src, &t, e)) {
@@ -2233,8 +2238,6 @@ SEXP rdz_native_read_schema(rdz_reader *opened, int threads, int recursive, rdz_
                 return R_NilValue;
             }
             SET_VECTOR_ELT(entries, src, Rf_lengthgets(t.names, t.n));
-            UNPROTECT(2);
-            nprot -= 2;
         }
         if ((v = rdz_attr_value(opened, src, RDZ_ATTRIBUTE_FLAG_CLASS, NULL, e, &bad)) >= 0 ||
             (!bad && (v = rdz_attr_value(opened, src, RDZ_ATTRIBUTE_FLAG_OTHER, "class", e, &bad)) >= 0)) {
