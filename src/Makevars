@@ -4,8 +4,13 @@
 # zstd (src/vendor/zstd/, see tools/vendor/) is compiled with its API's
 # visibility attribute emptied, so that with $(C_VISIBILITY) none of its
 # symbols leaves rdz.so; only R_init_rdz is exported. tools/vendor/verify
-# checks these defines against tools/vendor/manifest.tsv.
-PKG_CPPFLAGS = -I. -DZSTDLIB_VISIBLE= -DZSTDERRORLIB_VISIBLE=
+# checks these defines against tools/vendor/manifest.tsv.#
+# XXH3_STREAM_USE_STACK=1: zufast's vendored xxHash keeps XXH3's streaming
+# accumulators in its state struct when clang compiles it, which halves the
+# streaming hash's speed (the content hash streams every vector); gcc and
+# MSVC already get the stack copy this asks for. Same algorithm, same hash
+# values. To move into zufast's vendor_config.h, then go from here.
+PKG_CPPFLAGS = -I. -DZSTDLIB_VISIBLE= -DZSTDERRORLIB_VISIBLE= -DXXH3_STREAM_USE_STACK=1
 PKG_CFLAGS = $(C_VISIBILITY)
 PKG_LIBS = -pthread
 
