@@ -377,7 +377,10 @@ block's record, before any compression:
   two zero bytes, `base:i32`, then `n` codes of `width` bits, packed least
   significant bit first; a value is `base + code`, and with `has_na` the
   all-ones code is `NA` (the width leaves room for it). Unused high bits of
-  the last byte are zero. An all-`NA` block has base 0.
+  the last byte are zero. An all-`NA` block has base 0. Any width that holds
+  the codes is valid: compressing levels write the smallest, and level 0
+  rounds a width of 1 to 16 up to 8 or 16 (writer policy), so that its codes
+  are bytes or little-endian halfwords, narrowed and widened at copy speed.
 - **13, delta:** `width:u8`, three zero bytes, `first:i32`, `min_delta:i64`,
   then the `n - 1` codes `value[i] - value[i - 1] - min_delta`, packed as
   above; the width is at most 32. No `NA`; `n >= 2`.
@@ -412,7 +415,8 @@ block's record, before any compression:
 
 Every decoded value is checked: an integer record cannot produce `INT32_MIN`
 except through its `NA` code. The writer chooses the smallest record from one
-pass of block statistics; between raw and shuffled raw (the same size) it
+pass of block statistics (except that level 0 widens frame-of-reference codes
+of up to 16 bits to 8 or 16, above); between raw and shuffled raw (the same size) it
 stores shuffled planes when the block will be compressed, unless a sample of
 4,096 values is under half distinct, when plain bytes keep the repeats zstd
 finds. Neither choice is recorded beyond the encoding ID, and readers accept

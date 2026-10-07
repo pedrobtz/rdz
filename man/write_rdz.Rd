@@ -56,12 +56,13 @@ blocks of 1 MiB. Every file records the object's content hash
 }
 \details{
 \code{compress} is the Zstandard level each block is compressed at: \code{0} stores
-every block raw (the fastest to write and read), \code{1} (the default) is fast
-and already small, and higher levels, up to \code{19}, trade write time for
-size; reads stay fast at any level. Below level 6 a block is stored
-compressed only when that saves at least an eighth of it, so data that
-barely compresses reads at memory speed; from level 6, whenever it is
-smaller. \code{options(rdz.threads = )} sets the threads that compress and, in
+every block raw (the fastest to write and read; small integer and factor
+codes take a byte or two each rather than the fewest bits), \code{1} (the
+default) is fast and already small, and higher levels, up to \code{19}, trade
+write time for size; reads stay fast at any level. Below level 6 a block
+is stored compressed only when that saves at least an eighth of it, so
+data that barely compresses reads at memory speed; from level 6, whenever
+it is smaller. \code{options(rdz.threads = )} sets the threads that compress and, in
 \code{\link[=read_rdz]{read_rdz()}}, decompress blocks; the default is 1. The file does not
 depend on either: any setting reads any file, and the same object written
 with any number of threads gives the same bytes.

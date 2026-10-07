@@ -647,6 +647,40 @@ static void sweep_ints(int32_t *v, size_t n, unsigned width, int na, uint32_t se
     }
 }
 
+/* Level 0 widens codes of up to 16 bits to 8 or 16 only while the record
+   still beats raw: four values of 9 to 16 bits would take as many bytes
+   either way, so they keep the exact width. Every case round-trips. */
+static void test_level0_widths(void)
+{
+    static const unsigned widths[] = {4, 8, 9, 15, 16};
+    static const size_t lengths[] = {2, 3, 4, 5, 8};
+    int32_t v[8], back[8];
+    zb_buf rec;
+    size_t a, b;
+    zb_buf_alloc(&rec, 0, 0);
+    for (a = 0; a < sizeof widths / sizeof *widths; a++) {
+        for (b = 0; b < sizeof lengths / sizeof *lengths; b++) {
+            size_t n = lengths[b], i;
+            uint16_t enc;
+            rdz_error e;
+            for (i = 0; i < n; i++) v[i] = 1000 + (int32_t)(i * ((1u << widths[a]) - 1u) / (n - 1));
+            if (rdz_int_encode(v, n, 0, &rec, &enc, &e)) {
+                CHECK(0, "level-0 width %u n %zu: %s", widths[a], n, e.message);
+                continue;
+            }
+            CHECK(rec.len <= 4 * n, "level-0 width %u n %zu: %zu bytes, raw %zu", widths[a], n,
+                  rec.len, 4 * n);
+            if (enc == RDZ_ENCODING_INT_FOR) {
+                CHECK(rec.len < 4 * n, "level-0 width %u n %zu: FOR not below raw", widths[a], n);
+            }
+            CHECK(rdz_int_decode(rec.data, rec.len, enc, n, back, &e) == 0 &&
+                      memcmp(v, back, n * sizeof *v) == 0,
+                  "level-0 width %u n %zu: no round trip", widths[a], n);
+        }
+    }
+    zb_buf_release(&rec);
+}
+
 static void test_bit_exact_ints(void)
 {
     static const size_t lengths[] = {1, 2, 3, 15, 16, 17, 31, 32, 33, 63, 64, 65, 1023, 1024,
@@ -1460,8 +1494,9 @@ static void test_extensions(const char *tmpdir)
 }
 
 /* FOR decode against a 64-bit reference, code by code: every code of
-   widths 0 to 6, on bases at and near each end of int32, as integers and
-   as factors of 1 to 40 levels, with and without an NA code. Each block
+   widths 0 to 8 (8 is level 0's byte-aligned path), on bases at and near
+   each end of int32, as integers and as factors of 1 to 40 levels, with
+   and without an NA code. Each block
    repeats one code 21 times (the 8- and 4-lane loops and a scalar tail),
    and a last block mixes them all. */
 static void test_for_ranges(void)
@@ -1470,11 +1505,11 @@ static void test_for_ranges(void)
                                     INT32_MAX};
     static const uint32_t tops[] = {0, 1, 5, 26, 40};
     enum { REPS = 21 };
-    uint8_t rec[RDZ_INT_FOR_HEADER + 64 * REPS];
-    int32_t got[64 * REPS];
+    static uint8_t rec[RDZ_INT_FOR_HEADER + 256 * REPS];
+    static int32_t got[256 * REPS];
     unsigned width, has_na;
     size_t b, t;
-    for (width = 0; width <= 6; width++) {
+    for (width = 0; width <= 8; width++) {
         for (has_na = 0; has_na <= (width > 0); has_na++) {
             for (b = 0; b < sizeof bases / sizeof *bases; b++) {
                 for (t = 0; t < sizeof tops / sizeof *tops; t++) {
@@ -1546,6 +1581,7 @@ int main(int argc, char **argv)
     test_extensions(tmpdir);
     test_empty_logical(tmpdir);
     test_for_ranges();
+    test_level0_widths();
     test_bit_exact_ints();
     test_bit_exact_logical();
     printf("logical kernel: %s\n", rdz_logical_kernel());

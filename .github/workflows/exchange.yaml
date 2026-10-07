@@ -2,7 +2,8 @@
 # each write the frozen corpus's specs (tools/exchange.R write), then every
 # platform reads every platform's files (tools/exchange.R check): each reads
 # to its spec's value, and every uncompressed file is the same bytes
-# everywhere and the same as the frozen corpus's.
+# everywhere and the same as the frozen corpus's (but those whose small
+# integer codes level 0 now widens, which must be larger).
 on:
   push:
     branches: [main, master]

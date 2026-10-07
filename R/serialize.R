@@ -8,12 +8,13 @@
 #' ([rdz_hash()]).
 #'
 #' `compress` is the Zstandard level each block is compressed at: `0` stores
-#' every block raw (the fastest to write and read), `1` (the default) is fast
-#' and already small, and higher levels, up to `19`, trade write time for
-#' size; reads stay fast at any level. Below level 6 a block is stored
-#' compressed only when that saves at least an eighth of it, so data that
-#' barely compresses reads at memory speed; from level 6, whenever it is
-#' smaller. `options(rdz.threads = )` sets the threads that compress and, in
+#' every block raw (the fastest to write and read; small integer and factor
+#' codes take a byte or two each rather than the fewest bits), `1` (the
+#' default) is fast and already small, and higher levels, up to `19`, trade
+#' write time for size; reads stay fast at any level. Below level 6 a block
+#' is stored compressed only when that saves at least an eighth of it, so
+#' data that barely compresses reads at memory speed; from level 6, whenever
+#' it is smaller. `options(rdz.threads = )` sets the threads that compress and, in
 #' [read_rdz()], decompress blocks; the default is 1. The file does not
 #' depend on either: any setting reads any file, and the same object written
 #' with any number of threads gives the same bytes.
