@@ -123,6 +123,111 @@ static inline uint32_t v4_any(rdz_v4 a) { return (uint32_t)(_mm_movemask_epi8(a)
 #define RDZ_VEC_INT 1
 #endif
 
+/* AVX2 (eight lanes, chosen at run time) for the integer codec's hottest
+   loops on x86-64, where SSE2 lacks 32-bit min and max. Each returns how far
+   it got; the four-lane and scalar loops finish the rest. */
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#define RDZ_HAVE_AVX2_INT 1
+#include <immintrin.h>
+
+static int rdz_int_avx2(void)
+{
+    __builtin_cpu_init();
+    return __builtin_cpu_supports("avx2");
+}
+
+/* from i >= 1: the minimum of values other than NA, the maximum, the NA
+   count and the number of values unlike the one before */
+__attribute__((target("avx2"))) static size_t int_stats_avx2(const int32_t *v, size_t i, size_t n,
+                                                             int32_t *mn, int32_t *mx,
+                                                             uint32_t *nas, uint32_t *changes)
+{
+    const __m256i na8 = _mm256_set1_epi32(INT32_MIN), max8 = _mm256_set1_epi32(INT32_MAX);
+    __m256i mn0 = _mm256_set1_epi32(*mn), mx0 = _mm256_set1_epi32(*mx), mn1 = mn0, mx1 = mx0;
+    __m256i vna = _mm256_setzero_si256(), veq = _mm256_setzero_si256();
+    size_t start = i, k;
+    int32_t a[8], b[8];
+    uint32_t c[8], d[8];
+    for (; i + 16 <= n; i += 16) {
+        __m256i x0 = _mm256_loadu_si256((const __m256i *)(const void *)(v + i)),
+                p0 = _mm256_loadu_si256((const __m256i *)(const void *)(v + i - 1)),
+                x1 = _mm256_loadu_si256((const __m256i *)(const void *)(v + i + 8)),
+                p1 = _mm256_loadu_si256((const __m256i *)(const void *)(v + i + 7));
+        __m256i n0 = _mm256_cmpeq_epi32(x0, na8), n1 = _mm256_cmpeq_epi32(x1, na8);
+        mn0 = _mm256_min_epi32(mn0, _mm256_blendv_epi8(x0, max8, n0));
+        mn1 = _mm256_min_epi32(mn1, _mm256_blendv_epi8(x1, max8, n1));
+        mx0 = _mm256_max_epi32(mx0, x0);
+        mx1 = _mm256_max_epi32(mx1, x1);
+        vna = _mm256_sub_epi32(_mm256_sub_epi32(vna, n0), n1); /* a mask is -1 */
+        veq = _mm256_sub_epi32(_mm256_sub_epi32(veq, _mm256_cmpeq_epi32(x0, p0)),
+                               _mm256_cmpeq_epi32(x1, p1));
+    }
+    if (i == start) return i;
+    _mm256_storeu_si256((__m256i *)(void *)a, _mm256_min_epi32(mn0, mn1));
+    _mm256_storeu_si256((__m256i *)(void *)b, _mm256_max_epi32(mx0, mx1));
+    _mm256_storeu_si256((__m256i *)(void *)c, vna);
+    _mm256_storeu_si256((__m256i *)(void *)d, veq);
+    for (k = 0; k < 8; k++) {
+        *mn = a[k] < *mn ? a[k] : *mn;
+        *mx = b[k] > *mx ? b[k] : *mx;
+        *nas += c[k];
+        *changes -= d[k];
+    }
+    *changes += (uint32_t)(i - start);
+    return i;
+}
+
+/* frame-of-reference codes: the NA code for NA, else value - base */
+__attribute__((target("avx2"))) static size_t for_codes_avx2(const int32_t *v, size_t n,
+                                                             int32_t base, uint32_t na_code,
+                                                             uint32_t *codes)
+{
+    const __m256i na8 = _mm256_set1_epi32(INT32_MIN), code8 = _mm256_set1_epi32((int)na_code),
+                  base8 = _mm256_set1_epi32(base);
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m256i x = _mm256_loadu_si256((const __m256i *)(const void *)(v + i));
+        _mm256_storeu_si256((__m256i *)(void *)(codes + i),
+                            _mm256_blendv_epi8(_mm256_sub_epi32(x, base8), code8,
+                                               _mm256_cmpeq_epi32(x, na8)));
+    }
+    return i;
+}
+
+/* for_add_base() eight lanes at a time; or-s into *bad */
+__attribute__((target("avx2"))) static size_t for_add_base_avx2(uint32_t *c, size_t n, int has_na,
+                                                                uint32_t na_code, uint32_t ubase,
+                                                                uint32_t limit, uint32_t zero_bad,
+                                                                uint32_t top, uint32_t *bad)
+{
+    const __m256i flip = _mm256_set1_epi32(INT32_MIN), zero = _mm256_setzero_si256(),
+                  one = _mm256_set1_epi32(1), na8 = _mm256_set1_epi32(INT32_MIN),
+                  code8 = _mm256_set1_epi32((int)(has_na ? na_code : 0)),
+                  use_na = _mm256_set1_epi32(has_na ? -1 : 0),
+                  base8 = _mm256_set1_epi32((int)ubase),
+                  limit8 = _mm256_xor_si256(_mm256_set1_epi32((int)limit), flip),
+                  zbad8 = _mm256_set1_epi32(zero_bad ? -1 : 0),
+                  check8 = _mm256_set1_epi32(top ? -1 : 0),
+                  top18 = _mm256_xor_si256(_mm256_set1_epi32((int)(top - 1u)), flip);
+    __m256i vbad = zero;
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m256i ci = _mm256_loadu_si256((const __m256i *)(const void *)(c + i));
+        __m256i na = _mm256_and_si256(use_na, _mm256_cmpeq_epi32(ci, code8));
+        __m256i val = _mm256_add_epi32(ci, base8);
+        /* unsigned a > b as signed after flipping the sign bits */
+        __m256i b = _mm256_or_si256(_mm256_cmpgt_epi32(_mm256_xor_si256(ci, flip), limit8),
+                                    _mm256_and_si256(zbad8, _mm256_cmpeq_epi32(ci, zero)));
+        b = _mm256_or_si256(b, _mm256_and_si256(check8, _mm256_cmpgt_epi32(
+                                   _mm256_xor_si256(_mm256_sub_epi32(val, one), flip), top18)));
+        vbad = _mm256_or_si256(vbad, _mm256_andnot_si256(na, b));
+        _mm256_storeu_si256((__m256i *)(void *)(c + i), _mm256_blendv_epi8(val, na8, na));
+    }
+    *bad |= !_mm256_testz_si256(vbad, vbad);
+    return i;
+}
+#endif
+
 #define INT_NA INT32_MIN
 
 /* On a little-endian host the values' bytes in memory are their file
@@ -512,8 +617,13 @@ int rdz_int_encode_range(const int32_t *v, size_t n, int compressing, zb_buf *ou
             mx = v[0];
         }
         i = 1;
+#ifdef RDZ_HAVE_AVX2_INT
+        if (n >= 17 && rdz_int_avx2()) {
+            i = int_stats_avx2(v, i, n, &mn, &mx, &na_count, &changes);
+        }
+#endif
 #ifdef RDZ_VEC_INT
-        if (n >= 5) {
+        if (n - i >= 4) {
             const rdz_v4 na4 = v4_dup((uint32_t)INT_NA), max4 = v4_dup((uint32_t)INT32_MAX);
             rdz_v4 vmn = v4_dup((uint32_t)mn), vmx = v4_dup((uint32_t)mx), vna = v4_dup(0),
                    vch = v4_dup(0), all = v4_dup(0xffffffffu);
@@ -637,6 +747,9 @@ int rdz_int_encode_range(const int32_t *v, size_t n, int compressing, zb_buf *ou
         uint32_t *codes;
         if (!(codes = codes_after(out, for_len, n, e))) return 1;
         i = 0;
+#ifdef RDZ_HAVE_AVX2_INT
+        if (rdz_int_avx2()) i = for_codes_avx2(v, n, base, na_code, codes);
+#endif
 #ifdef RDZ_VEC_INT
         {
             const rdz_v4 na4 = v4_dup((uint32_t)INT_NA), code4 = v4_dup(na_code),
@@ -693,6 +806,9 @@ static uint32_t for_add_base(uint32_t *c, size_t n, int has_na, uint32_t na_code
 {
     uint32_t bad = 0, check = top != 0, top1 = top - 1u;
     size_t i = 0;
+#ifdef RDZ_HAVE_AVX2_INT
+    if (rdz_int_avx2()) i = for_add_base_avx2(c, n, has_na, na_code, ubase, limit, zero_bad, top, &bad);
+#endif
 #ifdef RDZ_VEC_INT
     {
         const rdz_v4 code4 = v4_dup(has_na ? na_code : 0), use_na = v4_dup(has_na ? ~0u : 0),
