@@ -214,6 +214,7 @@ rdz_slot *rdz_pipeline_next(rdz_pipeline *p, int *must_consume)
     rdz_slot_set(p, s, RDZ_SLOT_FILLING);
     s->seq = p->next_submit;
     s->failed = 0;
+    s->values = NULL;
     zb_buf_reset(&s->in);
     zb_buf_reset(&s->out);
     return s;
@@ -310,6 +311,7 @@ void rdz_job_vector(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
     size_t n = (size_t)s->logical_count;
     uint16_t encoding = 0;
     int failed;
+    const int32_t *iv = (const int32_t *)s->values;
     if (s->vtype == RDZ_TYPE_CHARACTER) {
         uint16_t keep = s->encoding;
         rdz_job_compress(p, s, codec);
@@ -318,11 +320,11 @@ void rdz_job_vector(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
     }
     switch (s->vtype) {
     case RDZ_TYPE_LOGICAL:
-        failed = rdz_logical_encode((const int32_t *)(const void *)s->in.data, n, &s->out,
+        failed = rdz_logical_encode(iv, n, &s->out,
                                     &encoding, &codec->scratch, &s->e);
         break;
     case RDZ_TYPE_INTEGER:
-        failed = rdz_int_encode((const int32_t *)(const void *)s->in.data, n, p->level != 0,
+        failed = rdz_int_encode(iv, n, p->level != 0,
                                 &s->out, &encoding, &s->e);
         break;
     case RDZ_TYPE_FACTOR: {
@@ -330,7 +332,7 @@ void rdz_job_vector(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
            outside its levels is refused here, without a pass of its own */
         int32_t lo, hi;
         int has;
-        failed = rdz_int_encode_range((const int32_t *)(const void *)s->in.data, n,
+        failed = rdz_int_encode_range(iv, n,
                                       p->level != 0, &s->out, &encoding, &lo, &hi, &has, &s->e);
         if (!failed && has && (lo < 1 || (uint64_t)hi > s->levels)) {
             rdz_unsupported(&s->e, "a factor with codes outside its levels");
@@ -339,7 +341,7 @@ void rdz_job_vector(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
         break;
     }
     default:
-        failed = rdz_dbl_encode((const double *)(const void *)s->in.data, n, p->level != 0,
+        failed = rdz_dbl_encode((const double *)s->values, n, p->level != 0,
                                 &s->out, &encoding, &s->e);
         break;
     }
@@ -353,9 +355,9 @@ void rdz_job_vector(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
     if ((encoding == RDZ_ENCODING_INT_SHUFFLE || encoding == RDZ_ENCODING_DBL_SHUFFLE) &&
         rdz_plain_wins(p, s, codec)) {
         failed = s->vtype != RDZ_TYPE_DOUBLE
-                     ? rdz_int_encode((const int32_t *)(const void *)s->in.data, n, 0, &s->out,
+                     ? rdz_int_encode(iv, n, 0, &s->out,
                                       &encoding, &s->e)
-                     : rdz_dbl_encode((const double *)(const void *)s->in.data, n, 0, &s->out,
+                     : rdz_dbl_encode((const double *)s->values, n, 0, &s->out,
                                       &encoding, &s->e);
         if (failed) {
             s->failed = 1;
@@ -364,7 +366,7 @@ void rdz_job_vector(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
     }
     s->encoding = encoding;
     s->decoded_len = s->out.len;
-    /* the values in `in` are spent: compress the record into it */
+    /* compress the record into `in`, which the values never used */
     if (rdz_codec_compress(codec, p->level, s->out.data, s->out.len, &s->in, &s->compression,
                            &s->e)) {
         s->failed = 1;
