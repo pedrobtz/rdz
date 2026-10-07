@@ -65,6 +65,9 @@ test_that("a malformed object is refused for a native file, after the open", {
   expect_error(rdz_attributes(path, object = list(NA)), "allow_full", class = "rdz_argument_error")
 })
 
+# The schema and the attribute walk both list attributes through C's
+# rdz_entries_of(), each resolving shared parts on its own path: they must
+# agree on every part.
 test_that("rdz_attributes() lists the attributes rdz_schema() names, for every part", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)

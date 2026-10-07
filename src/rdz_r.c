@@ -138,18 +138,13 @@ static void rdz_set(SEXP list, SEXP names, R_xlen_t i, const char *name, SEXP va
 
 SEXP rdz_native_attribute_names(rdz_reader *r, rdz_error *e); /* adapter/rdz_native_r.c */
 
-SEXP rdz_c_info(SEXP path)
+/* rdz_info()'s fields of an open reader, which stays open; NULL (and e)
+   when a native file's attribute names cannot be read. */
+SEXP rdz_info_list(rdz_reader *r, rdz_error *e)
 {
-    rdz_reader *r;
-    rdz_error e;
-    SEXP ptr = PROTECT(rdz_reader_handle(&r));
     SEXP out, names, synopsis;
     const char *codec = "unknown";
 
-    if (rdz_open_source(r, path, &e)) {
-        UNPROTECT(1);
-        return rdz_failure(&e);
-    }
     if (r->codec_id == RDZ_CODEC_R_SERIAL_V3) codec = "r_serial_v3";
     if (r->codec_id == RDZ_CODEC_NATIVE_V1) codec = "native_v1";
 
@@ -177,11 +172,10 @@ SEXP rdz_c_info(SEXP path)
                               ? (double)r->objects[0].child_count
                               : (double)r->objects[0].logical_len));
     if (r->codec_id == RDZ_CODEC_NATIVE_V1) {
-        SEXP an = rdz_native_attribute_names(r, &e);
+        SEXP an = rdz_native_attribute_names(r, e);
         if (!an) {
-            rdz_reader_finalize(ptr);
-            UNPROTECT(3);
-            return rdz_failure(&e);
+            UNPROTECT(2);
+            return NULL;
         }
         PROTECT(an);
         rdz_set(out, names, 13, "attribute_names", an);
@@ -229,9 +223,28 @@ SEXP rdz_c_info(SEXP path)
         UNPROTECT(2);
     }
     Rf_setAttrib(out, R_NamesSymbol, names);
+    UNPROTECT(2);
+    return out;
+}
 
+SEXP rdz_c_info(SEXP path)
+{
+    rdz_reader *r;
+    rdz_error e;
+    SEXP ptr = PROTECT(rdz_reader_handle(&r));
+    SEXP out;
+    if (rdz_open_source(r, path, &e)) {
+        UNPROTECT(1);
+        return rdz_failure(&e);
+    }
+    if (!(out = rdz_info_list(r, &e))) {
+        rdz_reader_finalize(ptr);
+        UNPROTECT(1);
+        return rdz_failure(&e);
+    }
+    PROTECT(out);
     rdz_reader_finalize(ptr);
-    UNPROTECT(3);
+    UNPROTECT(2);
     return out;
 }
 
@@ -289,6 +302,38 @@ SEXP rdz_c_attributes(SEXP path, SEXP settings, SEXP object, SEXP names, SEXP al
     if (!native && !full) {
         UNPROTECT(1);
         return rdz_request("attributes_full", R_NilValue);
+    }
+    out = PROTECT(Rf_allocVector(VECSXP, 2));
+    SET_VECTOR_ELT(out, 0, Rf_ScalarLogical(native));
+    SET_VECTOR_ELT(out, 1, x);
+    UNPROTECT(2);
+    return out;
+}
+
+SEXP rdz_schema_read(SEXP path, SEXP settings, int recursive, int *native);
+
+/* rdz_schema()'s one read: list(native, x). For a native file x is
+   list(info, directory, entries, ids, values):
+   - info: rdz_info()'s fields (rdz_info_list());
+   - directory: list(objects, attributes), each a list of columns: objects
+     id, parent, role, type, flags, length, first_child, child_count,
+     first_attribute, attribute_count, first_block, block_count,
+     stored_bytes, decoded_bytes; attributes owner, kind, name,
+     name_object, value_object;
+   - entries: per object, the attribute names of each part's object (a
+     shared part's target) as rdz_attributes() lists them, else NULL;
+   - ids, values: the objects the tree shows (kept containers' names, the
+     parts' class and dim), read whole.
+   Parts are the root and the children, down to depth 1 unless recursive.
+   For a generic file x is list(info). */
+SEXP rdz_c_schema(SEXP path, SEXP settings, SEXP recursive)
+{
+    int native = 0;
+    SEXP x = PROTECT(rdz_schema_read(path, settings, Rf_asLogical(recursive) == TRUE, &native)),
+         out;
+    if (Rf_inherits(x, "rdz_failure")) {
+        UNPROTECT(1);
+        return x;
     }
     out = PROTECT(Rf_allocVector(VECSXP, 2));
     SET_VECTOR_ELT(out, 0, Rf_ScalarLogical(native));

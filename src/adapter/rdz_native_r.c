@@ -1722,8 +1722,8 @@ SEXP rdz_native_read_request(rdz_reader *opened, int threads, SEXP select, SEXP 
 
 /* ---- rdz_attributes(): an object's attributes from one open of the file ----------- */
 
-/* What an object's attributes are, in the order R lists them
-   (rdz_attribute_entries() in R/inspect.R does the same for rdz_schema()):
+/* What an object's attributes are, in the order R lists them (for
+   rdz_attributes() and rdz_schema()'s `attributes` column alike):
    a factor's levels and class, implied; a data frame's names, row.names
    (stored, or 1..n) and class (stored, or "data.frame"); then the stored
    attributes in directory order, each appended or, under a name already
@@ -2050,31 +2050,17 @@ static void rdz_col(SEXP list, SEXP names, int i, const char *name, SEXP value)
 /* A native file's directory as two tables (lists of columns): objects (id,
    parent, role, type, flags, length, children, attributes, blocks, stored
    and decoded bytes) and attributes (owner, kind, name, name and value
-   objects). General attributes' names come from their one-block name
-   objects; nothing else is read. */
-SEXP rdz_c_directory(SEXP path)
+   objects), from an open reader, which stays open. General attributes'
+   names come from their one-block name objects; nothing else is read.
+   NULL (and e) when a name cannot be read; unprotected. */
+static SEXP rdz_directory_tables(rdz_reader *rp, rdz_error *e)
 {
-    rdz_reader *rp;
-    rdz_error e;
-    SEXP ptr = PROTECT(rdz_reader_handle(&rp));
     uint32_t i, n, na;
     SEXP out, outn, obj, objn, att, attn, col;
     int *id, *parent, *role, *type, *flags, *fc, *cc, *fa, *ac, *fb, *bc;
     double *len, *stored, *decoded;
-    if (rdz_open_source(rp, path, &e)) {
-        rdz_reader_finalize(ptr);
-        UNPROTECT(1);
-        return rdz_failure(&e);
-    }
-    if (rp->codec_id != RDZ_CODEC_NATIVE_V1) {
-        rdz_codec_error(&e, rp->codec_id, rp->codec_version);
-        rdz_reader_finalize(ptr);
-        UNPROTECT(1);
-        return rdz_failure(&e);
-    }
     n = rp->nobjects;
     na = rp->nattributes;
-    /* the reader belongs to `ptr`: an R error anywhere frees it */
     /* every list and column protected while it is filled (rchk cannot see
        through a list) */
     out = PROTECT(Rf_allocVector(VECSXP, 2));
@@ -2152,36 +2138,144 @@ SEXP rdz_c_directory(SEXP path)
             INTEGER(kind)[i] = (int)a->flags;
             INTEGER(nobj)[i] = (int)a->name_object_id;
             INTEGER(vobj)[i] = (int)a->value_object_id;
-            if (rdz_read_attr_name(rp, a, nm, sizeof nm, &e)) {
-                rdz_reader_finalize(ptr);
-                UNPROTECT(12);
-                return rdz_failure(&e);
+            if (rdz_read_attr_name(rp, a, nm, sizeof nm, e)) {
+                UNPROTECT(11);
+                return NULL;
             }
             SET_STRING_ELT(name, i, Rf_mkChar(nm));
         }
         UNPROTECT(5);
     }
-    rdz_reader_finalize(ptr);
     Rf_setAttrib(out, R_NamesSymbol, outn);
-    UNPROTECT(7);
+    UNPROTECT(6);
     return out;
 }
 
-/* Objects of a native file (0-based ids) and everything below each, read
-   alone: the list of them. */
-SEXP rdz_c_read_objects(SEXP path, SEXP ids, SEXP settings)
+
+/* ---- rdz_schema(): the facts of a native file's tree, from one open ---------------- */
+
+/* The value object of `owner`'s attribute of this kind (and, for a general
+   one, this name), or -1. */
+static int rdz_attr_value(rdz_reader *r, uint32_t owner, uint32_t kind, const char *name,
+                          rdz_error *e, int *failed)
 {
-    rdz_reader r;
-    rdz_error e;
-    int failed, threads = INTEGER(settings)[1] < 1 ? 1 : INTEGER(settings)[1];
-    SEXP out;
-    if (rdz_open_source(&r, path, &e)) return rdz_failure(&e);
-    if (r.codec_id != RDZ_CODEC_NATIVE_V1) {
-        rdz_codec_error(&e, r.codec_id, r.codec_version);
-        rdz_reader_close(&r);
-        return rdz_failure(&e);
+    const rdz_object *o = &r->objects[owner];
+    uint32_t a;
+    *failed = 0;
+    for (a = 0; a < o->attribute_count; a++) {
+        const rdz_attribute *at = &r->attributes[o->first_attribute + a];
+        char nm[10001]; /* R caps a symbol at 10,000 bytes */
+        if (at->flags != kind) continue;
+        if (name) {
+            if (rdz_read_attr_name(r, at, nm, sizeof nm, e)) {
+                *failed = 1;
+                return -1;
+            }
+            if (strcmp(nm, name)) continue;
+        }
+        return (int)at->value_object_id;
     }
-    out = PROTECT(rdz_native_read_in(&r, threads, R_NilValue, ids, R_NilValue, &e, &failed)); /* closes r */
-    UNPROTECT(1);
-    return failed ? rdz_failure(&e) : out;
+    return -1;
+}
+
+/* rdz_schema()'s read of an open native file: rdz_info()'s fields, the
+   directory tables, the attribute names of each part's object (as
+   rdz_attributes() lists them; a shared part's target), and the values the
+   schema shows (the containers' names, the parts' class and dim), read in
+   one pass, which takes the reader over. Parts are the root and the
+   children; only those down to depth 1 unless recursive. list(info,
+   directory, entries, ids, values): entries per object (NULL where not a
+   part's), values per id. */
+SEXP rdz_native_read_schema(rdz_reader *opened, int threads, int recursive, rdz_error *e,
+                            int *failed)
+{
+    uint32_t n = opened->nobjects, i;
+    SEXP out, info, dir, entries, hold, ids, values = R_NilValue;
+    int *depth, *want, nwant = 0, nprot = 0;
+    *failed = 1;
+    if (!(info = rdz_info_list(opened, e))) return R_NilValue;
+    PROTECT(info);
+    nprot++;
+    if (!(dir = rdz_directory_tables(opened, e))) {
+        UNPROTECT(nprot);
+        return R_NilValue;
+    }
+    PROTECT(dir);
+    nprot++;
+    entries = PROTECT(Rf_allocVector(VECSXP, n));
+    nprot++;
+    /* each object's entry tables while they are filled: held here, so the
+       loop protects nothing itself (rchk follows a counter that only grows) */
+    hold = PROTECT(Rf_allocVector(VECSXP, 2));
+    nprot++;
+    depth = (int *)R_alloc(n ? n : 1, sizeof(int));
+    want = (int *)R_alloc(n ? n : 1, sizeof(int));
+    memset(want, 0, (n ? n : 1) * sizeof(int));
+    for (i = 0; i < n; i++) {
+        const rdz_object *o = &opened->objects[i];
+        uint32_t src;
+        int v, bad;
+        /* parents come first */
+        depth[i] = i == 0 ? 0 : depth[o->parent_id] + 1;
+        if (o->role != RDZ_ROLE_ROOT && o->role != RDZ_ROLE_CHILD) continue;
+        if (!recursive && depth[i] > 1) continue;
+        if ((o->type_tag == RDZ_TYPE_LIST || o->type_tag == RDZ_TYPE_DATA_FRAME) &&
+            (v = rdz_attr_value(opened, i, RDZ_ATTRIBUTE_FLAG_NAMES, NULL, e, &bad)) >= 0) {
+            want[v] = 1;
+        }
+        src = rdz_resolve_id(opened, i);
+        if (VECTOR_ELT(entries, src) == R_NilValue) {
+            rdz_entries t;
+            R_xlen_t cap = (R_xlen_t)opened->objects[src].attribute_count + 5;
+            t.names = Rf_allocVector(STRSXP, cap);
+            SET_VECTOR_ELT(hold, 0, t.names);
+            t.values = Rf_allocVector(VECSXP, cap);
+            SET_VECTOR_ELT(hold, 1, t.values);
+            t.object = (int *)R_alloc((size_t)cap, sizeof(int));
+            t.n = 0;
+            if (rdz_entries_of(opened, src, &t, e)) {
+                UNPROTECT(nprot);
+                return R_NilValue;
+            }
+            SET_VECTOR_ELT(entries, src, Rf_lengthgets(t.names, t.n));
+        }
+        if ((v = rdz_attr_value(opened, src, RDZ_ATTRIBUTE_FLAG_CLASS, NULL, e, &bad)) >= 0 ||
+            (!bad && (v = rdz_attr_value(opened, src, RDZ_ATTRIBUTE_FLAG_OTHER, "class", e, &bad)) >= 0)) {
+            want[v] = 1;
+        }
+        if (!bad && (v = rdz_attr_value(opened, src, RDZ_ATTRIBUTE_FLAG_OTHER, "dim", e, &bad)) >= 0) {
+            want[v] = 1;
+        }
+        if (bad) {
+            UNPROTECT(nprot);
+            return R_NilValue;
+        }
+    }
+    for (i = 0; i < n; i++) nwant += want[i];
+    ids = PROTECT(Rf_allocVector(INTSXP, nwant));
+    nprot++;
+    for (i = 0, nwant = 0; i < n; i++) {
+        if (want[i]) INTEGER(ids)[nwant++] = (int)i;
+    }
+    if (nwant) {
+        values = PROTECT(rdz_native_read_in(opened, threads, R_NilValue, ids, R_NilValue, e, failed));
+        nprot++;
+        if (*failed) {
+            UNPROTECT(nprot);
+            return R_NilValue;
+        }
+    } else {
+        values = PROTECT(Rf_allocVector(VECSXP, 0));
+        nprot++;
+    }
+    out = PROTECT(Rf_allocVector(VECSXP, 5));
+    nprot++;
+    SET_VECTOR_ELT(out, 0, info);
+    SET_VECTOR_ELT(out, 1, dir);
+    SET_VECTOR_ELT(out, 2, entries);
+    SET_VECTOR_ELT(out, 3, ids);
+    SET_VECTOR_ELT(out, 4, values);
+    *failed = 0;
+    UNPROTECT(nprot);
+    return out;
 }

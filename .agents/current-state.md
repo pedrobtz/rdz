@@ -5,6 +5,19 @@ A log of dated checkpoints, newest first. For what the system is, read
 a checkpoint records what changed and why, and later checkpoints can
 supersede earlier ones.
 
+## Checkpoint 2026-10-07: one call for `rdz_schema()`
+
+`rdz_schema()` opens the file once (it opened it three times: `rdz_info()`,
+the directory, the parts' names and classes). `rdz_c_schema` returns the
+facts from one reader: `rdz_info()`'s fields, the directory tables, each
+part's attribute names through the C listing `rdz_attributes()` uses, and
+the small objects the tree shows; R still builds and formats the tree, so
+its output is unchanged. Gone: `rdz_c_directory`, `rdz_c_read_objects`,
+`rdz_read_objects()`, `rdz_attribute_entries()` (the R twin of the C
+listing) and `rdz_resolve()`. `rdz_c_info`'s body is `rdz_info_list()`,
+shared with the schema; `rdz_read_source()` takes a callback for a generic
+file opened but not read.
+
 ## Checkpoint 2026-10-07: one call for `rdz_attributes(object =)` (#27 F.1)
 
 `rdz_attributes(path, object, names)` opens the file once. Before, a native
@@ -18,8 +31,7 @@ and refused unread otherwise. A malformed `object` is refused once the
 file is known to be native, so a generic file keeps answering it as
 before. The open, the generic read and the close are one function,
 `rdz_read_source()`, shared with `rdz_c_read`. `rdz_object_id()` is gone.
-Candidate, the maintainer's choice: `rdz_schema()` through one call (it
-opens the file three times).
+`rdz_schema()` followed (the checkpoint above).
 
 ## Checkpoint 2026-10-07: one call for `select` and `rows` (#27 F.1)
 
