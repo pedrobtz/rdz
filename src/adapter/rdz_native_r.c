@@ -2225,14 +2225,16 @@ SEXP rdz_native_read_schema(rdz_reader *opened, int threads, int recursive, rdz_
             R_xlen_t cap = (R_xlen_t)opened->objects[src].attribute_count + 5;
             t.names = PROTECT(Rf_allocVector(STRSXP, cap));
             t.values = PROTECT(Rf_allocVector(VECSXP, cap));
+            nprot += 2;
             t.object = (int *)R_alloc((size_t)cap, sizeof(int));
             t.n = 0;
             if (rdz_entries_of(opened, src, &t, e)) {
-                UNPROTECT(nprot + 2);
+                UNPROTECT(nprot);
                 return R_NilValue;
             }
             SET_VECTOR_ELT(entries, src, Rf_lengthgets(t.names, t.n));
             UNPROTECT(2);
+            nprot -= 2;
         }
         if ((v = rdz_attr_value(opened, src, RDZ_ATTRIBUTE_FLAG_CLASS, NULL, e, &bad)) >= 0 ||
             (!bad && (v = rdz_attr_value(opened, src, RDZ_ATTRIBUTE_FLAG_OTHER, "class", e, &bad)) >= 0)) {

@@ -237,10 +237,15 @@ SEXP rdz_c_info(SEXP path)
         UNPROTECT(1);
         return rdz_failure(&e);
     }
-    out = rdz_info_list(r, &e);
+    if (!(out = rdz_info_list(r, &e))) {
+        rdz_reader_finalize(ptr);
+        UNPROTECT(1);
+        return rdz_failure(&e);
+    }
+    PROTECT(out);
     rdz_reader_finalize(ptr);
-    UNPROTECT(1);
-    return out ? out : rdz_failure(&e);
+    UNPROTECT(2);
+    return out;
 }
 
 SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP metadata,
