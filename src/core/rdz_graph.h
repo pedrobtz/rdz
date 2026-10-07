@@ -69,6 +69,13 @@ int rdz_graph_read_window(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sink
                           const uint8_t *want, const rdz_window *windows, int threads,
                           rdz_tick_fn tick, void *tick_ctx, rdz_error *e);
 
+/* One character object's strings into the sink, block by block, through
+   the reader's own buffers: the reader stays open for a read after it (the
+   names a selection is resolved against). The object is a character
+   object, or a reference to one. */
+int rdz_graph_read_strings(rdz_reader *r, uint32_t object, const rdz_names_sink *sink,
+                           rdz_error *e);
+
 /* Validates the object graph of a native file's directory (the container
    reader calls it). */
 int rdz_graph_check(const rdz_reader *r, rdz_error *e);

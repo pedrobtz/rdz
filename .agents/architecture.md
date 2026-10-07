@@ -108,18 +108,23 @@ computes it.
 R validates arguments (raising `rdz_argument_error`), reads options into
 the settings the C layer takes, and does what is simplest over R values:
 
-- `read_rdz(rows =)`: the C reader returns the window covering the rows;
-  R takes the rows as `[` does (`rdz_rows_take()`), and reads whole any
-  value the reader refuses to window, and any generic file;
-- `read_rdz(select =)` on a generic file: the value is read whole and
-  subset;
+- `read_rdz(select =, rows =)`: one `.Call` (`rdz_c_read`) opens the file
+  once. For a native file C resolves `select` against the root (names
+  through `Rf_match()` on the root's names, read from the open reader;
+  positions against its children), checks the rows' window against the
+  root, and reads whole a value whose window it refuses (a vector shared
+  with a part read whole; a matrix, an array, a time series), returning
+  where the value starts. A request the file cannot serve (an unknown name,
+  rows past the length) comes back as a failure of kind `request`, which
+  `rdz_check()` words as R's argument checks did (`rdz_request_stop()`,
+  `rdz_argument_error`). R then takes the rows as `[` does
+  (`rdz_rows_take()`), and selects from a generic file's whole value;
 - `rdz_schema()` builds its tree from the directory dump;
 - `rdz_attributes(object =)`, `rdz_save()`/`rdz_load()`, `skip_unchanged`.
 
-A `select` and a `rows` read each open the file more than once (the
-directory for the selection, then the read); one C entry point taking
-`select`, `rows` and `object` would remove that, and is a candidate for a
-later version.
+`rdz_attributes(object =)` still opens the file once per step of its path
+(the directory, each step's names, the attributes); serving it from one
+call is the follow-up to #27 F.1.
 
 ## Writing
 

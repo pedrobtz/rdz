@@ -13,6 +13,13 @@
 /* The failure value an entry point returns: the message, class
    "rdz_failure", the kind in attribute "kind". R's rdz_check() raises it. */
 SEXP rdz_failure(const rdz_error *e);
+/* A request the file cannot serve (a `select` name it does not hold, `rows`
+   past its length): class "rdz_failure", kind "request", `what` as its
+   message and `data` (what R's message prints) in attribute "data". R's
+   rdz_check() words it as R's argument checks did. */
+SEXP rdz_request(const char *what, SEXP data);
+/* The root's type as rdz_info() reports it. */
+const char *rdz_root_type_name(const rdz_reader *r);
 /* Raises e as the classed condition rdz_check() makes, from inside a
    callback that cannot return a value (an R_inpstream). Does not return. */
 void rdz_raise(const rdz_error *e);

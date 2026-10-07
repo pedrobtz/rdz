@@ -30,8 +30,8 @@
 
 #include "../core/rdz_vector.h"
 
-SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, SEXP window,
-                       rdz_error *e, int *failed);
+SEXP rdz_native_read_request(rdz_reader *opened, int threads, SEXP select, SEXP window,
+                             rdz_error *e, int *failed, double *lo);
 
 /* settings: c(level, threads, block_size[, hash]); level 0 stores raw,
    block_size 0 is the format's 1 MiB, hash 0 writes no content hash (readers
@@ -408,10 +408,16 @@ static void rdz_gen_in_cleanup(void *data, Rboolean jump)
     if (jump) rdz_gen_in_finalize((SEXP)data);
 }
 
-/* select: R_NilValue, or 0-based children of a native list or data frame
-   root to read alone (R selects from a generic root after reading it).
-   *native: whether the file was native. */
-SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *native)
+/* rdz_c_read()'s read, from one open of the file. select: R_NilValue, or
+   the user's select as a character vector, a double vector, or FALSE for
+   neither type; window: R_NilValue or c(lo, hi), the rows' span. A native
+   file resolves both against the reader it opened and returns the value or
+   a request failure (rdz_native_read_request()); a generic file ignores
+   both, for R to apply to the whole value. *native: whether the file was
+   native; *lo: the row the value starts after, the window's start when the
+   reader windowed it, else 0. */
+SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *native,
+                      double *lo)
 {
     rdz_settings set = rdz_settings_of(settings);
     rdz_error e;
@@ -436,12 +442,14 @@ SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *n
     *native = g->r.codec_id == RDZ_CODEC_NATIVE_V1;
     if (g->r.codec_id == RDZ_CODEC_NATIVE_V1) {
         int failed;
-        /* the native reader takes the open reader over */
-        out = PROTECT(rdz_native_read_r(&g->r, set.threads, select, window, &e, &failed));
+        /* the native reader resolves select and window against the open
+           reader, then takes it over */
+        out = PROTECT(rdz_native_read_request(&g->r, set.threads, select, window, &e, &failed, lo));
         rdz_gen_in_finalize(ptr);
         UNPROTECT(3);
-        return failed ? rdz_failure(&e) : out;
+        return failed == 1 ? rdz_failure(&e) : out; /* 2: out is a request failure */
     }
+    /* a generic file: select and window are R's, on the whole value */
     /* A one-block file needs no workers. */
     if (rdz_pipeline_init(&g->pipe, g->r.nblocks > 1 ? set.threads : 1, rdz_job_decode,
                           (size_t)RDZ_MAX_BLOCK_SIZE, (size_t)g->r.block_size, &e)) {

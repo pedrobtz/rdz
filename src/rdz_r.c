@@ -44,6 +44,30 @@ SEXP rdz_failure(const rdz_error *e)
     return out;
 }
 
+SEXP rdz_request(const char *what, SEXP data)
+{
+    SEXP out = PROTECT(Rf_mkString(what));
+    Rf_setAttrib(out, Rf_install("kind"), PROTECT(Rf_mkString("request")));
+    Rf_setAttrib(out, Rf_install("data"), data);
+    Rf_setAttrib(out, R_ClassSymbol, PROTECT(Rf_mkString("rdz_failure")));
+    UNPROTECT(3);
+    return out;
+}
+
+const char *rdz_root_type_name(const rdz_reader *r)
+{
+    if (!r->nobjects) return "";
+    switch (r->objects[0].type_tag) {
+    case RDZ_TYPE_INTEGER: return "integer";
+    case RDZ_TYPE_DOUBLE: return "double";
+    case RDZ_TYPE_CHARACTER: return "character";
+    case RDZ_TYPE_FACTOR: return "factor";
+    case RDZ_TYPE_LIST: return "list";
+    case RDZ_TYPE_DATA_FRAME: return "data.frame";
+    default: return "logical"; /* as rdz_info() has always said, NULL included */
+    }
+}
+
 /* The bytes of a path for the core: UTF-8 on Windows, where the core opens
    it through the wide-character API; the native encoding elsewhere. */
 const char *rdz_path(SEXP path)
@@ -60,8 +84,13 @@ const char *rdz_path(SEXP path)
 
 /* Opens what R names: a path, or a raw vector holding a file (read in
    place: the caller keeps it alive for the call). */
+/* Files opened through rdz_open_source(), for rdz_test_opens(): R thread
+   only, like everything in this file. */
+static double rdz_opens = 0;
+
 int rdz_open_source(rdz_reader *r, SEXP src, rdz_error *e)
 {
+    rdz_opens++;
     if (TYPEOF(src) == RAWSXP) return rdz_reader_open_memory(r, RAW(src), (size_t)XLENGTH(src), e);
     return rdz_reader_open(r, rdz_path(src), e);
 }
@@ -140,14 +169,7 @@ SEXP rdz_c_info(SEXP path)
     if (r->synopsis_len) memcpy(RAW(synopsis), r->synopsis, r->synopsis_len);
     rdz_set(out, names, 10, "synopsis", synopsis);
     UNPROTECT(1);
-    rdz_set(out, names, 11, "root_type",
-            Rf_mkString(!r->nobjects ? ""
-                        : r->objects[0].type_tag == RDZ_TYPE_INTEGER ? "integer"
-                        : r->objects[0].type_tag == RDZ_TYPE_DOUBLE ? "double"
-                        : r->objects[0].type_tag == RDZ_TYPE_CHARACTER ? "character"
-                        : r->objects[0].type_tag == RDZ_TYPE_FACTOR ? "factor"
-                        : r->objects[0].type_tag == RDZ_TYPE_LIST ? "list"
-                        : r->objects[0].type_tag == RDZ_TYPE_DATA_FRAME ? "data.frame" : "logical"));
+    rdz_set(out, names, 11, "root_type", Rf_mkString(rdz_root_type_name(r)));
     rdz_set(out, names, 12, "root_length",
             Rf_ScalarReal(!r->nobjects ? -1.0
                           : r->objects[0].type_tag == RDZ_TYPE_LIST ||
@@ -215,26 +237,34 @@ SEXP rdz_c_info(SEXP path)
 
 SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP metadata,
                        int fail_after);
-SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *native);
+SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *native,
+                      double *lo);
 
 SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP metadata)
 {
     return rdz_generic_write(x, synopsis, path, settings, metadata, -1);
 }
 
-/* list(value, native): whether the file was native, so R knows what is
-   left to it (a generic value's selection) */
+/* The one read behind read_rdz(), from one open of the file: select (NULL,
+   a character vector, a double vector, or FALSE for one of neither type)
+   and window (NULL or c(lo, hi), the rows' span) are resolved against the
+   file it opened. list(value, native, lo): whether the file was native, so
+   R knows what is left to it (a generic value's selection and rows), and
+   the row the value starts after, window[1] when the reader windowed it,
+   else 0 (it read the value whole). */
 SEXP rdz_c_read(SEXP path, SEXP settings, SEXP select, SEXP window)
 {
     int native = 0;
-    SEXP value = PROTECT(rdz_generic_read(path, settings, select, window, &native)), out;
+    double lo = 0;
+    SEXP value = PROTECT(rdz_generic_read(path, settings, select, window, &native, &lo)), out;
     if (Rf_inherits(value, "rdz_failure")) {
         UNPROTECT(1);
         return value;
     }
-    out = PROTECT(Rf_allocVector(VECSXP, 2));
+    out = PROTECT(Rf_allocVector(VECSXP, 3));
     SET_VECTOR_ELT(out, 0, value);
     SET_VECTOR_ELT(out, 1, Rf_ScalarLogical(native));
+    SET_VECTOR_ELT(out, 2, Rf_ScalarReal(lo));
     UNPROTECT(2);
     return out;
 }
@@ -262,6 +292,12 @@ SEXP rdz_test_write_generic_unwind(SEXP x, SEXP path, SEXP blocks, SEXP settings
     SEXP out = rdz_generic_write(x, synopsis, path, settings, R_NilValue, Rf_asInteger(blocks));
     UNPROTECT(1);
     return out;
+}
+
+/* Files opened so far (rdz_open_source()): read_rdz() opens each once. */
+SEXP rdz_test_opens(void)
+{
+    return Rf_ScalarReal(rdz_opens);
 }
 
 SEXP rdz_test_records(void)
