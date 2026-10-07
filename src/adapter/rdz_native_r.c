@@ -493,7 +493,6 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
     /* a factor: levels and class are the codec's */
     if (type == INTSXP && rdz_has_class(a.cls, "factor")) {
         SEXP levels = a.levels;
-        R_xlen_t nlev;
         const int *codes;
         int ordered = rdz_is_class(a.cls, "ordered", "factor");
         if (!ordered && !rdz_is_class(a.cls, "factor", NULL)) {
@@ -503,11 +502,7 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
             rdz_attribute_count(levels) != 0) {
             return "a factor with names or malformed levels";
         }
-        nlev = XLENGTH(levels);
-        codes = INTEGER_RO(x);
-        if (!rdz_int_codes_ok(codes, (size_t)XLENGTH(x), (uint64_t)nlev)) {
-            return "a factor with codes outside its levels";
-        }
+        codes = INTEGER_RO(x); /* checked against the levels as they are encoded */
         n->type = RDZ_TYPE_FACTOR;
         n->flags = ordered ? RDZ_OBJECT_FLAG_ORDERED : 0;
         n->values = codes;
@@ -745,9 +740,19 @@ static int rdz_plan_hash(rdz_plan *p, uint8_t out[16], rdz_error *e)
         const rdz_node *n = rdz_plan_node(p, i);
         rdz_content_node(c, n);
         switch (n->type) {
+        case RDZ_TYPE_FACTOR: {
+            /* the writer refuses codes outside the levels as it encodes, so
+               a hash without writing checks them too: a value the writer
+               would send generic hashes as it */
+            const rdz_node *l = rdz_plan_node(p, n->first_child);
+            if (l->type == RDZ_TYPE_REFERENCE) l = rdz_plan_node(p, l->first_child);
+            if (!rdz_int_codes_ok((const int32_t *)n->values, (size_t)n->length, l->length)) {
+                return rdz_unsupported(e, "a factor with codes outside its levels");
+            }
+        }
+            /* fall through */
         case RDZ_TYPE_LOGICAL:
-        case RDZ_TYPE_INTEGER:
-        case RDZ_TYPE_FACTOR: rdz_content_values(c, n->values, (size_t)n->length, 4); break;
+        case RDZ_TYPE_INTEGER: rdz_content_values(c, n->values, (size_t)n->length, 4); break;
         case RDZ_TYPE_DOUBLE: rdz_content_values(c, n->values, (size_t)n->length, 8); break;
         case RDZ_TYPE_CHARACTER:
             if (rdz_hash_strings(c, n->strings, &cache, e)) return 1;

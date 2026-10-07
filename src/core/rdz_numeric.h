@@ -44,6 +44,13 @@
 
 /* Encodes values[0, n) into out as the smallest record (shuffled raw in
    place of raw when `compressing`). */
+/* rdz_int_encode(), reporting the block's smallest and largest value other
+   than NA (*has_values 0 when every value is NA), from the statistics pass
+   it makes anyway. */
+int rdz_int_encode_range(const int32_t *values, size_t n, int compressing, zb_buf *out,
+                         uint16_t *encoding, int32_t *lo_out, int32_t *hi_out, int *has_values,
+                         rdz_error *e);
+
 int rdz_int_encode(const int32_t *values, size_t n, int compressing, zb_buf *out,
                    uint16_t *encoding, rdz_error *e);
 int rdz_dbl_encode(const double *values, size_t n, int compressing, zb_buf *out,

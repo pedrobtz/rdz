@@ -74,13 +74,19 @@ static int emit_strings(void *ctx, uint16_t encoding, uint64_t count, const uint
     return 0;
 }
 
-static int write_values(rdz_vec *v, const rdz_node *node, rdz_tick_fn tick, void *tick_ctx,
-                        rdz_error *e)
+static int write_values(rdz_vec *v, const rdz_node *nodes, const rdz_node *node, rdz_tick_fn tick,
+                        void *tick_ctx, rdz_error *e)
 {
     uint16_t vt = node->type == RDZ_TYPE_FACTOR ? RDZ_TYPE_INTEGER : node->type;
+    uint64_t levels = 0;
     size_t n = (size_t)node->length, per = rdz_vec_block_values(vt),
            size = vt == RDZ_TYPE_DOUBLE ? sizeof(double) : sizeof(int32_t), at = 0;
     const uint8_t *src = (const uint8_t *)node->values;
+    if (node->type == RDZ_TYPE_FACTOR) { /* its levels, through a shared node */
+        const rdz_node *l = &nodes[node->first_child];
+        if (l->type == RDZ_TYPE_REFERENCE) l = &nodes[l->first_child];
+        levels = l->length;
+    }
     do {
         size_t take = n - at < per ? n - at : per;
         rdz_slot *s = next_slot(v, e);
@@ -89,7 +95,8 @@ static int write_values(rdz_vec *v, const rdz_node *node, rdz_tick_fn tick, void
             rdz_pipeline_unget(&v->pipe, s);
             return rdz_memory(e, "a block");
         }
-        s->vtype = vt;
+        s->vtype = node->type == RDZ_TYPE_FACTOR ? RDZ_TYPE_FACTOR : vt;
+        s->levels = levels;
         s->logical_count = take;
         rdz_pipeline_submit(&v->pipe, s, e);
         if (v->content) rdz_content_values(v->content, src + at * size, take, size);
@@ -168,7 +175,7 @@ int rdz_graph_write(rdz_vec *v, const char *path, const rdz_node *nodes, uint32_
         case RDZ_TYPE_INTEGER:
         case RDZ_TYPE_DOUBLE:
         case RDZ_TYPE_FACTOR:
-            if (write_values(v, n, tick, tick_ctx, e)) goto done;
+            if (write_values(v, nodes, n, tick, tick_ctx, e)) goto done;
             break;
         case RDZ_TYPE_CHARACTER:
             /* an attribute's name is one plain record (the validator's rule) */

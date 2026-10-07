@@ -486,6 +486,15 @@ static uint32_t *codes_after(zb_buf *out, size_t len, size_t n, rdz_error *e)
 int rdz_int_encode(const int32_t *v, size_t n, int compressing, zb_buf *out, uint16_t *encoding,
                    rdz_error *e)
 {
+    int32_t lo, hi;
+    int has;
+    return rdz_int_encode_range(v, n, compressing, out, encoding, &lo, &hi, &has, e);
+}
+
+int rdz_int_encode_range(const int32_t *v, size_t n, int compressing, zb_buf *out,
+                         uint16_t *encoding, int32_t *lo_out, int32_t *hi_out, int *has_values,
+                         rdz_error *e)
+{
     int64_t lo = INT32_MAX, hi = INT32_MIN, dlo = INT64_MAX, dhi = INT64_MIN;
     size_t i, runs = n ? 1 : 0, nas = 0;
     size_t raw_len = 4 * n, for_len = SIZE_MAX, delta_len = SIZE_MAX, runs_len;
@@ -534,6 +543,9 @@ int rdz_int_encode(const int32_t *v, size_t n, int compressing, zb_buf *out, uin
             lo = mn;
             hi = mx;
         }
+        *has_values = nas < n;
+        *lo_out = mn;
+        *hi_out = mx;
     }
     if (n) {
         uint64_t range = nas == n ? 0 : (uint64_t)(hi - lo);
