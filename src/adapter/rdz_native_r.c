@@ -2128,25 +2128,18 @@ static SEXP rdz_directory_tables(rdz_reader *rp, rdz_error *e)
 /* ---- rdz_schema(): the facts of a native file's tree, from one open ---------------- */
 
 /* The value object of `owner`'s attribute of this kind (and, for a general
-   one, this name), or -1. */
-static int rdz_attr_value(rdz_reader *r, uint32_t owner, uint32_t kind, const char *name,
-                          rdz_error *e, int *failed)
+   one, this name), or -1. `names`: the attributes' names, the directory
+   table's column, read once there. */
+static int rdz_attr_value(const rdz_reader *r, SEXP names, uint32_t owner, uint32_t kind,
+                          const char *name)
 {
     const rdz_object *o = &r->objects[owner];
     uint32_t a;
-    *failed = 0;
     for (a = 0; a < o->attribute_count; a++) {
-        const rdz_attribute *at = &r->attributes[o->first_attribute + a];
-        char nm[10001]; /* R caps a symbol at 10,000 bytes */
-        if (at->flags != kind) continue;
-        if (name) {
-            if (rdz_read_attr_name(r, at, nm, sizeof nm, e)) {
-                *failed = 1;
-                return -1;
-            }
-            if (strcmp(nm, name)) continue;
-        }
-        return (int)at->value_object_id;
+        uint32_t k = o->first_attribute + a;
+        if (r->attributes[k].flags != kind) continue;
+        if (name && strcmp(CHAR(STRING_ELT(names, k)), name)) continue;
+        return (int)r->attributes[k].value_object_id;
     }
     return -1;
 }
@@ -2163,7 +2156,7 @@ SEXP rdz_native_read_schema(rdz_reader *opened, int threads, int recursive, rdz_
                             int *failed)
 {
     uint32_t n = opened->nobjects, i;
-    SEXP out, info, dir, entries, hold, ids, values = R_NilValue;
+    SEXP out, info, dir, attr_names, entries, hold, ids, values = R_NilValue;
     int *depth, *want, nwant = 0, nprot = 0;
     *failed = 1;
     if (!(info = rdz_info_list(opened, e))) return R_NilValue;
@@ -2175,6 +2168,8 @@ SEXP rdz_native_read_schema(rdz_reader *opened, int threads, int recursive, rdz_
     }
     PROTECT(dir);
     nprot++;
+    /* the attributes' names, read once for the tables (held by `dir`) */
+    attr_names = VECTOR_ELT(VECTOR_ELT(dir, 1), 2);
     entries = PROTECT(Rf_allocVector(VECSXP, n));
     nprot++;
     /* each object's entry tables while they are filled: held here, so the
@@ -2187,13 +2182,13 @@ SEXP rdz_native_read_schema(rdz_reader *opened, int threads, int recursive, rdz_
     for (i = 0; i < n; i++) {
         const rdz_object *o = &opened->objects[i];
         uint32_t src;
-        int v, bad;
+        int v;
         /* parents come first */
         depth[i] = i == 0 ? 0 : depth[o->parent_id] + 1;
         if (o->role != RDZ_ROLE_ROOT && o->role != RDZ_ROLE_CHILD) continue;
         if (!recursive && depth[i] > 1) continue;
         if ((o->type_tag == RDZ_TYPE_LIST || o->type_tag == RDZ_TYPE_DATA_FRAME) &&
-            (v = rdz_attr_value(opened, i, RDZ_ATTRIBUTE_FLAG_NAMES, NULL, e, &bad)) >= 0) {
+            (v = rdz_attr_value(opened, attr_names, i, RDZ_ATTRIBUTE_FLAG_NAMES, NULL)) >= 0) {
             want[v] = 1;
         }
         src = rdz_resolve_id(opened, i);
@@ -2212,16 +2207,12 @@ SEXP rdz_native_read_schema(rdz_reader *opened, int threads, int recursive, rdz_
             }
             SET_VECTOR_ELT(entries, src, Rf_lengthgets(t.names, t.n));
         }
-        if ((v = rdz_attr_value(opened, src, RDZ_ATTRIBUTE_FLAG_CLASS, NULL, e, &bad)) >= 0 ||
-            (!bad && (v = rdz_attr_value(opened, src, RDZ_ATTRIBUTE_FLAG_OTHER, "class", e, &bad)) >= 0)) {
+        if ((v = rdz_attr_value(opened, attr_names, src, RDZ_ATTRIBUTE_FLAG_CLASS, NULL)) >= 0 ||
+            (v = rdz_attr_value(opened, attr_names, src, RDZ_ATTRIBUTE_FLAG_OTHER, "class")) >= 0) {
             want[v] = 1;
         }
-        if (!bad && (v = rdz_attr_value(opened, src, RDZ_ATTRIBUTE_FLAG_OTHER, "dim", e, &bad)) >= 0) {
+        if ((v = rdz_attr_value(opened, attr_names, src, RDZ_ATTRIBUTE_FLAG_OTHER, "dim")) >= 0) {
             want[v] = 1;
-        }
-        if (bad) {
-            UNPROTECT(nprot);
-            return R_NilValue;
         }
     }
     for (i = 0; i < n; i++) nwant += want[i];
