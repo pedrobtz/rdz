@@ -877,6 +877,43 @@ static void test_numeric(const char *tmpdir)
             if (ok) CHECK(got[0] == 0 && got[1] == d32[k].want, "delta width 32 edge %zu: %d", k, (int)got[1]);
         }
     }
+    /* delta at width 0, an arithmetic progression decoded in closed form:
+       against the running sum, at lengths around the vector loop's 8 and
+       with the last value on and one past each end of int32 */
+    {
+        static const struct {
+            int32_t first;
+            int64_t step;
+            size_t n;
+        } prog[] = {{5, 1, 2},         {5, 1, 8},         {5, 1, 9},          {5, 1, 17},
+                    {-3, -7, 33},      {0, 0, 40},        {INT32_MAX - 9, 1, 10},
+                    {INT32_MAX - 9, 1, 11},                {-INT32_MAX + 20, -2, 11},
+                    {-INT32_MAX + 20, -2, 12},             {-INT32_MAX, (int64_t)UINT32_MAX - 1, 2},
+                    {-INT32_MAX, (int64_t)UINT32_MAX - 1, 3},
+                    {INT32_MAX, -(int64_t)UINT32_MAX, 2},  {0, 65536, 70000}};
+        size_t k;
+        for (k = 0; k < sizeof prog / sizeof *prog; k++) {
+            uint8_t rec[RDZ_INT_DELTA_HEADER] = {0, 0, 0, 0};
+            int32_t *got = malloc(prog[k].n * sizeof *got);
+            int64_t value = prog[k].first;
+            int want_ok = 1, ok, same = 1;
+            size_t j;
+            rdz_error e;
+            for (j = 1; j < prog[k].n; j++) {
+                value += prog[k].step;
+                if (value <= INT32_MIN || value > INT32_MAX) want_ok = 0;
+            }
+            zb_wr_u32le(rec + 4, (uint32_t)prog[k].first);
+            zb_wr_u64le(rec + 8, (uint64_t)prog[k].step);
+            ok = rdz_int_decode(rec, sizeof rec, RDZ_ENCODING_INT_DELTA, prog[k].n, got, &e) == 0;
+            CHECK(ok == want_ok, "delta progression %zu: decoded %d", k, ok);
+            for (value = prog[k].first, j = 0; ok && j < prog[k].n; j++, value += prog[k].step) {
+                same &= got[j] == (int32_t)value;
+            }
+            CHECK(same, "delta progression %zu: values", k);
+            free(got);
+        }
+    }
     /* an empty block of no bytes: only raw and shuffled layouts hold nothing
        but values; the others have a header to read (never past `enc`) */
     {

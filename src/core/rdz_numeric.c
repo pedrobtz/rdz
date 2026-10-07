@@ -868,6 +868,47 @@ static int bad_int(rdz_error *e) { return rdz_invalid(e, "invalid integer block"
 /* rdz_int_decode(), and with top (a factor's level count, else 0) the
    frame-of-reference record checks its values against 1..top as it adds the
    base, and sets *checked. */
+/* Codes decoded and used a chunk at a time: whole groups of 32, and small
+   enough to stay in a core's level-2 cache (64 KiB of codes). */
+#define RDZ_DECODE_CHUNK ((size_t)16384)
+
+/* A delta block of width 0 is an arithmetic progression from out[0] =
+   value in steps of dmin: in range throughout exactly when its last value
+   is (it is monotone), and then exact in 32-bit lanes. Nonzero if not. */
+static int delta_progression(int32_t *out, size_t n, int64_t value, int64_t dmin)
+{
+    uint64_t span = (uint64_t)(dmin < 0 ? -dmin : dmin);
+    uint32_t step = (uint32_t)dmin, x = (uint32_t)value;
+    int64_t last;
+    size_t i = 1;
+    /* past 2^32 - 1 in all the progression leaves int32 (and the product
+       below could overflow) */
+    if (span && (uint64_t)(n - 1) > UINT32_MAX / span) return 1;
+    last = value + (int64_t)(n - 1) * dmin;
+    if (last <= INT32_MIN || last > INT32_MAX) return 1;
+#ifdef RDZ_VEC_INT
+    if (n >= 9) {
+        uint32_t *o = (uint32_t *)(void *)out;
+        const int32_t first[4] = {(int32_t)(x + step), (int32_t)(x + 2u * step),
+                                  (int32_t)(x + 3u * step), (int32_t)(x + 4u * step)};
+        const rdz_v4 step4 = v4_dup(4u * step), step8 = v4_dup(8u * step);
+        rdz_v4 a = v4_load(first), b = v4_add(a, step4);
+        for (; i + 8 <= n; i += 8) {
+            v4_store(o + i, a);
+            v4_store(o + i + 4, b);
+            a = v4_add(a, step8);
+            b = v4_add(b, step8);
+        }
+        x += (uint32_t)(i - 1) * step;
+    }
+#endif
+    for (; i < n; i++) {
+        x += step;
+        out[i] = (int32_t)x;
+    }
+    return 0;
+}
+
 static int int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, int32_t *out,
                       uint32_t top, int *checked, rdz_error *e);
 
@@ -934,8 +975,16 @@ static int int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t 
                base of INT32_MIN */
             uint32_t limit = (uint32_t)(INT32_MAX - base), ubase = (uint32_t)base,
                      zero_bad = base == INT32_MIN, bad = 0;
-            unpack_codes(enc + RDZ_INT_FOR_HEADER, len - RDZ_INT_FOR_HEADER, n, width, c);
-            bad = for_add_base(c, n, has_na, na_code, ubase, limit, zero_bad, top);
+            size_t at;
+            /* chunk by chunk, so that the codes are still in cache when the
+               base is added; a chunk is whole groups and starts on a byte */
+            for (at = 0; at < n; at += RDZ_DECODE_CHUNK) {
+                size_t m = n - at < RDZ_DECODE_CHUNK ? n - at : RDZ_DECODE_CHUNK,
+                       skip = at / 8 * width;
+                unpack_codes(enc + RDZ_INT_FOR_HEADER + skip, len - RDZ_INT_FOR_HEADER - skip, m,
+                             width, c + at);
+                bad |= for_add_base(c + at, m, has_na, na_code, ubase, limit, zero_bad, top);
+            }
             *checked = top != 0;
             if (bad) {
                 return top ? rdz_invalid(e, "factor code outside its levels") : bad_int(e);
@@ -954,14 +1003,22 @@ static int int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t 
             return bad_int(e);
         }
         out[0] = (int32_t)value;
+        if (width == 0) return delta_progression(out, n, value, dmin) ? bad_int(e) : 0;
         {
             uint32_t *c = (uint32_t *)(void *)(out + 1);
+            size_t at;
             int bad = 0;
-            unpack_codes(enc + RDZ_INT_DELTA_HEADER, len - RDZ_INT_DELTA_HEADER, n - 1, width, c);
-            for (i = 1; i < n; i++) {
-                value += dmin + (int64_t)c[i - 1];
-                bad |= value <= INT32_MIN || value > INT32_MAX;
-                out[i] = (int32_t)value;
+            /* as FOR: the codes of a chunk, then their running sum in place */
+            for (at = 0; at < n - 1; at += RDZ_DECODE_CHUNK) {
+                size_t m = n - 1 - at < RDZ_DECODE_CHUNK ? n - 1 - at : RDZ_DECODE_CHUNK,
+                       skip = at / 8 * width;
+                unpack_codes(enc + RDZ_INT_DELTA_HEADER + skip, len - RDZ_INT_DELTA_HEADER - skip,
+                             m, width, c + at);
+                for (i = at; i < at + m; i++) {
+                    value += dmin + (int64_t)c[i];
+                    bad |= value <= INT32_MIN || value > INT32_MAX;
+                    c[i] = (uint32_t)(int32_t)value;
+                }
             }
             if (bad) return bad_int(e);
         }
