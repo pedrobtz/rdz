@@ -124,7 +124,7 @@ test_that("a NUL inside a string or in metadata is a format error, not R's", {
 test_that("a factor code past its levels is a format error", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
-  f <- factor(rep(c("a", "b", "c"), 100)) # frame of reference, base 1, codes 0..2 in 2 bits
+  f <- factor(rep(c("a", "b", "c"), 100)) # frame of reference, base 1, codes 0..2 a byte each
   write_rdz(f, path, compress = 0)
   expect_identical(read_rdz(path), f)
   bytes <- readBin(path, "raw", file.size(path))
@@ -136,8 +136,8 @@ test_that("a factor code past its levels is a format error", {
   first <- sum(as.numeric(bytes[dir + hl + 41:44]) * 256^(0:3)) # the root's first block
   entry <- dir + hl + 48 * nobj + 32 * natt + 64 * first
   payload <- le_u64(bytes, entry + 16)
-  expect_identical(as.integer(bytes[payload + 1L]), 2L) # width 2
-  bytes[payload + 8L + 1L] <- as.raw(0xff) # four codes of 3: the value 4, past 3 levels
+  expect_identical(as.integer(bytes[payload + 1L]), 8L) # level 0: width 8
+  bytes[payload + 8L + 1L] <- as.raw(3) # the first code 3: the value 4, past 3 levels
   writeBin(reseal_block(bytes, payload), path)
   expect_error(read_rdz(path), "outside its levels", class = "rdz_format_error")
 })

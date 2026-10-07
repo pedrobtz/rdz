@@ -123,6 +123,68 @@ static inline uint32_t v4_any(rdz_v4 a) { return (uint32_t)(_mm_movemask_epi8(a)
 #define RDZ_VEC_INT 1
 #endif
 
+/* Codes at the byte-aligned widths, 8 and 16 bits, where the LSB-first bit
+   stream is plain little-endian bytes or halfwords: narrowed from four
+   lanes (each code fits its width) and widened back. */
+#if defined(RDZ_VEC_INT) && defined(__aarch64__)
+static inline void v4_narrow8(rdz_v4 a, rdz_v4 b, rdz_v4 c, rdz_v4 d, uint8_t *dst)
+{
+    uint16x8_t ab = vcombine_u16(vmovn_u32(a), vmovn_u32(b)),
+               cd = vcombine_u16(vmovn_u32(c), vmovn_u32(d));
+    vst1q_u8(dst, vcombine_u8(vmovn_u16(ab), vmovn_u16(cd)));
+}
+static inline void v4_narrow16(rdz_v4 a, rdz_v4 b, uint8_t *dst)
+{
+    vst1q_u8(dst, vreinterpretq_u8_u16(vcombine_u16(vmovn_u32(a), vmovn_u32(b))));
+}
+static inline void v4_widen8x(const uint8_t *src, rdz_v4 out[4])
+{
+    uint8x16_t x = vld1q_u8(src);
+    uint16x8_t lo = vmovl_u8(vget_low_u8(x)), hi = vmovl_u8(vget_high_u8(x));
+    out[0] = vmovl_u16(vget_low_u16(lo));
+    out[1] = vmovl_u16(vget_high_u16(lo));
+    out[2] = vmovl_u16(vget_low_u16(hi));
+    out[3] = vmovl_u16(vget_high_u16(hi));
+}
+static inline void v4_widen16x(const uint8_t *src, rdz_v4 out[2])
+{
+    uint16x8_t x = vreinterpretq_u16_u8(vld1q_u8(src));
+    out[0] = vmovl_u16(vget_low_u16(x));
+    out[1] = vmovl_u16(vget_high_u16(x));
+}
+#elif defined(RDZ_VEC_INT)
+static inline void v4_narrow8(rdz_v4 a, rdz_v4 b, rdz_v4 c, rdz_v4 d, uint8_t *dst)
+{
+    /* codes of at most 255: the signed saturations are exact */
+    _mm_storeu_si128((__m128i *)(void *)dst,
+                     _mm_packus_epi16(_mm_packs_epi32(a, b), _mm_packs_epi32(c, d)));
+}
+static inline void v4_narrow16(rdz_v4 a, rdz_v4 b, uint8_t *dst)
+{
+    /* the low halves sign-extended, so that the signed pack keeps them */
+    a = _mm_srai_epi32(_mm_slli_epi32(a, 16), 16);
+    b = _mm_srai_epi32(_mm_slli_epi32(b, 16), 16);
+    _mm_storeu_si128((__m128i *)(void *)dst, _mm_packs_epi32(a, b));
+}
+static inline void v4_widen8x(const uint8_t *src, rdz_v4 out[4])
+{
+    const __m128i z = _mm_setzero_si128();
+    __m128i x = _mm_loadu_si128((const __m128i *)(const void *)src),
+            lo = _mm_unpacklo_epi8(x, z), hi = _mm_unpackhi_epi8(x, z);
+    out[0] = _mm_unpacklo_epi16(lo, z);
+    out[1] = _mm_unpackhi_epi16(lo, z);
+    out[2] = _mm_unpacklo_epi16(hi, z);
+    out[3] = _mm_unpackhi_epi16(hi, z);
+}
+static inline void v4_widen16x(const uint8_t *src, rdz_v4 out[2])
+{
+    const __m128i z = _mm_setzero_si128();
+    __m128i x = _mm_loadu_si128((const __m128i *)(const void *)src);
+    out[0] = _mm_unpacklo_epi16(x, z);
+    out[1] = _mm_unpackhi_epi16(x, z);
+}
+#endif
+
 /* AVX2 (eight lanes, chosen at run time) for the integer codec's hottest
    loops on x86-64, where SSE2 lacks 32-bit min and max. Each returns how far
    it got; the four-lane and scalar loops finish the rest. */
@@ -326,6 +388,24 @@ RDZ_PACK_WIDTHS(RDZ_PACK_FN)
 static size_t pack_groups(const uint32_t *c, size_t n, unsigned width, uint8_t *dst)
 {
     size_t groups = n / 32;
+#ifdef RDZ_VEC_INT
+    if (width == 8 || width == 16) {
+        size_t i;
+        for (i = 0; i < 32 * groups; i += 16) {
+            rdz_v4 a = v4_load((const int32_t *)(const void *)(c + i)),
+                   b = v4_load((const int32_t *)(const void *)(c + i + 4)),
+                   x = v4_load((const int32_t *)(const void *)(c + i + 8)),
+                   y = v4_load((const int32_t *)(const void *)(c + i + 12));
+            if (width == 8) {
+                v4_narrow8(a, b, x, y, dst + i);
+            } else {
+                v4_narrow16(a, b, dst + 2 * i);
+                v4_narrow16(x, y, dst + 2 * i + 16);
+            }
+        }
+        return groups * 32;
+    }
+#endif
     switch (width) {
 #define RDZ_PACK_CASE(W) case W: pack_w##W(c, groups, dst); break;
         RDZ_PACK_WIDTHS(RDZ_PACK_CASE)
@@ -338,6 +418,25 @@ static size_t pack_groups(const uint32_t *c, size_t n, unsigned width, uint8_t *
 static size_t unpack_groups(const uint8_t *src, size_t n, unsigned width, uint32_t *c)
 {
     size_t groups = n / 32;
+#ifdef RDZ_VEC_INT
+    if (width == 8 || width == 16) {
+        size_t i;
+        for (i = 0; i < 32 * groups; i += 16) {
+            rdz_v4 x[4];
+            if (width == 8) {
+                v4_widen8x(src + i, x);
+            } else {
+                v4_widen16x(src + 2 * i, x);
+                v4_widen16x(src + 2 * i + 16, x + 2);
+            }
+            v4_store(c + i, x[0]);
+            v4_store(c + i + 4, x[1]);
+            v4_store(c + i + 8, x[2]);
+            v4_store(c + i + 12, x[3]);
+        }
+        return groups * 32;
+    }
+#endif
     switch (width) {
 #define RDZ_UNPACK_CASE(W) case W: unpack_w##W(src, groups, c); break;
         RDZ_PACK_WIDTHS(RDZ_UNPACK_CASE)
@@ -734,6 +833,45 @@ int rdz_int_encode_range(const int32_t *v, size_t n, int compressing, zb_buf *ou
         *encoding = RDZ_ENCODING_INT_DELTA;
         return 0;
     }
+    if (n && for_len < raw_len && !compressing && for_width && for_width <= 16) {
+        /* level 0 stores codes of up to 16 bits as bytes or halfwords, which
+           a pass narrows to and widens from as fast as it copies them; the
+           encoding was chosen by the smallest width, which only grows here */
+        unsigned width = for_width <= 8 ? 8 : 16;
+        uint32_t na_code = (1u << width) - 1u, base = nas == n ? 0 : (uint32_t)(int32_t)lo;
+        size_t len = RDZ_INT_FOR_HEADER + packed_bytes(n, width);
+        uint8_t *codes;
+        if (!(dst = reserve(out, len, e))) return 1;
+        memset(dst, 0, RDZ_INT_FOR_HEADER);
+        dst[0] = (uint8_t)width;
+        dst[1] = nas ? 1 : 0;
+        zb_wr_u32le(dst + 4, base);
+        codes = dst + RDZ_INT_FOR_HEADER;
+        i = 0;
+#ifdef RDZ_VEC_INT
+        {
+            const rdz_v4 na4 = v4_dup((uint32_t)INT_NA), code4 = v4_dup(na_code),
+                         base4 = v4_dup(base);
+#define RDZ_CODE4(k) v4_sel(v4_eq(v4_load(v + i + (k)), na4), code4, v4_sub(v4_load(v + i + (k)), base4))
+            for (; i + 16 <= n; i += 16) {
+                if (width == 8) {
+                    v4_narrow8(RDZ_CODE4(0), RDZ_CODE4(4), RDZ_CODE4(8), RDZ_CODE4(12), codes + i);
+                } else {
+                    v4_narrow16(RDZ_CODE4(0), RDZ_CODE4(4), codes + 2 * i);
+                    v4_narrow16(RDZ_CODE4(8), RDZ_CODE4(12), codes + 2 * i + 16);
+                }
+            }
+#undef RDZ_CODE4
+        }
+#endif
+        for (; i < n; i++) {
+            uint32_t c = v[i] == INT_NA ? na_code : (uint32_t)v[i] - base;
+            codes[width / 8 * i] = (uint8_t)c;
+            if (width == 16) codes[2 * i + 1] = (uint8_t)(c >> 8);
+        }
+        *encoding = RDZ_ENCODING_INT_FOR;
+        return 0;
+    }
     if (n && for_len < raw_len) {
         uint32_t na_code = for_width == 32 ? 0xffffffffu : (uint32_t)((1ull << for_width) - 1);
         int32_t base = nas == n ? 0 : (int32_t)lo;
@@ -827,6 +965,39 @@ static uint32_t for_add_base(uint32_t *c, size_t n, int has_na, uint32_t na_code
     }
     return bad;
 }
+
+#ifdef RDZ_VEC_INT
+/* for_add_base() straight from codes of 8 or 16 bits, which are widened in
+   registers, never stored as codes: the whole groups of 16; returns how
+   many it did and or-s into *bad. */
+static size_t for_add_base_aligned(const uint8_t *src, unsigned width, size_t n, uint32_t *c,
+                                   int has_na, uint32_t na_code, uint32_t ubase, uint32_t lo,
+                                   uint32_t span, uint32_t *bad)
+{
+    const rdz_v4 code4 = v4_dup(has_na ? na_code : 0), use_na = v4_dup(has_na ? ~0u : 0),
+                 na4 = v4_dup((uint32_t)INT_NA), base4 = v4_dup(ubase), lo4 = v4_dup(lo),
+                 span4 = v4_dup(span), zero4 = v4_dup(0);
+    rdz_v4 vbad = zero4;
+    size_t i;
+    for (i = 0; i + 16 <= n; i += 16) {
+        rdz_v4 x[4];
+        int k;
+        if (width == 8) {
+            v4_widen8x(src + i, x);
+        } else {
+            v4_widen16x(src + 2 * i, x);
+            v4_widen16x(src + 2 * i + 16, x + 2);
+        }
+        for (k = 0; k < 4; k++) {
+            rdz_v4 na = v4_and(use_na, v4_eq(x[k], code4));
+            vbad = v4_or(vbad, v4_sel(na, zero4, v4_gtu(v4_sub(x[k], lo4), span4)));
+            v4_store(c + i + 4 * k, v4_sel(na, na4, v4_add(x[k], base4)));
+        }
+    }
+    *bad |= v4_any(vbad) != 0;
+    return i;
+}
+#endif
 
 /* The codes of a FOR block on `base` that decode in range, as [lo, lo +
    span]: base + code must not overflow int32 nor land on NA (INT32_MIN),
@@ -979,10 +1150,17 @@ static int int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t 
             uint32_t ubase = (uint32_t)base, lo = 0, span = 0, bad = 0;
             /* no code decodes in range: then only NA codes may appear */
             int none = !for_code_range(base, top, &lo, &span);
-            size_t at;
+            size_t at = 0;
+#ifdef RDZ_VEC_INT
+            /* codes of 8 or 16 bits: one pass, the rest as below */
+            if (!none && (width == 8 || width == 16)) {
+                at = for_add_base_aligned(enc + RDZ_INT_FOR_HEADER, width, n, c, has_na, na_code,
+                                          ubase, lo, span, &bad);
+            }
+#endif
             /* chunk by chunk, so that the codes are still in cache when the
                base is added; a chunk is whole groups and starts on a byte */
-            for (at = 0; at < n; at += RDZ_DECODE_CHUNK) {
+            for (; at < n; at += RDZ_DECODE_CHUNK) {
                 size_t m = n - at < RDZ_DECODE_CHUNK ? n - at : RDZ_DECODE_CHUNK,
                        skip = at / 8 * width;
                 unpack_codes(enc + RDZ_INT_FOR_HEADER + skip, len - RDZ_INT_FOR_HEADER - skip, m,

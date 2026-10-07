@@ -1,6 +1,7 @@
 # The frozen 0.1.0 corpus (helper-frozen-fixtures.R): every later rdz reads
 # each file to its spec's value, and writes a native `speed` file's bytes
-# again (but the writer field). Compressed files are compared by value only:
+# again (but the writer field, and frame-of-reference codes of up to 16
+# bits, which level 0 now stores as bytes or halfwords). Compressed files are compared by value only:
 # zstd's output may change between its versions (container-format.md). So
 # are generic files: R's serialization header records the R version that
 # wrote the stream.
@@ -52,20 +53,31 @@ test_that("every frozen value hashes as its file records, on every platform", {
   }
 })
 
-test_that("this rdz writes every frozen native speed file's bytes again", {
+test_that("this rdz writes every frozen native speed file's bytes again, codes aside", {
   # R on x87 (i386) sets the quiet bit of NA_real_, a signalling NaN, when it
   # merely copies it, so a spec's doubles there are not the bits the corpus
   # holds (R still reads both as NA)
   na <- writeBin(c(NA_real_, 0)[1L], raw(), endian = "little")
   skip_if(!identical(na, as.raw(c(0xa2, 0x07, 0, 0, 0, 0, 0xf0, 0x7f))),
           "R on this platform changes NaN payloads")
+  # The corpus's level-0 files hold frame-of-reference codes at their
+  # smallest width; level 0 now writes codes of up to 16 bits as bytes or
+  # halfwords (container-format.md, encoding 12). These files hold such
+  # codes, and are written larger and read the same; every other one is
+  # written byte for byte again.
+  wider <- c("factor_speed", "frame_speed", "frame_row_names_speed", "frame_classed_speed",
+             "attributes_speed", "metadata_speed")
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
+  changed <- character()
   for (spec in frozen_fixture_specs()) {
     if (!identical(spec$preset, "speed") || !identical(spec$codec, "native_v1")) next
+    frozen <- file.path(frozen_dir(), paste0(spec$name, ".rdz"))
     write_frozen_fixture(spec, path)
-    expect_identical(bytes_but_writer(path),
-                     bytes_but_writer(file.path(frozen_dir(), paste0(spec$name, ".rdz"))),
-                     label = spec$name)
+    if (identical(bytes_but_writer(path), bytes_but_writer(frozen))) next
+    changed <- c(changed, spec$name)
+    expect_identical(read_rdz(path), read_rdz(frozen), label = spec$name)
+    expect_gt(file.size(path), file.size(frozen), label = spec$name)
   }
+  expect_setequal(changed, wider)
 })

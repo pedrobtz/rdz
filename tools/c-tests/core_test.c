@@ -1460,7 +1460,7 @@ static void test_extensions(const char *tmpdir)
 }
 
 /* FOR decode against a 64-bit reference, code by code: every code of
-   widths 0 to 6, on bases at and near each end of int32, as integers and
+   widths 0 to 8 (8 is level 0's byte-aligned path), on bases at and near each end of int32, as integers and
    as factors of 1 to 40 levels, with and without an NA code. Each block
    repeats one code 21 times (the 8- and 4-lane loops and a scalar tail),
    and a last block mixes them all. */
@@ -1470,11 +1470,11 @@ static void test_for_ranges(void)
                                     INT32_MAX};
     static const uint32_t tops[] = {0, 1, 5, 26, 40};
     enum { REPS = 21 };
-    uint8_t rec[RDZ_INT_FOR_HEADER + 64 * REPS];
-    int32_t got[64 * REPS];
+    static uint8_t rec[RDZ_INT_FOR_HEADER + 256 * REPS];
+    static int32_t got[256 * REPS];
     unsigned width, has_na;
     size_t b, t;
-    for (width = 0; width <= 6; width++) {
+    for (width = 0; width <= 8; width++) {
         for (has_na = 0; has_na <= (width > 0); has_na++) {
             for (b = 0; b < sizeof bases / sizeof *bases; b++) {
                 for (t = 0; t < sizeof tops / sizeof *tops; t++) {
