@@ -58,7 +58,7 @@ test_that("the C writer reproduces every generic fixture byte for byte", {
     info <- rdz_info(path)
     if (info$codec != "r_serial_v3") next
     payload <- rdz:::rdz_check(.Call(rdz:::rdz_test_read_generic, path))
-    synopsis <- rdz:::rdz_c_file_info(path)$synopsis
+    synopsis <- rdz:::rdz_check(.Call(rdz:::rdz_c_info, path))$synopsis
     copy <- file.path(dir, basename(path))
     rdz:::rdz_check(.Call(rdz:::rdz_test_write_generic, payload, synopsis, copy))
     expect_identical(

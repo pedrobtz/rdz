@@ -202,5 +202,5 @@ test_that("a frame's attributes survive rows =, whole, even when shared", {
   raw <- .Call(rdz:::rdz_c_read, path, rdz:::rdz_settings(0L), NULL, c(1, 3))
   expect_false(inherits(raw, "rdz_failure"))
   expect_identical(raw[[3L]], 0)
-  expect_identical(raw[[1L]], df)
+  expect_identical(raw[[2L]], df)
 })

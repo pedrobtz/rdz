@@ -137,8 +137,12 @@ the settings the C layer takes, and does what is simplest over R values:
 - `rdz_save()`/`rdz_load()`, `skip_unchanged`.
 
 `read_rdz()`, `rdz_attributes()`, `rdz_schema()` and `rdz_info()` each open
-the file once; the open, the generic read and the close are
-`rdz_read_source()` in `src/adapter/rdz_generic.c`.
+the file once. The three reads take one path: their `.Call` entry point
+fills an `rdz_read_args` (`src/rdz_r.h`; each read sets and reads only its
+own fields, `lo` the one output) and calls `rdz_read_source()`
+(`src/adapter/rdz_generic.c`), which opens, hands a native file to that
+read's native reader, reads or skips a generic one, and closes; the result
+is `list(native, x)`, with `read_rdz()`'s `lo` third.
 
 ## Writing
 

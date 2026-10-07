@@ -252,40 +252,46 @@ SEXP rdz_c_info(SEXP path)
 
 SEXP rdz_generic_write(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP metadata,
                        int fail_after);
-SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *native,
-                      double *lo);
 
 SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP metadata)
 {
     return rdz_generic_write(x, synopsis, path, settings, metadata, -1);
 }
 
-/* The one read behind read_rdz(), from one open of the file: select (NULL,
-   a character vector, a double vector, or FALSE for one of neither type)
-   and window (NULL or c(lo, hi), the rows' span) are resolved against the
-   file it opened. list(value, native, lo): whether the file was native, so
-   R knows what is left to it (a generic value's selection and rows), and
-   the row the value starts after, window[1] when the reader windowed it,
-   else 0 (it read the value whole). */
-SEXP rdz_c_read(SEXP path, SEXP settings, SEXP select, SEXP window)
+/* The result of the three one-open reads below: a failure as it is, else
+   list(native, x), and with_lo appends the row the value starts after. x
+   is protected by the caller (rchk counts only call-site protection). */
+static SEXP rdz_read_result(SEXP x, int native, int with_lo, double lo)
 {
-    int native = 0;
-    double lo = 0;
-    SEXP value = PROTECT(rdz_generic_read(path, settings, select, window, &native, &lo)), out;
-    if (Rf_inherits(value, "rdz_failure")) {
-        UNPROTECT(1);
-        return value;
-    }
-    out = PROTECT(Rf_allocVector(VECSXP, 3));
-    SET_VECTOR_ELT(out, 0, value);
-    SET_VECTOR_ELT(out, 1, Rf_ScalarLogical(native));
-    SET_VECTOR_ELT(out, 2, Rf_ScalarReal(lo));
-    UNPROTECT(2);
+    SEXP out;
+    if (Rf_inherits(x, "rdz_failure")) return x;
+    out = PROTECT(Rf_allocVector(VECSXP, with_lo ? 3 : 2));
+    SET_VECTOR_ELT(out, 0, Rf_ScalarLogical(native));
+    SET_VECTOR_ELT(out, 1, x);
+    if (with_lo) SET_VECTOR_ELT(out, 2, Rf_ScalarReal(lo));
+    UNPROTECT(1);
     return out;
 }
 
-SEXP rdz_attributes_read(SEXP path, SEXP settings, SEXP steps, SEXP names, int whole_generic,
-                         int *native);
+/* read_rdz()'s one read: select (NULL, a character vector, a double
+   vector, or FALSE for one of neither type) and window (NULL or c(lo, hi),
+   the rows' span) resolved against the file it opened. list(native, value,
+   lo): whether the file was native, so R knows what is left to it (a
+   generic value's selection and rows), and the row the value starts after,
+   window[1] when the reader windowed it, else 0 (read whole). */
+SEXP rdz_c_read(SEXP path, SEXP settings, SEXP select, SEXP window)
+{
+    rdz_read_args a = rdz_read_args_none();
+    int native = 0;
+    SEXP x, out;
+    a.select = select;
+    a.window = window;
+    /* read first: native and a.lo are its outputs */
+    x = PROTECT(rdz_read_source(path, settings, rdz_native_read_request, NULL, &a, 1, &native));
+    out = rdz_read_result(x, native, 1, a.lo);
+    UNPROTECT(1);
+    return out;
+}
 
 /* rdz_attributes()' one read: object (NULL, a list of steps, strings and
    doubles, or FALSE when R found the path malformed), names (NULL or a
@@ -295,24 +301,38 @@ SEXP rdz_attributes_read(SEXP path, SEXP settings, SEXP steps, SEXP names, int w
    request failure "attributes_full"). */
 SEXP rdz_c_attributes(SEXP path, SEXP settings, SEXP object, SEXP names, SEXP allow_full)
 {
+    rdz_read_args a = rdz_read_args_none();
     int native = 0, full = Rf_asLogical(allow_full) == TRUE;
-    SEXP x = PROTECT(rdz_attributes_read(path, settings, object, names, full, &native)), out;
-    if (Rf_inherits(x, "rdz_failure")) {
-        UNPROTECT(1);
-        return x;
-    }
-    if (!native && !full) {
+    SEXP x, out;
+    a.steps = object;
+    a.names = names;
+    x = PROTECT(rdz_read_source(path, settings, rdz_native_read_attributes, NULL, &a, full,
+                                &native));
+    if (!native && !full && !Rf_inherits(x, "rdz_failure")) {
         UNPROTECT(1);
         return rdz_request("attributes_full", R_NilValue);
     }
-    out = PROTECT(Rf_allocVector(VECSXP, 2));
-    SET_VECTOR_ELT(out, 0, Rf_ScalarLogical(native));
-    SET_VECTOR_ELT(out, 1, x);
-    UNPROTECT(2);
+    out = rdz_read_result(x, native, 0, 0);
+    UNPROTECT(1);
     return out;
 }
 
-SEXP rdz_schema_read(SEXP path, SEXP settings, int recursive, int *native);
+/* A generic file's schema: rdz_info()'s fields alone, as list(info). */
+static SEXP rdz_schema_generic(rdz_reader *opened, int threads, rdz_read_args *args, rdz_error *e,
+                               int *failed)
+{
+    SEXP info, out;
+    (void)threads;
+    (void)args;
+    *failed = 1;
+    if (!(info = rdz_info_list(opened, e))) return R_NilValue;
+    PROTECT(info);
+    out = PROTECT(Rf_allocVector(VECSXP, 1));
+    SET_VECTOR_ELT(out, 0, info);
+    *failed = 0;
+    UNPROTECT(2);
+    return out;
+}
 
 /* rdz_schema()'s one read: list(native, x). For a native file x is
    list(info, directory, entries, ids, values):
@@ -330,17 +350,14 @@ SEXP rdz_schema_read(SEXP path, SEXP settings, int recursive, int *native);
    For a generic file x is list(info). */
 SEXP rdz_c_schema(SEXP path, SEXP settings, SEXP recursive)
 {
+    rdz_read_args a = rdz_read_args_none();
     int native = 0;
-    SEXP x = PROTECT(rdz_schema_read(path, settings, Rf_asLogical(recursive) == TRUE, &native)),
-         out;
-    if (Rf_inherits(x, "rdz_failure")) {
-        UNPROTECT(1);
-        return x;
-    }
-    out = PROTECT(Rf_allocVector(VECSXP, 2));
-    SET_VECTOR_ELT(out, 0, Rf_ScalarLogical(native));
-    SET_VECTOR_ELT(out, 1, x);
-    UNPROTECT(2);
+    SEXP x, out;
+    a.recursive = Rf_asLogical(recursive) == TRUE;
+    x = PROTECT(rdz_read_source(path, settings, rdz_native_read_schema, rdz_schema_generic, &a, 0,
+                                &native));
+    out = rdz_read_result(x, native, 0, 0);
+    UNPROTECT(1);
     return out;
 }
 

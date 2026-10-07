@@ -1658,11 +1658,13 @@ done:
    The window's refusals for R's words come first: a root without rows,
    then rows past its length; a window the plan refuses (a vector shared
    with a part read whole; a matrix, an array, a time series) reads the
-   value whole instead, *lo 0. *failed: 0, 1 (e), or 2 (the value is a
+   value whole instead, args->lo 0. *failed: 0, 1 (e), or 2 (the value is a
    request failure). */
-SEXP rdz_native_read_request(rdz_reader *opened, int threads, SEXP select, SEXP window,
-                             rdz_error *e, int *failed, double *lo)
+SEXP rdz_native_read_request(rdz_reader *opened, int threads, rdz_read_args *args,
+                             rdz_error *e, int *failed)
 {
+    SEXP select = args->select, window = args->window;
+    double *lo = &args->lo;
     const rdz_object *root = &opened->objects[0];
     SEXP index = R_NilValue, request, out;
     *lo = 0;
@@ -1740,6 +1742,24 @@ static void rdz_entry_add(rdz_entries *t, const char *name, int object, SEXP val
     SET_VECTOR_ELT(t->values, j, object < 0 ? value : R_NilValue);
 }
 
+/* The value object of `owner`'s attribute of this kind (and, for a general
+   one, this name), or -1. `names`: the attributes' names, the directory
+   table's column, read once there; R_NilValue only when no name is
+   matched (name NULL). */
+static int rdz_attr_value(const rdz_reader *r, SEXP names, uint32_t owner, uint32_t kind,
+                          const char *name)
+{
+    const rdz_object *o = &r->objects[owner];
+    uint32_t a;
+    for (a = 0; a < o->attribute_count; a++) {
+        uint32_t k = o->first_attribute + a;
+        if (r->attributes[k].flags != kind) continue;
+        if (name && strcmp(CHAR(STRING_ELT(names, k)), name)) continue;
+        return (int)r->attributes[k].value_object_id;
+    }
+    return -1;
+}
+
 static int rdz_entries_of(rdz_reader *r, uint32_t id, rdz_entries *t, rdz_error *e)
 {
     const rdz_object *o = &r->objects[id];
@@ -1757,13 +1777,9 @@ static int rdz_entries_of(rdz_reader *r, uint32_t id, rdz_entries *t, rdz_error 
         rdz_entry_add(t, "class", -1, cls);
         UNPROTECT(1);
     } else if (o->type_tag == RDZ_TYPE_DATA_FRAME) {
-        int names = -1, rows = -1, cls = -1;
-        for (a = 0; a < o->attribute_count; a++) {
-            const rdz_attribute *at = &r->attributes[o->first_attribute + a];
-            if (at->flags == RDZ_ATTRIBUTE_FLAG_NAMES) names = (int)at->value_object_id;
-            if (at->flags == RDZ_ATTRIBUTE_FLAG_ROW_NAMES) rows = (int)at->value_object_id;
-            if (at->flags == RDZ_ATTRIBUTE_FLAG_CLASS) cls = (int)at->value_object_id;
-        }
+        int names = rdz_attr_value(r, R_NilValue, id, RDZ_ATTRIBUTE_FLAG_NAMES, NULL),
+            rows = rdz_attr_value(r, R_NilValue, id, RDZ_ATTRIBUTE_FLAG_ROW_NAMES, NULL),
+            cls = rdz_attr_value(r, R_NilValue, id, RDZ_ATTRIBUTE_FLAG_CLASS, NULL);
         if (names >= 0) rdz_entry_add(t, "names", names, R_NilValue);
         if (rows >= 0) {
             rdz_entry_add(t, "row.names", rows, R_NilValue);
@@ -1852,9 +1868,10 @@ static int rdz_walk(rdz_reader *r, SEXP steps, uint32_t *id, SEXP *request, rdz_
    pass of the reader, which it takes over. steps FALSE: R found the path
    malformed and raises that once it knows the file is native. *failed: 0,
    1 (e), or 2 (the value is a request failure). */
-SEXP rdz_native_read_attributes(rdz_reader *opened, int threads, SEXP steps, SEXP names,
+SEXP rdz_native_read_attributes(rdz_reader *opened, int threads, rdz_read_args *args,
                                 rdz_error *e, int *failed)
 {
+    SEXP steps = args->steps, names = args->names;
     rdz_entries t;
     SEXP request, requested, available, m, out, ids, missing;
     uint32_t id;
@@ -2127,22 +2144,6 @@ static SEXP rdz_directory_tables(rdz_reader *rp, rdz_error *e)
 
 /* ---- rdz_schema(): the facts of a native file's tree, from one open ---------------- */
 
-/* The value object of `owner`'s attribute of this kind (and, for a general
-   one, this name), or -1. `names`: the attributes' names, the directory
-   table's column, read once there. */
-static int rdz_attr_value(const rdz_reader *r, SEXP names, uint32_t owner, uint32_t kind,
-                          const char *name)
-{
-    const rdz_object *o = &r->objects[owner];
-    uint32_t a;
-    for (a = 0; a < o->attribute_count; a++) {
-        uint32_t k = o->first_attribute + a;
-        if (r->attributes[k].flags != kind) continue;
-        if (name && strcmp(CHAR(STRING_ELT(names, k)), name)) continue;
-        return (int)r->attributes[k].value_object_id;
-    }
-    return -1;
-}
 
 /* rdz_schema()'s read of an open native file: rdz_info()'s fields, the
    directory tables, the attribute names of each part's object (as
@@ -2152,9 +2153,10 @@ static int rdz_attr_value(const rdz_reader *r, SEXP names, uint32_t owner, uint3
    children; only those down to depth 1 unless recursive. list(info,
    directory, entries, ids, values): entries per object (NULL where not a
    part's), values per id. */
-SEXP rdz_native_read_schema(rdz_reader *opened, int threads, int recursive, rdz_error *e,
-                            int *failed)
+SEXP rdz_native_read_schema(rdz_reader *opened, int threads, rdz_read_args *args,
+                            rdz_error *e, int *failed)
 {
+    int recursive = args->recursive;
     uint32_t n = opened->nobjects, i;
     SEXP out, info, dir, attr_names, entries, hold, ids, values = R_NilValue;
     int *depth, *want, nwant = 0, nprot = 0;

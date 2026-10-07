@@ -234,8 +234,8 @@ read_rdz <- function(path, select = NULL, rows = NULL) {
   # (rdz_request_stop()), and reads the value whole where it cannot window
   # it; a generic file is read whole, for R to select from
   read <- rdz_check(.Call(rdz_c_read, path, rdz_settings(0L), rdz_select_arg(select), window))
-  value <- read[[1L]]
-  if (!read[[2L]] && !is.null(select)) value <- rdz_select_generic(value, select)
+  value <- read[[2L]]
+  if (!read[[1L]] && !is.null(select)) value <- rdz_select_generic(value, select)
   # a windowed read starts after row read[[3]]; a whole one at row 1
   if (!is.null(rows)) value <- rdz_rows_take(value, rows, read[[3L]])
   value
@@ -416,7 +416,7 @@ rdz_select_generic <- function(value, select) {
 #' @export
 rdz_info <- function(path) {
   path <- validate_existing_rdz_path(path)
-  rdz_info_of(rdz_c_file_info(path))
+  rdz_info_of(rdz_check(.Call(rdz_c_info, path)))
 }
 
 # rdz_info()'s value from the fields C reads (rdz_info_list() in src/rdz_r.c).
