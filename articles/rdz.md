@@ -72,7 +72,7 @@ rds <- tempfile(fileext = ".rds")
 saveRDS(sales, rds)
 c(sizes, saveRDS = file.size(rds))
 #>    none default level_9 saveRDS 
-#>  917817  278811  278779  425618
+#> 1017817  278811  278779  425618
 ```
 
 Level 0 is the fastest to write and to read, and the largest; level 1,

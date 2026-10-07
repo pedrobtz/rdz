@@ -123,12 +123,13 @@ and <code>rdz_info()$content_hash</code> (then <code>NA</code>) have nothing to 
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
     <p><code>compress</code> is the Zstandard level each block is compressed at: <code>0</code> stores
-every block raw (the fastest to write and read), <code>1</code> (the default) is fast
-and already small, and higher levels, up to <code>19</code>, trade write time for
-size; reads stay fast at any level. Below level 6 a block is stored
-compressed only when that saves at least an eighth of it, so data that
-barely compresses reads at memory speed; from level 6, whenever it is
-smaller. <code>options(rdz.threads = )</code> sets the threads that compress and, in
+every block raw (the fastest to write and read; small integer and factor
+codes take a byte or two each rather than the fewest bits), <code>1</code> (the
+default) is fast and already small, and higher levels, up to <code>19</code>, trade
+write time for size; reads stay fast at any level. Below level 6 a block
+is stored compressed only when that saves at least an eighth of it, so
+data that barely compresses reads at memory speed; from level 6, whenever
+it is smaller. <code>options(rdz.threads = )</code> sets the threads that compress and, in
 <code><a href="read_rdz.html">read_rdz()</a></code>, decompress blocks; the default is 1. The file does not
 depend on either: any setting reads any file, and the same object written
 with any number of threads gives the same bytes.</p>

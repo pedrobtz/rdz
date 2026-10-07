@@ -124,7 +124,7 @@ what a reader needs: any setting reads any file.</p>
 <span><span class="fu"><a href="https://rdrr.io/r/base/readRDS.html" class="external-link">saveRDS</a></span><span class="op">(</span><span class="va">sales</span>, <span class="va">rds</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">sizes</span>, saveRDS <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/file.info.html" class="external-link">file.size</a></span><span class="op">(</span><span class="va">rds</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;    none default level_9 saveRDS </span></span>
-<span><span class="co">#&gt;  917817  278811  278779  425618</span></span></code></pre></div>
+<span><span class="co">#&gt; 1017817  278811  278779  425618</span></span></code></pre></div>
 <p>Level 0 is the fastest to write and to read, and the largest; level
 1, the default, is nearly as fast and much smaller; higher levels spend
 write time for smaller files, and read as fast.

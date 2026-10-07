@@ -29,7 +29,9 @@
   checks a file.
 - `write_rdz(compress =)` (or `options(rdz.compress)`) is the Zstandard
   level of each block, from 0 (none: the fastest to write and read) to
-  19; the default, 1, is fast and already small.
+  19; the default, 1, is fast and already small. At level 0 small
+  integer and factor codes take a byte or two each, for speed;
+  compressing levels pack them into the fewest bits.
 - `write_rdz(hash = FALSE)` (or `options(rdz.hash = FALSE)`) skips the
   content hash, for about a tenth less write time.
 - [`rdz_serialize()`](https://pedrobtz.github.io/rdz/reference/rdz_serialize.md)
