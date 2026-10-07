@@ -420,7 +420,11 @@ rdz_select_generic <- function(value, select) {
 #' @export
 rdz_info <- function(path) {
   path <- validate_existing_rdz_path(path)
-  info <- rdz_c_file_info(path)
+  rdz_info_of(rdz_c_file_info(path))
+}
+
+# rdz_info()'s value from the fields C reads (rdz_info_list() in src/rdz_r.c).
+rdz_info_of <- function(info) {
   synopsis <- if (length(info$synopsis) == 0L) NULL else rdz_synopsis_read(info$synopsis)
   info$synopsis <- synopsis
   native <- identical(info$codec, "native_v1")

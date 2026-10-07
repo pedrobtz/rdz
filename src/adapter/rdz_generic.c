@@ -34,6 +34,8 @@ SEXP rdz_native_read_request(rdz_reader *opened, int threads, SEXP select, SEXP 
                              rdz_error *e, int *failed, double *lo);
 SEXP rdz_native_read_attributes(rdz_reader *opened, int threads, SEXP steps, SEXP names,
                                 rdz_error *e, int *failed);
+SEXP rdz_native_read_schema(rdz_reader *opened, int threads, int recursive, rdz_error *e,
+                            int *failed);
 
 /* settings: c(level, threads, block_size[, hash]); level 0 stores raw,
    block_size 0 is the format's 1 MiB, hash 0 writes no content hash (readers
@@ -413,14 +415,16 @@ static void rdz_gen_in_cleanup(void *data, Rboolean jump)
 /* One open of a file (a path or a raw vector) for an entry point that
    reads it once: a native file goes to native_read, which takes the
    reader over; a generic one is unserialized whole, or, with whole_generic
-   0, not read at all (R_NilValue). The reader is closed once, here, on
-   every path, and an R error meanwhile frees it through the external
-   pointer. *native: whether the file was native. */
+   0, not read at all: generic_open's result from the open reader when it
+   is given, else R_NilValue. The reader is closed once, here, on every
+   path, and an R error meanwhile frees it through the external pointer.
+   *native: whether the file was native. */
 typedef SEXP (*rdz_native_fn)(rdz_reader *opened, int threads, void *ctx, rdz_error *e,
                               int *failed);
 
-static SEXP rdz_read_source(SEXP path, SEXP settings, rdz_native_fn native_read, void *ctx,
-                            int whole_generic, int *native)
+static SEXP rdz_read_source(SEXP path, SEXP settings, rdz_native_fn native_read,
+                            rdz_native_fn generic_open, void *ctx, int whole_generic,
+                            int *native)
 {
     rdz_settings set = rdz_settings_of(settings);
     rdz_error e;
@@ -451,9 +455,11 @@ static SEXP rdz_read_source(SEXP path, SEXP settings, rdz_native_fn native_read,
         return failed == 1 ? rdz_failure(&e) : out; /* 2: out is a request failure */
     }
     if (!whole_generic) {
+        int failed = 0;
+        out = PROTECT(generic_open ? generic_open(&g->r, set.threads, ctx, &e, &failed) : R_NilValue);
         rdz_gen_in_finalize(ptr);
-        UNPROTECT(2);
-        return R_NilValue;
+        UNPROTECT(3);
+        return failed == 1 ? rdz_failure(&e) : out;
     }
     /* A one-block file needs no workers. */
     if (rdz_pipeline_init(&g->pipe, g->r.nblocks > 1 ? set.threads : 1, rdz_job_decode,
@@ -495,7 +501,7 @@ SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *n
     c.window = window;
     c.lo = lo;
     *lo = 0;
-    return rdz_read_source(path, settings, rdz_read_native, &c, 1, native);
+    return rdz_read_source(path, settings, rdz_read_native, NULL, &c, 1, native);
 }
 
 typedef struct {
@@ -519,7 +525,40 @@ SEXP rdz_attributes_read(SEXP path, SEXP settings, SEXP steps, SEXP names, int w
     rdz_attributes_ctx c;
     c.steps = steps;
     c.names = names;
-    return rdz_read_source(path, settings, rdz_attributes_native, &c, whole_generic, native);
+    return rdz_read_source(path, settings, rdz_attributes_native, NULL, &c, whole_generic,
+                           native);
+}
+
+static SEXP rdz_schema_native(rdz_reader *opened, int threads, void *ctx, rdz_error *e,
+                              int *failed)
+{
+    return rdz_native_read_schema(opened, threads, *(int *)ctx, e, failed);
+}
+
+/* A generic file's schema: rdz_info()'s fields alone, as list(info). */
+static SEXP rdz_schema_generic(rdz_reader *opened, int threads, void *ctx, rdz_error *e,
+                               int *failed)
+{
+    SEXP info, out;
+    (void)threads;
+    (void)ctx;
+    *failed = 1;
+    if (!(info = rdz_info_list(opened, e))) return R_NilValue;
+    PROTECT(info);
+    out = PROTECT(Rf_allocVector(VECSXP, 1));
+    SET_VECTOR_ELT(out, 0, info);
+    *failed = 0;
+    UNPROTECT(2);
+    return out;
+}
+
+/* rdz_schema()'s read, from one open of the file: for a native file the
+   facts of its tree (rdz_native_read_schema()), for a generic one
+   list(info). */
+SEXP rdz_schema_read(SEXP path, SEXP settings, int recursive, int *native)
+{
+    return rdz_read_source(path, settings, rdz_schema_native, rdz_schema_generic, &recursive, 0,
+                           native);
 }
 
 /* ---- the synopsis ----------------------------------------------------------------- */

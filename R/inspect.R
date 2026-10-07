@@ -6,24 +6,12 @@
 rdz_type_names <- c("NULL", "logical", "integer", "double", "character", "factor", "list",
                     "data.frame", "reference")
 
-# What object id stands for: a shared object's target, else itself.
-rdz_resolve <- function(dir, id) {
-  o <- dir$objects[id + 1L, ]
-  if (o$type_name == "reference") o$first_child else id
-}
-
-# The directory of a native file: objects and attributes, as data frames.
-rdz_directory <- function(path) {
-  d <- rdz_check(.Call(rdz_c_directory, path))
+# The directory tables of rdz_c_schema()'s result (the contract is on
+# rdz_c_schema() in src/rdz_r.c), as data frames.
+rdz_directory_of <- function(d) {
   objects <- as.data.frame(d$objects)
   objects$type_name <- rdz_type_names[objects$type + 1L]
   list(objects = objects, attributes = as.data.frame(d$attributes, stringsAsFactors = FALSE))
-}
-
-# Objects (0-based ids) read alone, each with everything below it.
-rdz_read_objects <- function(path, ids) {
-  if (!length(ids)) return(list())
-  rdz_check(.Call(rdz_c_read_objects, path, as.integer(ids), rdz_settings(0L)))
 }
 
 # `object`, a path from the root like a `[[` index (names or positions, one
@@ -64,33 +52,6 @@ rdz_object_refused <- function(result, object) {
     object_position = rdz_stop("Position ", as.integer(steps[[k]]), " is past the ",
                                as.integer(data[[2L]]), " parts of ", where, ".", call. = FALSE)
   )
-}
-
-# An object's attributes as R lists them, each with the object holding its
-# value or, for those the codecs imply, the value itself.
-rdz_attribute_entries <- function(dir, id) {
-  id <- rdz_resolve(dir, id)
-  o <- dir$objects[id + 1L, ]
-  a <- dir$attributes[dir$attributes$owner == id, , drop = FALSE]
-  entries <- list()
-  add <- function(name, object = NA_integer_, value = NULL) {
-    entries[[name]] <<- list(object = object, value = value)
-  }
-  if (o$type_name == "factor") {
-    add("levels", object = o$first_child)
-    add("class", value = if (bitwAnd(o$flags, 1L)) c("ordered", "factor") else "factor")
-  } else if (o$type_name == "data.frame") {
-    add("names", object = a$value_object[a$kind == 1L])
-    if (any(a$kind == 2L)) add("row.names", object = a$value_object[a$kind == 2L])
-    else add("row.names", value = seq_len(o$length))
-    if (any(a$kind == 4L)) add("class", object = a$value_object[a$kind == 4L])
-    else add("class", value = "data.frame")
-  }
-  for (k in seq_len(nrow(a))) {
-    if (o$type_name == "data.frame" && a$kind[k] != 8L) next # listed above
-    add(a$name[k], object = a$value_object[k])
-  }
-  entries
 }
 
 #' Inspect an rdz Object Schema
@@ -136,7 +97,12 @@ rdz_schema <- function(path, recursive = TRUE) {
   if (!is.logical(recursive) || length(recursive) != 1L || is.na(recursive)) {
     rdz_stop("`recursive` must be TRUE or FALSE.", call. = FALSE)
   }
-  info <- rdz_info(path)
+  # one call, one open of the file: rdz_info()'s fields and, for a native
+  # file, the directory, each part's attribute names and the names and
+  # classes the tree shows
+  read <- rdz_check(.Call(rdz_c_schema, path, rdz_settings(0L), recursive))
+  facts <- read[[2L]]
+  info <- rdz_info_of(facts[[1L]])
   out <- c(
     list(
       codec = info$codec,
@@ -146,12 +112,14 @@ rdz_schema <- function(path, recursive = TRUE) {
     info$schema,
     list(data_blocks_read = FALSE)
   )
-  if (identical(info$codec, "native_v1")) out$objects <- rdz_schema_objects(path, recursive)
+  if (read[[1L]]) out$objects <- rdz_schema_objects(facts, recursive)
   structure(out, class = "rdz_schema")
 }
 
-rdz_schema_objects <- function(path, recursive) {
-  dir <- rdz_directory(path)
+# The schema's table from rdz_c_schema()'s facts (see src/rdz_r.c).
+rdz_schema_objects <- function(facts, recursive) {
+  dir <- rdz_directory_of(facts[[2L]])
+  entries <- facts[[3L]]
   objects <- dir$objects
   attrs <- dir$attributes
   n <- nrow(objects)
@@ -183,7 +151,7 @@ rdz_schema_objects <- function(path, recursive) {
     if (length(v)) v else NA_integer_
   }, integer(1L))
   # a shared part is described by its target
-  src <- vapply(keep - 1L, function(id) rdz_resolve(dir, id), integer(1L)) + 1L
+  src <- ifelse(objects$type_name[keep] == "reference", objects$first_child[keep], keep - 1L) + 1L
   class_at <- vapply(src - 1L, function(id) {
     v <- attrs$value_object[attrs$owner == id & (attrs$kind == 4L | (attrs$kind == 8L & attrs$name == "class"))]
     if (length(v)) v else NA_integer_
@@ -192,9 +160,7 @@ rdz_schema_objects <- function(path, recursive) {
     v <- attrs$value_object[attrs$owner == id & attrs$kind == 8L & attrs$name == "dim"]
     if (length(v)) v else NA_integer_
   }, integer(1L))
-  want <- unique(c(names_at[!is.na(names_at)], class_at[!is.na(class_at)],
-                   dim_at[!is.na(dim_at)]))
-  read <- stats::setNames(rdz_read_objects(path, want), want)
+  read <- stats::setNames(facts[[5L]], facts[[4L]])
   child_names <- list()
   for (k in seq_along(containers)) {
     if (!is.na(names_at[k])) child_names[[as.character(containers[k] - 1L)]] <- read[[as.character(names_at[k])]]
@@ -221,9 +187,7 @@ rdz_schema_objects <- function(path, recursive) {
       objects$type_name[i]
     )
   }, character(1L))
-  attr_names <- vapply(src - 1L, function(id) {
-    paste(names(rdz_attribute_entries(dir, id)), collapse = ", ")
-  }, character(1L))
+  attr_names <- vapply(src, function(i) paste(entries[[i]], collapse = ", "), character(1L))
   shape <- vapply(seq_along(keep), function(k) {
     i <- src[k]
     if (objects$type_name[i] == "data.frame") {

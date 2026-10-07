@@ -18,6 +18,9 @@ SEXP rdz_failure(const rdz_error *e);
    message and `data` (what R's message prints) in attribute "data". R's
    rdz_check() words it as R's argument checks did. */
 SEXP rdz_request(const char *what, SEXP data);
+/* rdz_info()'s fields of an open reader (it stays open); NULL and e when a
+   native file's attribute names cannot be read. Unprotected. */
+SEXP rdz_info_list(rdz_reader *r, rdz_error *e);
 /* The root's type as rdz_info() reports it. */
 const char *rdz_root_type_name(const rdz_reader *r);
 /* Raises e as the classed condition rdz_check() makes, from inside a

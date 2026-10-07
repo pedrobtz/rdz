@@ -128,13 +128,17 @@ the settings the C layer takes, and does what is simplest over R values:
   one pass; refusals come back as kind `request`, and R words them with the
   path rebuilt from the user's steps. A generic file is read whole in the
   same call when `allow_full`, for R to take the attributes from;
-- `rdz_schema()` builds its tree from the directory dump (its attribute
-  names by `rdz_attribute_entries()`, which a test keeps in step with
-  `rdz_attributes()`);
+- `rdz_schema()`: one `.Call` (`rdz_c_schema`) opens the file once and
+  returns the facts: `rdz_info()`'s fields, the directory tables, each
+  part's attribute names (the same C listing as `rdz_attributes()`) and the
+  names, class and dim objects the tree shows, read in one pass. R builds
+  the tree from them: order, paths, class, shape and sharing, formatted as
+  before;
 - `rdz_save()`/`rdz_load()`, `skip_unchanged`.
 
-`rdz_schema()` still opens the file three times (`rdz_info()`, the
-directory, the parts' names and classes); one call for it is a candidate.
+`read_rdz()`, `rdz_attributes()`, `rdz_schema()` and `rdz_info()` each open
+the file once; the open, the generic read and the close are
+`rdz_read_source()` in `src/adapter/rdz_generic.c`.
 
 ## Writing
 
