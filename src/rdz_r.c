@@ -269,6 +269,34 @@ SEXP rdz_c_read(SEXP path, SEXP settings, SEXP select, SEXP window)
     return out;
 }
 
+SEXP rdz_attributes_read(SEXP path, SEXP settings, SEXP steps, SEXP names, int whole_generic,
+                         int *native);
+
+/* rdz_attributes()' one read: object (NULL, a list of steps, strings and
+   doubles, or FALSE when R found the path malformed), names (NULL or a
+   character vector) and allow_full against one open of the file.
+   list(native, x): for a native file the named list of the attributes;
+   for a generic one its whole value, read only when allow_full (else the
+   request failure "attributes_full"). */
+SEXP rdz_c_attributes(SEXP path, SEXP settings, SEXP object, SEXP names, SEXP allow_full)
+{
+    int native = 0, full = Rf_asLogical(allow_full) == TRUE;
+    SEXP x = PROTECT(rdz_attributes_read(path, settings, object, names, full, &native)), out;
+    if (Rf_inherits(x, "rdz_failure")) {
+        UNPROTECT(1);
+        return x;
+    }
+    if (!native && !full) {
+        UNPROTECT(1);
+        return rdz_request("attributes_full", R_NilValue);
+    }
+    out = PROTECT(Rf_allocVector(VECSXP, 2));
+    SET_VECTOR_ELT(out, 0, Rf_ScalarLogical(native));
+    SET_VECTOR_ELT(out, 1, x);
+    UNPROTECT(2);
+    return out;
+}
+
 /* The logical classifier in use; force_scalar TRUE or FALSE switches the
    scalar reference on or off first, NA leaves it (tests compare kernels). */
 SEXP rdz_c_logical_kernel(SEXP force_scalar)

@@ -5,6 +5,22 @@ A log of dated checkpoints, newest first. For what the system is, read
 a checkpoint records what changed and why, and later checkpoints can
 supersede earlier ones.
 
+## Checkpoint 2026-10-07: one call for `rdz_attributes(object =)` (#27 F.1)
+
+`rdz_attributes(path, object, names)` opens the file once. Before, a native
+file took `rdz_info()`, the directory, one read of a container's names per
+name step of `object`, and one read of the stored values (5 opens for
+`object = c("a", "b")`); a generic file two. `rdz_c_attributes` (path,
+settings, object, names, allow_full) walks the path, lists the attributes
+exactly as `rdz_attribute_entries()` does and reads the values from one
+reader; a generic file is read whole in the same open when `allow_full`,
+and refused unread otherwise. A malformed `object` is refused once the
+file is known to be native, so a generic file keeps answering it as
+before. The open, the generic read and the close are one function,
+`rdz_read_source()`, shared with `rdz_c_read`. `rdz_object_id()` is gone.
+Candidate, the maintainer's choice: `rdz_schema()` through one call (it
+opens the file three times).
+
 ## Checkpoint 2026-10-07: one call for `select` and `rows` (#27 F.1)
 
 `read_rdz(path, select, rows)` opens the file once. Before, a native
@@ -18,8 +34,7 @@ worded in R exactly as before. `rdz_select_index()`, `rdz_rows_refused()`
 and `rdz_c_read_native_attribute` are gone; `rdz_graph_read_strings()`
 reads one string object from an open reader. A test-only counter
 (`rdz_test_opens`) checks one open for select, rows, both, the fallback
-and a generic file. No change on disk. Next: `rdz_attributes(object =)`
-through one call.
+and a generic file. No change on disk.
 
 ## Checkpoint 2026-10-06: the pre-submission review (#27)
 

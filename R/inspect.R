@@ -26,47 +26,44 @@ rdz_read_objects <- function(path, ids) {
   rdz_check(.Call(rdz_c_read_objects, path, as.integer(ids), rdz_settings(0L)))
 }
 
-# The id of the object at `object`, a path from the root like a `[[` index:
-# names or positions, one per level; NULL or 0 is the root.
-rdz_object_id <- function(path, dir, object) {
+# `object`, a path from the root like a `[[` index (names or positions, one
+# per level; NULL or 0 is the root), as rdz_c_attributes() takes it: NULL
+# for the root, a list of strings and doubles, or FALSE when it is
+# malformed (refused once the file is known to be native: a generic file
+# answers a malformed path as R's `[[` does, after its full read).
+rdz_object_steps <- function(object) {
   if (is.null(object) || (length(object) == 1L && is.numeric(object) && object == 0)) {
-    return(0L)
+    return(NULL)
   }
   steps <- as.list(object)
   ok <- vapply(steps, function(s) {
     length(s) == 1L && !is.na(s) && (is.character(s) || (is.numeric(s) && s >= 1 && s == trunc(s)))
   }, logical(1L))
-  if (!length(steps) || !all(ok)) {
-    rdz_stop("`object` must be NULL, 0, or a path of names and positive positions.", call. = FALSE)
+  if (!length(steps) || !all(ok)) return(FALSE)
+  lapply(steps, function(s) if (is.character(s)) as.character(s) else as.double(s))
+}
+
+# Words a refusal of `object` for people: the path up to the step that
+# leads nowhere, as "the root", "$sales" or "$models[[2]]".
+rdz_object_refused <- function(result, object) {
+  if (identical(as.character(result), "object_shape")) {
+    rdz_stop("`object` must be NULL, 0, or a path of names and positive positions.",
+             call. = FALSE)
   }
-  objects <- dir$objects
-  attrs <- dir$attributes
-  id <- 0L
-  where <- ""
-  for (s in steps) {
-    o <- objects[id + 1L, ]
-    if (!o$type_name %in% c("list", "data.frame")) {
-      rdz_stop("`object` goes below ", if (nzchar(where)) where else "the root",
-           ", which is not a list or a data frame.", call. = FALSE)
-    }
-    if (is.character(s)) {
-      names_id <- attrs$value_object[attrs$owner == id & attrs$kind == 1L]
-      names <- if (length(names_id)) rdz_read_objects(path, names_id)[[1L]]
-      at <- match(s, names)
-      if (is.na(at)) rdz_stop("No `", s, "` in ", if (nzchar(where)) where else "the root", ".",
-                          call. = FALSE)
-      where <- paste0(where, "$", s)
-    } else {
-      at <- as.integer(s)
-      if (at > o$child_count) {
-        rdz_stop("Position ", at, " is past the ", o$child_count, " parts of ",
-             if (nzchar(where)) where else "the root", ".", call. = FALSE)
-      }
-      where <- paste0(where, "[[", at, "]]")
-    }
-    id <- rdz_resolve(dir, o$first_child + at - 1L)
-  }
-  id
+  steps <- as.list(object)
+  data <- attr(result, "data")
+  k <- data[[1L]]
+  where <- paste0(vapply(steps[seq_len(k - 1L)], function(s) {
+    if (is.character(s)) paste0("$", s) else paste0("[[", as.integer(s), "]]")
+  }, ""), collapse = "")
+  where <- if (nzchar(where)) where else "the root"
+  switch(as.character(result),
+    object_below = rdz_stop("`object` goes below ", where, ", which is not a list or a data frame.",
+                            call. = FALSE),
+    object_unknown = rdz_stop("No `", steps[[k]], "` in ", where, ".", call. = FALSE),
+    object_position = rdz_stop("Position ", as.integer(steps[[k]]), " is past the ",
+                               as.integer(data[[2L]]), " parts of ", where, ".", call. = FALSE)
+  )
 }
 
 # An object's attributes as R lists them, each with the object holding its
@@ -306,30 +303,17 @@ rdz_attributes <- function(path, object = NULL, names = NULL, allow_full = FALSE
   if (!is.logical(allow_full) || length(allow_full) != 1L || is.na(allow_full)) {
     rdz_stop("`allow_full` must be TRUE or FALSE.", call. = FALSE)
   }
-  info <- rdz_info(path)
-  if (identical(info$codec, "native_v1")) {
-    dir <- rdz_directory(path)
-    id <- rdz_object_id(path, dir, object)
-    entries <- rdz_attribute_entries(dir, id)
-    requested <- if (is.null(names)) base::names(entries) else names
-    unknown <- setdiff(requested, base::names(entries))
-    if (length(unknown)) {
-      rdz_stop("Unknown attribute: ", paste(unknown, collapse = ", "), call. = FALSE)
-    }
-    entries <- entries[requested]
-    stored <- vapply(entries, function(e) e$object, integer(1L))
-    read <- rdz_read_objects(path, stored[!is.na(stored)])
-    values <- lapply(entries, function(e) e$value)
-    values[!is.na(stored)] <- read
-    return(stats::setNames(values, requested))
+  # one call, one open of the file: a native file walks `object` and reads
+  # the attributes asked for; a generic one is read whole, if allowed
+  read <- .Call(rdz_c_attributes, path, rdz_settings(0L), rdz_object_steps(object), names,
+                allow_full)
+  if (inherits(read, "rdz_failure") && identical(attr(read, "kind"), "request") &&
+      startsWith(as.character(read), "object_")) {
+    rdz_object_refused(read, object)
   }
-  if (!allow_full) {
-    rdz_stop(
-      "Exact generic attributes require a full read; set `allow_full = TRUE`.",
-      call. = FALSE
-    )
-  }
-  value <- read_rdz(path)
+  read <- rdz_check(read)
+  if (read[[1L]]) return(read[[2L]])
+  value <- read[[2L]]
   if (!is.null(object) && !(length(object) == 1L && is.numeric(object) && object == 0)) {
     for (s in as.list(object)) value <- value[[s]]
   }

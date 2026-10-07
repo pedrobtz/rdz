@@ -32,6 +32,8 @@
 
 SEXP rdz_native_read_request(rdz_reader *opened, int threads, SEXP select, SEXP window,
                              rdz_error *e, int *failed, double *lo);
+SEXP rdz_native_read_attributes(rdz_reader *opened, int threads, SEXP steps, SEXP names,
+                                rdz_error *e, int *failed);
 
 /* settings: c(level, threads, block_size[, hash]); level 0 stores raw,
    block_size 0 is the format's 1 MiB, hash 0 writes no content hash (readers
@@ -408,16 +410,17 @@ static void rdz_gen_in_cleanup(void *data, Rboolean jump)
     if (jump) rdz_gen_in_finalize((SEXP)data);
 }
 
-/* rdz_c_read()'s read, from one open of the file. select: R_NilValue, or
-   the user's select as a character vector, a double vector, or FALSE for
-   neither type; window: R_NilValue or c(lo, hi), the rows' span. A native
-   file resolves both against the reader it opened and returns the value or
-   a request failure (rdz_native_read_request()); a generic file ignores
-   both, for R to apply to the whole value. *native: whether the file was
-   native; *lo: the row the value starts after, the window's start when the
-   reader windowed it, else 0. */
-SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *native,
-                      double *lo)
+/* One open of a file (a path or a raw vector) for an entry point that
+   reads it once: a native file goes to native_read, which takes the
+   reader over; a generic one is unserialized whole, or, with whole_generic
+   0, not read at all (R_NilValue). The reader is closed once, here, on
+   every path, and an R error meanwhile frees it through the external
+   pointer. *native: whether the file was native. */
+typedef SEXP (*rdz_native_fn)(rdz_reader *opened, int threads, void *ctx, rdz_error *e,
+                              int *failed);
+
+static SEXP rdz_read_source(SEXP path, SEXP settings, rdz_native_fn native_read, void *ctx,
+                            int whole_generic, int *native)
 {
     rdz_settings set = rdz_settings_of(settings);
     rdz_error e;
@@ -442,14 +445,16 @@ SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *n
     *native = g->r.codec_id == RDZ_CODEC_NATIVE_V1;
     if (g->r.codec_id == RDZ_CODEC_NATIVE_V1) {
         int failed;
-        /* the native reader resolves select and window against the open
-           reader, then takes it over */
-        out = PROTECT(rdz_native_read_request(&g->r, set.threads, select, window, &e, &failed, lo));
+        out = PROTECT(native_read(&g->r, set.threads, ctx, &e, &failed));
         rdz_gen_in_finalize(ptr);
         UNPROTECT(3);
         return failed == 1 ? rdz_failure(&e) : out; /* 2: out is a request failure */
     }
-    /* a generic file: select and window are R's, on the whole value */
+    if (!whole_generic) {
+        rdz_gen_in_finalize(ptr);
+        UNPROTECT(2);
+        return R_NilValue;
+    }
     /* A one-block file needs no workers. */
     if (rdz_pipeline_init(&g->pipe, g->r.nblocks > 1 ? set.threads : 1, rdz_job_decode,
                           (size_t)RDZ_MAX_BLOCK_SIZE, (size_t)g->r.block_size, &e)) {
@@ -461,6 +466,60 @@ SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *n
     rdz_gen_in_finalize(ptr);
     UNPROTECT(3);
     return out;
+}
+
+typedef struct {
+    SEXP select, window;
+    double *lo;
+} rdz_read_ctx;
+
+static SEXP rdz_read_native(rdz_reader *opened, int threads, void *ctx, rdz_error *e, int *failed)
+{
+    rdz_read_ctx *c = (rdz_read_ctx *)ctx;
+    return rdz_native_read_request(opened, threads, c->select, c->window, e, failed, c->lo);
+}
+
+/* rdz_c_read()'s read, from one open of the file. select: R_NilValue, or
+   the user's select as a character vector, a double vector, or FALSE for
+   neither type; window: R_NilValue or c(lo, hi), the rows' span. A native
+   file resolves both against the reader it opened and returns the value or
+   a request failure (rdz_native_read_request()); a generic file ignores
+   both, for R to apply to the whole value. *native: whether the file was
+   native; *lo: the row the value starts after, the window's start when the
+   reader windowed it, else 0. */
+SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *native,
+                      double *lo)
+{
+    rdz_read_ctx c;
+    c.select = select;
+    c.window = window;
+    c.lo = lo;
+    *lo = 0;
+    return rdz_read_source(path, settings, rdz_read_native, &c, 1, native);
+}
+
+typedef struct {
+    SEXP steps, names;
+} rdz_attributes_ctx;
+
+static SEXP rdz_attributes_native(rdz_reader *opened, int threads, void *ctx, rdz_error *e,
+                                  int *failed)
+{
+    rdz_attributes_ctx *c = (rdz_attributes_ctx *)ctx;
+    return rdz_native_read_attributes(opened, threads, c->steps, c->names, e, failed);
+}
+
+/* rdz_c_attributes()' read, from one open of the file. A native file: the
+   attributes `names` of the object `steps` leads to (or a request failure).
+   A generic file: its whole value when whole_generic, for R to take the
+   attributes from, else R_NilValue unread. */
+SEXP rdz_attributes_read(SEXP path, SEXP settings, SEXP steps, SEXP names, int whole_generic,
+                         int *native)
+{
+    rdz_attributes_ctx c;
+    c.steps = steps;
+    c.names = names;
+    return rdz_read_source(path, settings, rdz_attributes_native, &c, whole_generic, native);
 }
 
 /* ---- the synopsis ----------------------------------------------------------------- */
