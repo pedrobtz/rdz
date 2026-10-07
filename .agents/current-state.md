@@ -55,10 +55,10 @@ group of findings (#28 to #35, and this one):
   `.agents/history/`.
 
 Left for the maintainer: `preset =`/`threads =` arguments; one C entry point
-for `select`, `rows` and `object` (`select` and `rows` done, see above); the items of #27 section E (test or
-strike); a shuffle-safe test suite (about 20 helpers defined at file scope
-in test files). `Remotes` and the zubin/zufast version floors wait for those
-packages to be on CRAN.
+for `select`, `rows` and `object` (`select` and `rows` done, see above); the
+items of #27 section E (test or strike); a shuffle-safe test suite (about 20
+helpers defined at file scope in test files). `Remotes` and the zubin/zufast
+version floors wait for those packages to be on CRAN.
 
 ## Checkpoint 2026-10-06: plan-c Stage S
 

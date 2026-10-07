@@ -408,9 +408,14 @@ static void rdz_gen_in_cleanup(void *data, Rboolean jump)
     if (jump) rdz_gen_in_finalize((SEXP)data);
 }
 
-/* select: R_NilValue, or 0-based children of a native list or data frame
-   root to read alone (R selects from a generic root after reading it).
-   *native: whether the file was native. */
+/* rdz_c_read()'s read, from one open of the file. select: R_NilValue, or
+   the user's select as a character vector, a double vector, or FALSE for
+   neither type; window: R_NilValue or c(lo, hi), the rows' span. A native
+   file resolves both against the reader it opened and returns the value or
+   a request failure (rdz_native_read_request()); a generic file ignores
+   both, for R to apply to the whole value. *native: whether the file was
+   native; *lo: the row the value starts after, the window's start when the
+   reader windowed it, else 0. */
 SEXP rdz_generic_read(SEXP path, SEXP settings, SEXP select, SEXP window, int *native,
                       double *lo)
 {
