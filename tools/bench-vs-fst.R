@@ -5,6 +5,13 @@
 # rdz level 1 (the default) against fst 50 (its default). Writes a CSV and a
 # markdown table; benchmarks.yaml runs it on a GitHub Linux runner.
 #
+# Each iteration's result stays alive until the next one replaces it, as in
+# `x <- read_rdz(p)` in a loop. bench::mark() drops each result at once, so
+# the next read's output lands on pages just freed and still mapped, and a
+# reader's cost then depends on how its allocations recycle rather than on
+# its work: under bench::mark() fst read random logicals 2.3 times faster
+# than rdz; in a loop that keeps its results, rdz was faster (2026-10-07).
+#
 #   Rscript tools/bench-vs-fst.R [rows] [out.csv] [out.md]
 
 suppressPackageStartupMessages({
@@ -46,8 +53,14 @@ dir.create(dir)
 p <- file.path(dir, "x.rdz")
 q <- file.path(dir, "x.fst")
 ms <- function(f) { # a function, so that every iteration runs it
-  b <- bench::mark(f(), iterations = iterations, check = FALSE, filter_gc = FALSE)
-  round(as.numeric(stats::median(b$time[[1L]])) * 1000, 1)
+  times <- numeric(iterations)
+  kept <- NULL
+  for (i in seq_len(iterations)) {
+    t0 <- bench::hires_time()
+    kept <- f() # the last result lives until this one replaces it
+    times[[i]] <- bench::hires_time() - t0
+  }
+  round(stats::median(times) * 1000, 1)
 }
 # An untimed round first: the first column measured otherwise pays for
 # loading code and growing the heap (lgl_random read 4.6 ms at level 0
