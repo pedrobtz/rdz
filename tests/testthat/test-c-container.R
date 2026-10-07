@@ -141,3 +141,17 @@ test_that("a factor code past its levels is a format error", {
   writeBin(reseal_block(bytes, payload), path)
   expect_error(read_rdz(path), "outside its levels", class = "rdz_format_error")
 })
+
+test_that("a factor with codes outside its levels is written generically, and hashes so", {
+  path <- tempfile(fileext = ".rdz")
+  on.exit(unlink(path), add = TRUE)
+  bad <- structure(c(1L, 5L, NA, 2L), levels = c("a", "b"), class = "factor")
+  big <- structure(c(rep(1:2, 200000L), 3L), levels = c("a", "b"), class = "factor") # past a block
+  for (x in list(bad, big)) {
+    write_rdz(x, path)
+    expect_identical(rdz_info(path)$codec, "r_serial_v3")
+    expect_identical(unclass(read_rdz(path)), unclass(x))
+    expect_identical(rdz_info(path)$content_hash, rdz_hash(x))
+    expect_error(write_rdz(x, path, mode = "native"), class = "rdz_unsupported_error")
+  }
+})

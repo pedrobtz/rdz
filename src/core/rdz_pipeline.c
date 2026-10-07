@@ -322,10 +322,22 @@ void rdz_job_vector(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec)
                                     &encoding, &codec->scratch, &s->e);
         break;
     case RDZ_TYPE_INTEGER:
-    case RDZ_TYPE_FACTOR:
         failed = rdz_int_encode((const int32_t *)(const void *)s->in.data, n, p->level != 0,
                                 &s->out, &encoding, &s->e);
         break;
+    case RDZ_TYPE_FACTOR: {
+        /* the codes' range comes with the encoding's statistics: a code
+           outside its levels is refused here, without a pass of its own */
+        int32_t lo, hi;
+        int has;
+        failed = rdz_int_encode_range((const int32_t *)(const void *)s->in.data, n,
+                                      p->level != 0, &s->out, &encoding, &lo, &hi, &has, &s->e);
+        if (!failed && has && (lo < 1 || (uint64_t)hi > s->levels)) {
+            rdz_unsupported(&s->e, "a factor with codes outside its levels");
+            failed = 1;
+        }
+        break;
+    }
     default:
         failed = rdz_dbl_encode((const double *)(const void *)s->in.data, n, p->level != 0,
                                 &s->out, &encoding, &s->e);

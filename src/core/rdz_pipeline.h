@@ -48,6 +48,8 @@ typedef struct {
     const void *block;    /* a read job's rdz_block */
     uint16_t vtype;       /* a vector job's RDZ_TYPE_*; RDZ_TYPE_CHARACTER: the
                              slot holds a packed string block to compress */
+    uint64_t levels;      /* RDZ_TYPE_FACTOR: its level count, which its codes
+                             are checked against as they are encoded */
 } rdz_slot;
 
 struct rdz_pipeline;
