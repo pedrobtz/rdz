@@ -46,11 +46,13 @@ SEXP rdz_failure(const rdz_error *e)
 
 SEXP rdz_request(const char *what, SEXP data)
 {
-    SEXP out = PROTECT(Rf_mkString(what));
+    SEXP out;
+    PROTECT(data); /* callers may pass it freshly allocated */
+    out = PROTECT(Rf_mkString(what));
     Rf_setAttrib(out, Rf_install("kind"), PROTECT(Rf_mkString("request")));
     Rf_setAttrib(out, Rf_install("data"), data);
     Rf_setAttrib(out, R_ClassSymbol, PROTECT(Rf_mkString("rdz_failure")));
-    UNPROTECT(3);
+    UNPROTECT(4);
     return out;
 }
 

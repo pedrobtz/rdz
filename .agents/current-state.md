@@ -5,6 +5,20 @@ A log of dated checkpoints, newest first. For what the system is, read
 a checkpoint records what changed and why, and later checkpoints can
 supersede earlier ones.
 
+## Checkpoint 2026-10-07: reading benchmarks, and the logical decoder
+
+The logical decoder is store-bound: into fresh pages it writes 5e6 values
+(20 MB) in about 1.1 ms of compute plus the page faults, about 18 GB/s on an
+M-series core, so fewer instructions do not move it (a table-driven
+expansion measured slower, 1.26 against 1.12 ms, and was dropped). The
+"2.3 times behind fst" on random logicals was `bench::mark()`'s artifact: it
+drops each result at once, so fst's next output landed on recycled, already
+faulted pages; in a loop that keeps its results, rdz read them faster than
+fst (3.85 against 4.89 ms). `tools/bench-vs-fst.R` now keeps each result
+until the next replaces it. Each read frees its block buffers (about 3.3 MB
+of pages reclaimed per read at 5e6 rows); keeping them between reads would
+add state for about a millisecond, so they are freed, by choice.
+
 ## Checkpoint 2026-10-07: one call for `rdz_schema()`
 
 `rdz_schema()` opens the file once (it opened it three times: `rdz_info()`,

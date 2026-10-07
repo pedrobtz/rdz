@@ -15,8 +15,8 @@
 SEXP rdz_failure(const rdz_error *e);
 /* A request the file cannot serve (a `select` name it does not hold, `rows`
    past its length): class "rdz_failure", kind "request", `what` as its
-   message and `data` (what R's message prints) in attribute "data". R's
-   rdz_check() words it as R's argument checks did. */
+   message and `data` (what R's message prints; it may be unprotected) in
+   attribute "data". R's rdz_check() words it as R's argument checks did. */
 SEXP rdz_request(const char *what, SEXP data);
 /* rdz_info()'s fields of an open reader (it stays open); NULL and e when a
    native file's attribute names cannot be read. Unprotected. */

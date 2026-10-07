@@ -31,29 +31,6 @@ rdz_object_steps <- function(object) {
   lapply(steps, function(s) if (is.character(s)) as.character(s) else as.double(s))
 }
 
-# Words a refusal of `object` for people: the path up to the step that
-# leads nowhere, as "the root", "$sales" or "$models[[2]]".
-rdz_object_refused <- function(result, object) {
-  if (identical(as.character(result), "object_shape")) {
-    rdz_stop("`object` must be NULL, 0, or a path of names and positive positions.",
-             call. = FALSE)
-  }
-  steps <- as.list(object)
-  data <- attr(result, "data")
-  k <- data[[1L]]
-  where <- paste0(vapply(steps[seq_len(k - 1L)], function(s) {
-    if (is.character(s)) paste0("$", s) else paste0("[[", as.integer(s), "]]")
-  }, ""), collapse = "")
-  where <- if (nzchar(where)) where else "the root"
-  switch(as.character(result),
-    object_below = rdz_stop("`object` goes below ", where, ", which is not a list or a data frame.",
-                            call. = FALSE),
-    object_unknown = rdz_stop("No `", steps[[k]], "` in ", where, ".", call. = FALSE),
-    object_position = rdz_stop("Position ", as.integer(steps[[k]]), " is past the ",
-                               as.integer(data[[2L]]), " parts of ", where, ".", call. = FALSE)
-  )
-}
-
 #' Inspect an rdz Object Schema
 #'
 #' `rdz_schema()` reads the bounded directory without reading object data
@@ -269,13 +246,8 @@ rdz_attributes <- function(path, object = NULL, names = NULL, allow_full = FALSE
   }
   # one call, one open of the file: a native file walks `object` and reads
   # the attributes asked for; a generic one is read whole, if allowed
-  read <- .Call(rdz_c_attributes, path, rdz_settings(0L), rdz_object_steps(object), names,
-                allow_full)
-  if (inherits(read, "rdz_failure") && identical(attr(read, "kind"), "request") &&
-      startsWith(as.character(read), "object_")) {
-    rdz_object_refused(read, object)
-  }
-  read <- rdz_check(read)
+  read <- rdz_check(.Call(rdz_c_attributes, path, rdz_settings(0L), rdz_object_steps(object),
+                          names, allow_full), object)
   if (read[[1L]]) return(read[[2L]])
   value <- read[[2L]]
   if (!is.null(object) && !(length(object) == 1L && is.numeric(object) && object == 0)) {

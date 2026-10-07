@@ -53,6 +53,14 @@ benchmark_serialization_matrix(
 )
 ```
 
+`tools/bench-vs-fst.R` compares rdz with fst one thread each (`benchmarks.yaml`
+runs it on Linux). It keeps each iteration's result alive until the next one
+replaces it: `bench::mark()` drops every result at once, so a read's output
+lands on just-freed, still-mapped pages, and reads of large vectors then
+measure how a package's allocations recycle rather than its decoding (random
+logicals read 2.3 times slower than fst that way, and faster in a loop that
+keeps its results). Compare reads in a loop that keeps its results.
+
 The result contains `read_ms`, `write_ms`, `file_mib`, size ratios against the
 in-memory object and uncompressed base R, read/write throughput, read/write
 allocation-proxy matrices, long-form `details`, backend settings, and environment

@@ -335,34 +335,30 @@ rdz_metadata_section <- function(metadata) {
   out
 }
 
-# The 1-based positions `select` names among n parts with these names.
-rdz_select_positions <- function(select, n, names) {
-  if (is.character(select)) {
-    if (anyNA(select)) rdz_stop("`select` must not contain NA.", call. = FALSE)
-    if (is.null(names)) rdz_stop("`select` names parts, but they have no names.", call. = FALSE)
-    at <- match(select, names)
-    if (anyNA(at)) {
-      rdz_stop("Unknown in `select`: ", paste(select[is.na(at)], collapse = ", "), call. = FALSE)
-    }
-  } else if (is.numeric(select)) {
-    if (anyNA(select) || any(select != trunc(select)) || any(select < 1) || any(select > n)) {
-      rdz_stop("`select` positions must be whole numbers from 1 to ", n, ".", call. = FALSE)
-    }
-    at <- as.integer(select)
-  } else {
-    rdz_stop("`select` must be NULL, a character vector or a numeric vector.", call. = FALSE)
-  }
-  if (anyDuplicated(at)) rdz_stop("`select` must not repeat a part.", call. = FALSE)
-  at
-}
-
 # The same selection from a value read whole (a generic file): the parts,
 # with their names; a data frame's row names and class.
 rdz_select_generic <- function(value, select) {
   if (typeof(value) != "list") {
     rdz_stop("`select` needs a list or a data frame.", call. = FALSE)
   }
-  at <- rdz_select_positions(select, length(value), names(value))
+  # a native file's selection is resolved in C (rdz_select_children()), with
+  # the same checks in the same order and the same words
+  n <- length(value)
+  nm <- names(value)
+  if (is.character(select)) {
+    if (anyNA(select)) rdz_stop("`select` must not contain NA.")
+    if (is.null(nm)) rdz_stop("`select` names parts, but they have no names.")
+    at <- match(select, nm)
+    if (anyNA(at)) rdz_stop("Unknown in `select`: ", paste(select[is.na(at)], collapse = ", "))
+  } else if (is.numeric(select)) {
+    if (anyNA(select) || any(select != trunc(select)) || any(select < 1) || any(select > n)) {
+      rdz_stop("`select` positions must be whole numbers from 1 to ", n, ".")
+    }
+    at <- as.integer(select)
+  } else {
+    rdz_stop("`select` must be NULL, a character vector or a numeric vector.")
+  }
+  if (anyDuplicated(at)) rdz_stop("`select` must not repeat a part.")
   out <- unclass(value)[at]
   attributes(out) <- if (is.null(names(value))) NULL else list(names = names(value)[at])
   if (is.data.frame(value)) {
