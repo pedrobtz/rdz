@@ -242,16 +242,29 @@ static int decode_strings(rdz_reader *r, const rdz_block *b, const zb_buf *rec,
     }
 }
 
-static int decode_values(uint16_t type, const rdz_block *b, const zb_buf *rec, void *out,
-                         size_t at, rdz_error *e)
+/* A factor's level count: its levels object's length, through a reference
+   (validation: a reference's target is an earlier non-reference object). */
+static uint64_t factor_levels(const rdz_reader *r, const rdz_object *o)
+{
+    const rdz_object *levels = &r->objects[o->first_child];
+    if (levels->type_tag == RDZ_TYPE_REFERENCE) levels = &r->objects[levels->first_child];
+    return levels->logical_len;
+}
+
+/* A block's values into out + at; a factor's codes are checked against its
+   levels here, block by block, while the block is still in cache. */
+static int decode_values(const rdz_reader *r, const rdz_object *o, const rdz_block *b,
+                         const zb_buf *rec, void *out, size_t at, rdz_error *e)
 {
     size_t n = (size_t)b->logical_count;
-    switch (type) {
+    switch (o->type_tag) {
     case RDZ_TYPE_LOGICAL:
         return rdz_logical_decode(rec->data, rec->len, b->encoding, n, (int32_t *)out + at, e);
     case RDZ_TYPE_INTEGER:
-    case RDZ_TYPE_FACTOR:
         return rdz_int_decode(rec->data, rec->len, b->encoding, n, (int32_t *)out + at, e);
+    case RDZ_TYPE_FACTOR:
+        return rdz_factor_decode(rec->data, rec->len, b->encoding, n, (int32_t *)out + at,
+                                 factor_levels(r, o), e);
     default:
         return rdz_dbl_decode(rec->data, rec->len, b->encoding, n, (double *)out + at, e);
     }
@@ -409,7 +422,7 @@ int rdz_graph_read_window(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sink
                 size_t width = o->type_tag == RDZ_TYPE_DOUBLE ? 8 : 4;
                 if (!dest) dest = sinks->values(sinks->ctx, object);
                 if (a == start && z == start + n) {
-                    if (decode_values(o->type_tag, b, s->result, dest, (size_t)(start - lo), e)) {
+                    if (decode_values(r, o, b, s->result, dest, (size_t)(start - lo), e)) {
                         return 1;
                     }
                 } else {
@@ -417,7 +430,7 @@ int rdz_graph_read_window(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sink
                     if (!zb_put_raw(&v->scratch, (size_t)n * width + 8)) {
                         return rdz_memory(e, "a block");
                     }
-                    if (decode_values(o->type_tag, b, s->result, v->scratch.data, 0, e)) return 1;
+                    if (decode_values(r, o, b, s->result, v->scratch.data, 0, e)) return 1;
                     memcpy((uint8_t *)dest + (size_t)(a - lo) * width,
                            v->scratch.data + (size_t)(a - start) * width, (size_t)(z - a) * width);
                 }
@@ -432,7 +445,7 @@ int rdz_graph_read_window(rdz_vec *v, rdz_reader *r, const rdz_graph_sinks *sink
             if (b->logical_count > o->logical_len - filled) {
                 return rdz_invalid(e, "native payload length mismatch");
             }
-            if (decode_values(o->type_tag, b, s->result, dest, filled, e)) return 1;
+            if (decode_values(r, o, b, s->result, dest, filled, e)) return 1;
             filled += (size_t)b->logical_count;
         }
         rdz_pipeline_release(&v->pipe, s);

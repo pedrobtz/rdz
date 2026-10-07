@@ -38,6 +38,7 @@
 
 #include "../core/rdz_content.h"
 #include "../core/rdz_graph.h"
+#include "../core/rdz_numeric.h"
 #include "../rdz_r.h"
 
 /* ---- attributes, through the API of each R version -------------------------------- */
@@ -130,18 +131,6 @@ static uint64_t rdz_column_rows(SEXP col)
     }
     if (TYPEOF(rn) == INTSXP || TYPEOF(rn) == STRSXP) return (uint64_t)XLENGTH(rn);
     return UINT64_MAX;
-}
-
-/* Whether every code is NA or from 1 to nlev: one branch-free pass, which
-   compilers vectorize (code - 1, unsigned, is below nlev exactly then). */
-static int rdz_factor_codes_ok(const int *codes, R_xlen_t n, R_xlen_t nlev)
-{
-    uint32_t bad = 0, top = nlev > (R_xlen_t)INT_MAX ? (uint32_t)INT_MAX : (uint32_t)nlev;
-    R_xlen_t k;
-    for (k = 0; k < n; k++) {
-        bad |= (uint32_t)(codes[k] != NA_INTEGER) & (uint32_t)((uint32_t)codes[k] - 1u >= top);
-    }
-    return !bad;
 }
 
 /* ---- strings ---------------------------------------------------------------------- */
@@ -516,7 +505,7 @@ static const char *rdz_plan_visit(rdz_plan *p, uint32_t i)
         }
         nlev = XLENGTH(levels);
         codes = INTEGER_RO(x);
-        if (!rdz_factor_codes_ok(codes, XLENGTH(x), nlev)) {
+        if (!rdz_int_codes_ok(codes, (size_t)XLENGTH(x), (uint64_t)nlev)) {
             return "a factor with codes outside its levels";
         }
         n->type = RDZ_TYPE_FACTOR;
@@ -1352,11 +1341,8 @@ static SEXP rdz_graph_body(void *data)
             }
         }
         if (o->type_tag == RDZ_TYPE_FACTOR) {
+            /* the core checked every code against the levels as it decoded */
             SEXP levels = VECTOR_ELT(g->holder, o->first_child), cls;
-            if (!rdz_factor_codes_ok(INTEGER_RO(x), XLENGTH(x), XLENGTH(levels))) {
-                rdz_invalid(&g->e, "factor code outside its levels");
-                return R_NilValue;
-            }
             if (o->flags & RDZ_OBJECT_FLAG_ORDERED) {
                 cls = PROTECT(Rf_allocVector(STRSXP, 2));
                 SET_STRING_ELT(cls, 0, Rf_mkChar("ordered"));
