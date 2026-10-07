@@ -176,7 +176,9 @@ block before it decompresses it. Readers reject a compressed block whose stored
 length is not less than its decoded length, so an incompressible block is
 always raw. The 0.1.0 writer compresses a block only when that saves at least an eighth
 of it, or from level 6 any saving (writer policy), so a block that barely
-compresses is read without decompression. The writer's level (`compress`,
+compresses is read without decompression; below level 6 a block of 256 KiB or
+more is first compressed in three 32 KiB probes, and stored raw untried when
+none saves a tenth. The writer's level (`compress`,
 `options(rdz.compress)`: 1 by default, 0 for none, at most 19) is not
 recorded and no reader needs it. Neither the level nor the thread count
 changes a reader's

@@ -3,12 +3,14 @@
  *
  * A block is stored zstd-compressed (compression 1, one zstd frame) only when
  * that saves at least an eighth of its decoded bytes (any saving at level 6
- * and up); otherwise it is
- * stored raw (compression 0), so a block that barely compresses (random
- * logicals, random doubles) costs nothing to decompress on every read. This
- * is writer policy: readers accept any compressed block that is smaller. Blocks
- * under RDZ_COMPRESS_MIN bytes are not tried. Decoding is strict: the frame
- * must be exactly the stored bytes and decode to exactly the decoded length.
+ * and up); otherwise it is stored raw (compression 0), so a block that barely
+ * compresses (random logicals, random doubles) costs nothing to decompress on
+ * every read. Below level 6 a block of 256 KiB or more is first compressed in
+ * three 32 KiB probes (start, middle, end); when none saves a tenth it is
+ * stored raw untried. This is writer policy: readers accept any compressed
+ * block that is smaller. Blocks under RDZ_COMPRESS_MIN bytes are not tried.
+ * Decoding is strict: the frame must be exactly the stored bytes and decode
+ * to exactly the decoded length.
  *
  * Threads: a context belongs to one thread at a time; each pipeline worker
  * owns one. zstd is single-threaded here (tools/vendor/zstd-in.c).

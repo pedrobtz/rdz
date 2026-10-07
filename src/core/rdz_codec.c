@@ -4,6 +4,9 @@
 
 #include "rdz_codec.h"
 
+/* the bytes of each probe of a large block (rdz_codec_compress()) */
+#define RDZ_PROBE ((size_t)32768)
+
 void rdz_codec_init(rdz_codec *c)
 {
     c->cctx = NULL;
@@ -33,6 +36,21 @@ int rdz_codec_compress(rdz_codec *c, int level, const uint8_t *src, size_t n, zb
     }
     bound = ZSTD_compressBound(n);
     if (zb_buf_reserve(out, bound)) return rdz_memory(e, "a compressed block");
+    /* below level 6 a large block is first tried on three probes, at its
+       start, middle and end: when none saves a tenth, the whole is not
+       expected to save the eighth that keeps it, and it is stored raw
+       without compressing the rest (random integers, random mantissas) */
+    if (level < 6 && n >= 8 * RDZ_PROBE) {
+        const size_t at[3] = {0, n / 2 - RDZ_PROBE / 2, n - RDZ_PROBE};
+        int k, saves = 0;
+        for (k = 0; k < 3 && !saves; k++) {
+            got = ZSTD_compressCCtx((ZSTD_CCtx *)c->cctx, out->data, bound, src + at[k], RDZ_PROBE,
+                                    level);
+            if (ZSTD_isError(got)) return rdz_memory(e, "a compressed block");
+            saves = got <= RDZ_PROBE - RDZ_PROBE / 10;
+        }
+        if (!saves) return 0;
+    }
     got = ZSTD_compressCCtx((ZSTD_CCtx *)c->cctx, out->data, bound, src, n, level);
     if (ZSTD_isError(got)) return rdz_memory(e, "a compressed block");
     /* worth a decompression on every read only if it saves an eighth; the

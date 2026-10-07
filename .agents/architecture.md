@@ -199,7 +199,9 @@ stated.
 - **Compression** is one number, the zstd level of every block: `compress`
   (or `options(rdz.compress)`), 0 (none) to 19, default 1; levels 20 to 22,
   which need hundreds of MB a thread, are refused. Below level 6 a block is
-  compressed only when that saves an eighth. The decimal double encoding
+  compressed only when that saves an eighth, and one of 256 KiB or more
+  is first tried on three 32 KiB probes (raw untried when none saves a
+  tenth). The decimal double encoding
   (23) is chosen only for a block that will be compressed, so level 0 never
   writes it. (Named presets, `speed`/`balanced`/`compact` for levels 0, 1 and
   6, were replaced by the level before release; the frozen corpus keeps
