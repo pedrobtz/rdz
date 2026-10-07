@@ -50,6 +50,9 @@ typedef struct {
                              slot holds a packed string block to compress */
     uint64_t levels;      /* RDZ_TYPE_FACTOR: its level count, which its codes
                              are checked against as they are encoded */
+    const void *values;   /* a vector job's values, borrowed: the producer
+                             keeps them alive and unchanged until the slot is
+                             consumed (an R vector, for the whole write) */
 } rdz_slot;
 
 struct rdz_pipeline;
@@ -100,7 +103,7 @@ rdz_slot *rdz_pipeline_oldest(rdz_pipeline *p, int wait);
 void rdz_pipeline_release(rdz_pipeline *p, rdz_slot *s);
 
 /* The jobs. compress: in holds bytes, compressed or not. decode: in holds a
-   block's stored bytes, verified and decompressed. vector: in holds
+   block's stored bytes, verified and decompressed. vector: values holds
    logical_count values of s->vtype, encoded as a record and compressed (a
    character slot holds an encoded string block, compressed as it is). */
 void rdz_job_compress(rdz_pipeline *p, rdz_slot *s, rdz_codec *codec);

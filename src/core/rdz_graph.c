@@ -91,10 +91,8 @@ static int write_values(rdz_vec *v, const rdz_node *nodes, const rdz_node *node,
         size_t take = n - at < per ? n - at : per;
         rdz_slot *s = next_slot(v, e);
         if (!s) return 1;
-        if (take && zb_put_bytes(&s->in, src + at * size, take * size)) {
-            rdz_pipeline_unget(&v->pipe, s);
-            return rdz_memory(e, "a block");
-        }
+        /* borrowed, not copied: the caller's vector outlives the write */
+        s->values = take ? src + at * size : NULL;
         s->vtype = node->type == RDZ_TYPE_FACTOR ? RDZ_TYPE_FACTOR : vt;
         s->levels = levels;
         s->logical_count = take;
