@@ -49,6 +49,16 @@ int rdz_int_encode(const int32_t *values, size_t n, int compressing, zb_buf *out
 int rdz_dbl_encode(const double *values, size_t n, int compressing, zb_buf *out,
                    uint16_t *encoding, rdz_error *e);
 
+/* Whether every value is NA or a factor code from 1 to nlev; one pass in
+   vector lanes, meant for a block just decoded, still in cache. */
+int rdz_int_codes_ok(const int32_t *v, size_t n, uint64_t nlev);
+
+/* rdz_int_decode() for a factor's codes, which must be NA or 1 to nlev (a
+   format error otherwise): checked in the decode's own pass for frame of
+   reference, else in a second pass over the block. */
+int rdz_factor_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, int32_t *out,
+                      uint64_t nlev, rdz_error *e);
+
 int rdz_int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, int32_t *out,
                    rdz_error *e);
 int rdz_dbl_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, double *out,

@@ -670,10 +670,100 @@ int rdz_int_encode(const int32_t *v, size_t n, int compressing, zb_buf *out, uin
     return 0;
 }
 
+/* A frame-of-reference block's codes c[0, n) into values in place: base
+   added, the NA code to NA; in 32-bit lanes, base + code overflows exactly
+   when the code exceeds INT32_MAX - base, and lands on NA only as code 0 on
+   a base of INT32_MIN. With top (a factor's level count, else 0), a value
+   outside 1..top is out of range too, in the same pass. Returns nonzero
+   when a value is out of range. */
+static uint32_t for_add_base(uint32_t *c, size_t n, int has_na, uint32_t na_code, uint32_t ubase,
+                             uint32_t limit, uint32_t zero_bad, uint32_t top)
+{
+    uint32_t bad = 0, check = top != 0, top1 = top - 1u;
+    size_t i = 0;
+#ifdef RDZ_VEC_INT
+    {
+        const rdz_v4 code4 = v4_dup(has_na ? na_code : 0), use_na = v4_dup(has_na ? ~0u : 0),
+                     na4 = v4_dup((uint32_t)INT_NA), base4 = v4_dup(ubase),
+                     limit4 = v4_dup(limit), zero4 = v4_dup(0), one4 = v4_dup(1),
+                     zbad4 = v4_dup(zero_bad ? ~0u : 0), check4 = v4_dup(check ? ~0u : 0),
+                     top14 = v4_dup(top1);
+        rdz_v4 vbad = zero4;
+        for (; i + 4 <= n; i += 4) {
+            rdz_v4 ci = v4_load((const int32_t *)(const void *)(c + i));
+            rdz_v4 na = v4_and(use_na, v4_eq(ci, code4));
+            rdz_v4 val = v4_add(ci, base4);
+            rdz_v4 b = v4_or(v4_gtu(ci, limit4), v4_and(zbad4, v4_eq(ci, zero4)));
+            b = v4_or(b, v4_and(check4, v4_gtu(v4_sub(val, one4), top14)));
+            vbad = v4_or(vbad, v4_sel(na, zero4, b));
+            v4_store(c + i, v4_sel(na, na4, val));
+        }
+        bad |= v4_any(vbad) != 0;
+    }
+#endif
+    for (; i < n; i++) {
+        uint32_t ci = c[i], na = has_na && ci == na_code, val = ubase + ci;
+        uint32_t b = (ci > limit) | (zero_bad & (ci == 0)) | (check & (val - 1u > top1));
+        bad |= (na ^ 1u) & b;
+        c[i] = na ? (uint32_t)INT_NA : val;
+    }
+    return bad;
+}
+
+int rdz_int_codes_ok(const int32_t *v, size_t n, uint64_t nlev)
+{
+    uint32_t top = nlev > (uint64_t)INT32_MAX ? (uint32_t)INT32_MAX : (uint32_t)nlev, bad = 0;
+    size_t i = 0;
+    if (!top) { /* no levels: only NA */
+        for (; i < n; i++) bad |= (uint32_t)(v[i] != INT_NA);
+        return !bad;
+    }
+#ifdef RDZ_VEC_INT
+    {
+        /* code - 1, unsigned, is below top exactly for 1..top; NA is exempt */
+        const rdz_v4 one = v4_dup(1), na4 = v4_dup((uint32_t)INT_NA), top1 = v4_dup(top - 1),
+                     zero = v4_dup(0);
+        rdz_v4 vbad = zero;
+        for (; i + 4 <= n; i += 4) {
+            rdz_v4 x = v4_load(v + i);
+            vbad = v4_or(vbad, v4_sel(v4_eq(x, na4), zero, v4_gtu(v4_sub(x, one), top1)));
+        }
+        bad = v4_any(vbad) != 0;
+    }
+#endif
+    for (; i < n; i++) bad |= (uint32_t)(v[i] != INT_NA) & (uint32_t)((uint32_t)v[i] - 1u >= top);
+    return !bad;
+}
+
 static int bad_int(rdz_error *e) { return rdz_invalid(e, "invalid integer block"); }
+
+/* rdz_int_decode(), and with top (a factor's level count, else 0) the
+   frame-of-reference record checks its values against 1..top as it adds the
+   base, and sets *checked. */
+static int int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, int32_t *out,
+                      uint32_t top, int *checked, rdz_error *e);
 
 int rdz_int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, int32_t *out,
                    rdz_error *e)
+{
+    int checked = 0;
+    return int_decode(enc, len, encoding, n, out, 0, &checked, e);
+}
+
+int rdz_factor_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, int32_t *out,
+                      uint64_t nlev, rdz_error *e)
+{
+    uint32_t top = nlev > (uint64_t)INT32_MAX ? (uint32_t)INT32_MAX : (uint32_t)nlev;
+    int checked = 0;
+    if (int_decode(enc, len, encoding, n, out, top, &checked, e)) return 1;
+    if (!checked && !rdz_int_codes_ok(out, n, nlev)) {
+        return rdz_invalid(e, "factor code outside its levels");
+    }
+    return 0;
+}
+
+static int int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, int32_t *out,
+                      uint32_t top, int *checked, rdz_error *e)
 {
     size_t i;
     /* an empty block: only the layouts that hold nothing but values */
@@ -717,38 +807,11 @@ int rdz_int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t n, 
             uint32_t limit = (uint32_t)(INT32_MAX - base), ubase = (uint32_t)base,
                      zero_bad = base == INT32_MIN, bad = 0;
             unpack_codes(enc + RDZ_INT_FOR_HEADER, len - RDZ_INT_FOR_HEADER, n, width, c);
-            i = 0;
-#ifdef RDZ_VEC_INT
-            {
-                const rdz_v4 code4 = v4_dup(has_na ? na_code : 0), use_na = v4_dup(has_na ? ~0u : 0),
-                             na4 = v4_dup((uint32_t)INT_NA), base4 = v4_dup(ubase),
-                             limit4 = v4_dup(limit), zero4 = v4_dup(0),
-                             zbad4 = v4_dup(zero_bad ? ~0u : 0);
-                rdz_v4 vbad = zero4;
-                for (; i + 4 <= n; i += 4) {
-                    rdz_v4 ci = v4_load((const int32_t *)(const void *)(c + i));
-                    rdz_v4 na = v4_and(use_na, v4_eq(ci, code4));
-                    rdz_v4 b = v4_or(v4_gtu(ci, limit4), v4_and(zbad4, v4_eq(ci, zero4)));
-                    vbad = v4_or(vbad, v4_sel(na, zero4, b));
-                    v4_store(c + i, v4_sel(na, na4, v4_add(ci, base4)));
-                }
-                bad |= v4_any(vbad) != 0;
+            bad = for_add_base(c, n, has_na, na_code, ubase, limit, zero_bad, top);
+            *checked = top != 0;
+            if (bad) {
+                return top ? rdz_invalid(e, "factor code outside its levels") : bad_int(e);
             }
-#endif
-            if (has_na) {
-                for (; i < n; i++) {
-                    uint32_t ci = c[i], na = ci == na_code;
-                    bad |= (na ^ 1u) & ((ci > limit) | (zero_bad & (ci == 0)));
-                    c[i] = na ? (uint32_t)INT_NA : ubase + ci;
-                }
-            } else {
-                for (; i < n; i++) {
-                    uint32_t ci = c[i];
-                    bad |= (ci > limit) | (zero_bad & (ci == 0));
-                    c[i] = ubase + ci;
-                }
-            }
-            if (bad) return bad_int(e);
         }
         return 0;
     }
