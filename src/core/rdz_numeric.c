@@ -197,31 +197,24 @@ __attribute__((target("avx2"))) static size_t for_codes_avx2(const int32_t *v, s
 /* for_add_base() eight lanes at a time; or-s into *bad */
 __attribute__((target("avx2"))) static size_t for_add_base_avx2(uint32_t *c, size_t n, int has_na,
                                                                 uint32_t na_code, uint32_t ubase,
-                                                                uint32_t limit, uint32_t zero_bad,
-                                                                uint32_t top, uint32_t *bad)
+                                                                uint32_t lo, uint32_t span,
+                                                                uint32_t *bad)
 {
-    const __m256i flip = _mm256_set1_epi32(INT32_MIN), zero = _mm256_setzero_si256(),
-                  one = _mm256_set1_epi32(1), na8 = _mm256_set1_epi32(INT32_MIN),
+    const __m256i flip = _mm256_set1_epi32(INT32_MIN), na8 = _mm256_set1_epi32(INT32_MIN),
                   code8 = _mm256_set1_epi32((int)(has_na ? na_code : 0)),
                   use_na = _mm256_set1_epi32(has_na ? -1 : 0),
-                  base8 = _mm256_set1_epi32((int)ubase),
-                  limit8 = _mm256_xor_si256(_mm256_set1_epi32((int)limit), flip),
-                  zbad8 = _mm256_set1_epi32(zero_bad ? -1 : 0),
-                  check8 = _mm256_set1_epi32(top ? -1 : 0),
-                  top18 = _mm256_xor_si256(_mm256_set1_epi32((int)(top - 1u)), flip);
-    __m256i vbad = zero;
+                  base8 = _mm256_set1_epi32((int)ubase), lo8 = _mm256_set1_epi32((int)lo),
+                  span8 = _mm256_xor_si256(_mm256_set1_epi32((int)span), flip);
+    __m256i vbad = _mm256_setzero_si256();
     size_t i = 0;
     for (; i + 8 <= n; i += 8) {
         __m256i ci = _mm256_loadu_si256((const __m256i *)(const void *)(c + i));
         __m256i na = _mm256_and_si256(use_na, _mm256_cmpeq_epi32(ci, code8));
-        __m256i val = _mm256_add_epi32(ci, base8);
         /* unsigned a > b as signed after flipping the sign bits */
-        __m256i b = _mm256_or_si256(_mm256_cmpgt_epi32(_mm256_xor_si256(ci, flip), limit8),
-                                    _mm256_and_si256(zbad8, _mm256_cmpeq_epi32(ci, zero)));
-        b = _mm256_or_si256(b, _mm256_and_si256(check8, _mm256_cmpgt_epi32(
-                                   _mm256_xor_si256(_mm256_sub_epi32(val, one), flip), top18)));
+        __m256i b = _mm256_cmpgt_epi32(_mm256_xor_si256(_mm256_sub_epi32(ci, lo8), flip), span8);
         vbad = _mm256_or_si256(vbad, _mm256_andnot_si256(na, b));
-        _mm256_storeu_si256((__m256i *)(void *)(c + i), _mm256_blendv_epi8(val, na8, na));
+        _mm256_storeu_si256((__m256i *)(void *)(c + i),
+                            _mm256_blendv_epi8(_mm256_add_epi32(ci, base8), na8, na));
     }
     *bad |= !_mm256_testz_si256(vbad, vbad);
     return i;
@@ -801,41 +794,54 @@ int rdz_int_encode_range(const int32_t *v, size_t n, int compressing, zb_buf *ou
    a base of INT32_MIN. With top (a factor's level count, else 0), a value
    outside 1..top is out of range too, in the same pass. Returns nonzero
    when a value is out of range. */
+/* Base added to the codes in place, NA codes to NA; nonzero if a code
+   other than NA is outside [lo, lo + span], the codes that land in range
+   (for_code_range()). */
 static uint32_t for_add_base(uint32_t *c, size_t n, int has_na, uint32_t na_code, uint32_t ubase,
-                             uint32_t limit, uint32_t zero_bad, uint32_t top)
+                             uint32_t lo, uint32_t span)
 {
-    uint32_t bad = 0, check = top != 0, top1 = top - 1u;
+    uint32_t bad = 0;
     size_t i = 0;
 #ifdef RDZ_HAVE_AVX2_INT
-    if (rdz_int_avx2()) i = for_add_base_avx2(c, n, has_na, na_code, ubase, limit, zero_bad, top, &bad);
+    if (rdz_int_avx2()) i = for_add_base_avx2(c, n, has_na, na_code, ubase, lo, span, &bad);
 #endif
 #ifdef RDZ_VEC_INT
     {
         const rdz_v4 code4 = v4_dup(has_na ? na_code : 0), use_na = v4_dup(has_na ? ~0u : 0),
-                     na4 = v4_dup((uint32_t)INT_NA), base4 = v4_dup(ubase),
-                     limit4 = v4_dup(limit), zero4 = v4_dup(0), one4 = v4_dup(1),
-                     zbad4 = v4_dup(zero_bad ? ~0u : 0), check4 = v4_dup(check ? ~0u : 0),
-                     top14 = v4_dup(top1);
-        rdz_v4 vbad = zero4;
+                     na4 = v4_dup((uint32_t)INT_NA), base4 = v4_dup(ubase), lo4 = v4_dup(lo),
+                     span4 = v4_dup(span);
+        rdz_v4 vbad = v4_dup(0);
         for (; i + 4 <= n; i += 4) {
             rdz_v4 ci = v4_load((const int32_t *)(const void *)(c + i));
             rdz_v4 na = v4_and(use_na, v4_eq(ci, code4));
-            rdz_v4 val = v4_add(ci, base4);
-            rdz_v4 b = v4_or(v4_gtu(ci, limit4), v4_and(zbad4, v4_eq(ci, zero4)));
-            b = v4_or(b, v4_and(check4, v4_gtu(v4_sub(val, one4), top14)));
-            vbad = v4_or(vbad, v4_sel(na, zero4, b));
-            v4_store(c + i, v4_sel(na, na4, val));
+            vbad = v4_or(vbad, v4_sel(na, v4_dup(0), v4_gtu(v4_sub(ci, lo4), span4)));
+            v4_store(c + i, v4_sel(na, na4, v4_add(ci, base4)));
         }
         bad |= v4_any(vbad) != 0;
     }
 #endif
     for (; i < n; i++) {
-        uint32_t ci = c[i], na = has_na && ci == na_code, val = ubase + ci;
-        uint32_t b = (ci > limit) | (zero_bad & (ci == 0)) | (check & (val - 1u > top1));
-        bad |= (na ^ 1u) & b;
-        c[i] = na ? (uint32_t)INT_NA : val;
+        uint32_t ci = c[i], na = has_na && ci == na_code;
+        bad |= (na ^ 1u) & (ci - lo > span);
+        c[i] = na ? (uint32_t)INT_NA : ubase + ci;
     }
     return bad;
+}
+
+/* The codes of a FOR block on `base` that decode in range, as [lo, lo +
+   span]: base + code must not overflow int32 nor land on NA (INT32_MIN),
+   and for a factor (top levels) must be 1..top. Zero if there are none. */
+static int for_code_range(int64_t base, uint32_t top, uint32_t *lo, uint32_t *span)
+{
+    int64_t a = base == INT32_MIN ? 1 : 0, b = INT32_MAX - base;
+    if (top) {
+        if (1 - base > a) a = 1 - base;
+        if ((int64_t)top - base < b) b = (int64_t)top - base;
+    }
+    if (b < a) return 0;
+    *lo = (uint32_t)a;
+    *span = (uint32_t)(b - a);
+    return 1;
 }
 
 int rdz_int_codes_ok(const int32_t *v, size_t n, uint64_t nlev)
@@ -970,11 +976,9 @@ static int int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t 
             /* the codes into out, then base added in place, branch-free
                (NA codes are common and unpredictable) */
             uint32_t *c = (uint32_t *)(void *)out;
-            /* in 32-bit lanes: base + code overflows exactly when the code
-               exceeds INT32_MAX - base, and lands on NA only as code 0 on a
-               base of INT32_MIN */
-            uint32_t limit = (uint32_t)(INT32_MAX - base), ubase = (uint32_t)base,
-                     zero_bad = base == INT32_MIN, bad = 0;
+            uint32_t ubase = (uint32_t)base, lo = 0, span = 0, bad = 0;
+            /* no code decodes in range: then only NA codes may appear */
+            int none = !for_code_range(base, top, &lo, &span);
             size_t at;
             /* chunk by chunk, so that the codes are still in cache when the
                base is added; a chunk is whole groups and starts on a byte */
@@ -983,7 +987,10 @@ static int int_decode(const uint8_t *enc, size_t len, uint16_t encoding, size_t 
                        skip = at / 8 * width;
                 unpack_codes(enc + RDZ_INT_FOR_HEADER + skip, len - RDZ_INT_FOR_HEADER - skip, m,
                              width, c + at);
-                bad |= for_add_base(c + at, m, has_na, na_code, ubase, limit, zero_bad, top);
+                bad |= for_add_base(c + at, m, has_na, na_code, ubase, lo, span);
+            }
+            if (none) {
+                for (at = 0; at < n && !bad; at++) bad = out[at] != INT_NA;
             }
             *checked = top != 0;
             if (bad) {
