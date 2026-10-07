@@ -14,7 +14,7 @@ points return `list(native, x[, lo])`, `rdz_entries_of()` finds a data
 frame's own attributes through `rdz_attr_value()`, and `rdz_c_file_info()`
 (a forwarder) is gone. No user-facing change.
 
-## Checkpoint 2026-10-07: reading benchmarks, and the logical decoder
+## Checkpoint 2026-10-07: optimisation round (reads, string digests, xxHash)
 
 The logical decoder is store-bound: into fresh pages it writes 5e6 values
 (20 MB) in about 1.1 ms of compute plus the page faults, about 18 GB/s on an
@@ -94,6 +94,18 @@ reads one string object from an open reader. A test-only counter
 (`rdz_test_opens`) checks one open for select, rows, both, the fallback
 and a generic file. No change on disk.
 
+## Checkpoint 2026-10-07: level-0 codes as bytes or halfwords (#60)
+
+Level 0 stores frame-of-reference codes of 1 to 16 bits at width 8 or 16,
+as fst stores factor codes and Arrow dictionary indices: encoding narrows
+the values to bytes or halfwords in one SIMD pass, decoding widens them in
+registers and checks and rebases them in the same pass. No format change:
+every 0.1.0 reader accepts any width that holds the codes, and compressing
+levels keep the smallest. The level-0 frozen fixtures that hold such codes
+(`frozen_wider_codes`) are written larger and read the same; every other
+level-0 file is still written byte for byte. On the x86-64 runner the
+result was inside the runner's noise; no AVX2 variant followed.
+
 ## Checkpoint 2026-10-06: the pre-submission review (#27)
 
 The review of `main` at a17f233 (issue #27) found two data bugs in
@@ -127,11 +139,11 @@ group of findings (#28 to #35, and this one):
   the Rust-era documents marked historical; review.md moved to
   `.agents/history/`.
 
-Left for the maintainer: `preset =`/`threads =` arguments; one C entry point
-for `select`, `rows` and `object` (`select` and `rows` done, see above); the
-items of #27 section E (test or strike); a shuffle-safe test suite (about 20
-helpers defined at file scope in test files). `Remotes` and the zubin/zufast
-version floors wait for those packages to be on CRAN.
+Left for the maintainer: `preset =`/`threads =` arguments, and the items of
+#27 section E (test or strike). Done since: one open per read for `select`,
+`rows`, `object` and the schema (#61 to #63, above), and a shuffle-safe
+test suite (244a7f6). `Remotes` and the zubin/zufast version floors wait
+for those packages to be on CRAN.
 
 ## Checkpoint 2026-10-06: plan-c Stage S
 
