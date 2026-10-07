@@ -5,6 +5,22 @@ A log of dated checkpoints, newest first. For what the system is, read
 a checkpoint records what changed and why, and later checkpoints can
 supersede earlier ones.
 
+## Checkpoint 2026-10-07: one call for `select` and `rows` (#27 F.1)
+
+`read_rdz(path, select, rows)` opens the file once. Before, a native
+`select` opened it three times (`rdz_info()`, the root's names, the read)
+and a refused row window up to five (the directory to word the refusal, a
+second read); the file could change between them, and each open validated
+the directory again. Now `rdz_c_read` resolves `select` and the window
+against the reader it opened, falls back to the whole value itself, and
+returns where the value starts; refusals come back as kind `request`,
+worded in R exactly as before. `rdz_select_index()`, `rdz_rows_refused()`
+and `rdz_c_read_native_attribute` are gone; `rdz_graph_read_strings()`
+reads one string object from an open reader. A test-only counter
+(`rdz_test_opens`) checks one open for select, rows, both, the fallback
+and a generic file. No change on disk. Next: `rdz_attributes(object =)`
+through one call.
+
 ## Checkpoint 2026-10-06: the pre-submission review (#27)
 
 The review of `main` at a17f233 (issue #27) found two data bugs in
@@ -39,7 +55,7 @@ group of findings (#28 to #35, and this one):
   `.agents/history/`.
 
 Left for the maintainer: `preset =`/`threads =` arguments; one C entry point
-for `select`, `rows` and `object`; the items of #27 section E (test or
+for `select`, `rows` and `object` (`select` and `rows` done, see above); the items of #27 section E (test or
 strike); a shuffle-safe test suite (about 20 helpers defined at file scope
 in test files). `Remotes` and the zubin/zufast version floors wait for those
 packages to be on CRAN.

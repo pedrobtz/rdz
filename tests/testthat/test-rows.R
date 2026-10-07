@@ -198,8 +198,9 @@ test_that("a frame's attributes survive rows =, whole, even when shared", {
   expect_identical(attr(got, "x"), v)
   expect_identical(attr(got, "note"), "kept")
   # the reader refuses to window the shared vector (it would cut the
-  # attribute short), so the value is read whole
+  # attribute short), so the one call reads the value whole: lo 0
   raw <- .Call(rdz:::rdz_c_read, path, rdz:::rdz_settings(0L), NULL, c(1, 3))
-  expect_true(inherits(raw, "rdz_failure"))
-  expect_identical(attr(raw, "kind"), "unsupported")
+  expect_false(inherits(raw, "rdz_failure"))
+  expect_identical(raw[[3L]], 0)
+  expect_identical(raw[[1L]], df)
 })

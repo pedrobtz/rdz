@@ -71,6 +71,5 @@ test_that("a root attribute shared with another reads alone", {
   attr(df, "a") <- v
   attr(df, "b") <- v # stored as a reference to "a"
   write_rdz(df, path)
-  expect_identical(rdz:::rdz_check(.Call(rdz:::rdz_c_read_native_attribute, path, "b")), v)
   expect_identical(rdz_attributes(path, names = "b"), list(b = v))
 })

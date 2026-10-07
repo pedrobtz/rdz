@@ -43,8 +43,34 @@ rdz_stop <- function(..., class = "rdz_argument_error", call. = FALSE) {
   ))
 }
 
+# A request the file cannot serve (rdz_request() in src/rdz_r.c), worded as
+# R's own argument checks word it: an rdz_argument_error.
+rdz_request_stop <- function(result) {
+  data <- attr(result, "data")
+  switch(as.character(result),
+    select_root = rdz_stop("`select` needs a list or a data frame; the file holds ",
+                           if (nzchar(data)) data else "neither", ".", call. = FALSE),
+    select_type = rdz_stop("`select` must be NULL, a character vector or a numeric vector.",
+                           call. = FALSE),
+    select_range = rdz_stop("`select` positions must be whole numbers from 1 to ", data, ".",
+                            call. = FALSE),
+    select_na = rdz_stop("`select` must not contain NA.", call. = FALSE),
+    select_no_names = rdz_stop("`select` names parts, but they have no names.", call. = FALSE),
+    select_unknown = rdz_stop("Unknown in `select`: ", paste(data, collapse = ", "),
+                              call. = FALSE),
+    select_repeat = rdz_stop("`select` must not repeat a part.", call. = FALSE),
+    rows_root = rdz_stop(
+      "`rows` needs a data frame or a vector; use `select` for a list's elements.",
+      call. = FALSE
+    ),
+    rows_range = rdz_stop("`rows` must be at most ", data, ".", call. = FALSE),
+    rdz_stop("rdz cannot serve this request.", call. = FALSE)
+  )
+}
+
 rdz_check <- function(result) {
   if (inherits(result, "rdz_failure")) {
+    if (identical(attr(result, "kind"), "request")) rdz_request_stop(result)
     class <- switch(attr(result, "kind"),
       limit = "rdz_limit_error",
       version = "rdz_version_error",

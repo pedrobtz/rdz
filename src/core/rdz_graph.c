@@ -247,6 +247,26 @@ static int decode_strings(rdz_reader *r, const rdz_block *b, const zb_buf *rec,
     }
 }
 
+int rdz_graph_read_strings(rdz_reader *r, uint32_t object, const rdz_names_sink *sink,
+                           rdz_error *e)
+{
+    const rdz_object *o;
+    size_t entries = 0;
+    uint32_t i;
+    if (object >= r->nobjects) return rdz_invalid(e, "object id out of range");
+    o = &r->objects[object];
+    if (o->type_tag == RDZ_TYPE_REFERENCE) o = &r->objects[o->first_child];
+    if (o->type_tag != RDZ_TYPE_CHARACTER) return rdz_invalid(e, "names that are not strings");
+    for (i = o->first_block; i < o->first_block + o->block_count; i++) {
+        const rdz_block *b = &r->blocks[i];
+        if (rdz_reader_read_block(r, i, &r->decoded, e) ||
+            decode_strings(r, b, &r->decoded, sink, &entries, 0, (size_t)b->logical_count, e)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* A factor's level count: its levels object's length, through a reference
    (validation: a reference's target is an earlier non-reference object). */
 static uint64_t factor_levels(const rdz_reader *r, const rdz_object *o)

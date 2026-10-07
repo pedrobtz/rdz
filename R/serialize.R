@@ -222,50 +222,32 @@ rdz_unserialize <- function(bytes, select = NULL, rows = NULL) {
 #' @export
 read_rdz <- function(path, select = NULL, rows = NULL) {
   path <- validate_existing_rdz_path(path)
-  index <- NULL
   window <- NULL
-  if (!is.null(select)) {
-    info <- rdz_info(path)
-    if (identical(info$codec, "native_v1")) index <- rdz_select_index(path, info, select)
-  }
   if (!is.null(rows)) {
     # the window covering the rows; the C reader checks it against the root
     # (a generic file ignores it)
     rows <- rdz_rows_check(rows)
     window <- if (length(rows)) c(min(rows) - 1, max(rows)) else c(0, 0)
   }
-  read <- tryCatch(
-    rdz_check(.Call(rdz_c_read, path, rdz_settings(0L), index, window)),
-    rdz_limit_error = function(e) rdz_rows_refused(path, rows, e),
-    rdz_unsupported_error = function(e) rdz_rows_refused(path, rows, e)
-  )
-  if (is.null(read)) { # a window the reader refuses: the value whole
-    window <- NULL
-    read <- rdz_check(.Call(rdz_c_read, path, rdz_settings(0L), index, NULL))
-  }
+  # one call, one open of the file: a native file resolves `select` and the
+  # window against its directory, refusing them in the words below
+  # (rdz_request_stop()), and reads the value whole where it cannot window
+  # it; a generic file is read whole, for R to select from
+  read <- rdz_check(.Call(rdz_c_read, path, rdz_settings(0L), rdz_select_arg(select), window))
   value <- read[[1L]]
   if (!read[[2L]] && !is.null(select)) value <- rdz_select_generic(value, select)
-  # a windowed read starts after row window[1]; a whole one at row 1
-  if (!is.null(rows)) value <- rdz_rows_take(value, rows, if (read[[2L]] && !is.null(window)) window[[1L]] else 0)
+  # a windowed read starts after row read[[3]]; a whole one at row 1
+  if (!is.null(rows)) value <- rdz_rows_take(value, rows, read[[3L]])
   value
 }
 
-# Words the reader's refusal of `rows` for people (the directory says why),
-# or, for a root that has rows but a window the reader cannot apply (a
-# matrix, a vector shared with a list column), NULL: read it whole.
-rdz_rows_refused <- function(path, rows, e) {
-  if (is.null(rows)) stop(e)
-  root <- rdz_directory(path)$objects[1L, ]
-  if (!root$type_name %in% c("data.frame", "logical", "integer", "double", "character",
-                             "factor")) {
-    rdz_stop("`rows` needs a data frame or a vector; use `select` for a list's elements.",
-         call. = FALSE)
-  }
-  if (length(rows) && max(rows) > root$length) {
-    rdz_stop("`rows` must be at most ", root$length, ".", call. = FALSE)
-  }
-  if (inherits(e, "rdz_unsupported_error")) return(NULL)
-  stop(e)
+# `select` as the C reader takes it: a character or double vector, FALSE for
+# neither (refused there, after the root's own check, as R's order had it).
+rdz_select_arg <- function(select) {
+  if (is.null(select)) NULL
+  else if (is.character(select)) as.character(select)
+  else if (is.numeric(select)) as.double(select)
+  else FALSE
 }
 
 rdz_rows_check <- function(rows) {
@@ -351,20 +333,6 @@ rdz_metadata_section <- function(metadata) {
   out <- c(u32(length(v)), unlist(lapply(seq_along(v), function(i) c(str(names(v)[i]), str(v[[i]])))))
   if (length(out) > 64 * 1024) rdz_stop("`metadata` exceeds 64 KiB.", call. = FALSE)
   out
-}
-
-# The 0-based children `select` names in a native file's list or data frame
-# root, reading only its names.
-rdz_select_index <- function(path, info, select) {
-  if (!info$root_type %in% c("list", "data.frame")) {
-    rdz_stop("`select` needs a list or a data frame; the file holds ",
-         if (nzchar(info$root_type)) info$root_type else "neither", ".", call. = FALSE)
-  }
-  n <- info$root_length
-  names <- if ("names" %in% info$attribute_names) {
-    rdz_check(.Call(rdz_c_read_native_attribute, path, "names"))
-  }
-  rdz_select_positions(select, n, names) - 1L
 }
 
 # The 1-based positions `select` names among n parts with these names.

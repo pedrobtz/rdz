@@ -1179,27 +1179,27 @@ static int rdz_read_attr_name(rdz_reader *r, const rdz_attribute *a, char *out, 
 
 /* With a window: the root's rows. A data frame's vector columns and its
    stored row names, or a vector and its names; other columns (lists, data
-   frames) are read whole, for R to subset. */
-static int rdz_window_plan(rdz_graph_in *g)
+   frames) are read whole, for R to subset. Fills `windows` (r->nobjects of
+   them) from the open reader, which it leaves open: rdz_native_read_request()
+   runs it first, to read the value whole when it refuses. */
+static int rdz_window_fill(rdz_reader *r, double lo, double hi, zb_buf *windows, rdz_error *e)
 {
-    rdz_reader *r = &g->r;
     const rdz_object *root = &r->objects[0];
-    double lo = REAL(g->window)[0], hi = REAL(g->window)[1];
     uint64_t rows = root->logical_len; /* a data frame's rows, a vector's elements */
     rdz_window *w;
     uint8_t *slot; /* the objects windowed in place: the root's columns, or the root */
     uint32_t k, a, j;
     if (root->type_tag == RDZ_TYPE_LIST || root->type_tag == RDZ_TYPE_NULL ||
         root->type_tag == RDZ_TYPE_REFERENCE) {
-        return rdz_unsupported(&g->e, "rows of a root that is not a data frame or a vector");
+        return rdz_unsupported(e, "rows of a root that is not a data frame or a vector");
     }
-    if (!(lo >= 0 && hi >= lo && hi <= (double)rows)) return rdz_limit(&g->e, "row range");
-    if (zb_put_zeros(&g->windows, (size_t)r->nobjects * sizeof(rdz_window))) {
-        return rdz_memory(&g->e, "the row range");
+    if (!(lo >= 0 && hi >= lo && hi <= (double)rows)) return rdz_limit(e, "row range");
+    if (zb_put_zeros(windows, (size_t)r->nobjects * sizeof(rdz_window))) {
+        return rdz_memory(e, "the row range");
     }
     slot = (uint8_t *)R_alloc(r->nobjects, 1);
     memset(slot, 0, r->nobjects);
-    w = (rdz_window *)(void *)g->windows.data;
+    w = (rdz_window *)(void *)windows->data;
     if (root->type_tag == RDZ_TYPE_DATA_FRAME) {
         for (k = 0; k < root->child_count; k++) {
             rdz_window_object(r, w, slot, root->first_child + k, (uint64_t)lo, (uint64_t)hi);
@@ -1223,7 +1223,7 @@ static int rdz_window_plan(rdz_graph_in *g)
         const rdz_object *o = &r->objects[j];
         if ((o->type_tag == RDZ_TYPE_REFERENCE && !slot[j] && w[o->first_child].on) ||
             (w[j].on && !slot[j])) {
-            return rdz_unsupported(&g->e, "rows of a vector shared with a part read whole");
+            return rdz_unsupported(e, "rows of a vector shared with a part read whole");
         }
         /* a matrix's or a time series' rows are not its elements' */
         if (w[j].on) {
@@ -1231,14 +1231,19 @@ static int rdz_window_plan(rdz_graph_in *g)
                 const rdz_attribute *at = &r->attributes[o->first_attribute + a];
                 char name[10001]; /* R caps a symbol at 10,000 bytes */
                 if (at->flags != RDZ_ATTRIBUTE_FLAG_OTHER) continue;
-                if (rdz_read_attr_name(r, at, name, sizeof name, &g->e)) return 1;
+                if (rdz_read_attr_name(r, at, name, sizeof name, e)) return 1;
                 if (!strcmp(name, "dim") || !strcmp(name, "dimnames") || !strcmp(name, "tsp")) {
-                    return rdz_unsupported(&g->e, "rows of a matrix, an array or a time series");
+                    return rdz_unsupported(e, "rows of a matrix, an array or a time series");
                 }
             }
         }
     }
     return 0;
+}
+
+static int rdz_window_plan(rdz_graph_in *g)
+{
+    return rdz_window_fill(&g->r, REAL(g->window)[0], REAL(g->window)[1], &g->windows, &g->e);
 }
 
 /* Builds the whole value of an open native file. */
@@ -1477,12 +1482,6 @@ static void rdz_graph_in_cleanup(void *data, Rboolean jump)
 static SEXP rdz_native_read_in(rdz_reader *opened, int threads, SEXP select, SEXP targets,
                                SEXP window, rdz_error *e, int *failed);
 
-SEXP rdz_native_read_r(rdz_reader *opened, int threads, SEXP select, SEXP window, rdz_error *e,
-                       int *failed)
-{
-    return rdz_native_read_in(opened, threads, select, R_NilValue, window, e, failed);
-}
-
 static SEXP rdz_native_read_in(rdz_reader *opened, int threads, SEXP select, SEXP targets,
                                SEXP window, rdz_error *e, int *failed)
 {
@@ -1522,6 +1521,202 @@ static SEXP rdz_native_read_in(rdz_reader *opened, int threads, SEXP select, SEX
     rdz_graph_in_finalize(ptr);
     UNPROTECT(3);
     return *failed ? R_NilValue : out;
+}
+
+/* ---- read_rdz(): select and rows resolved against the open file ------------------ */
+
+/* The root's names, from the open reader alone (it stays open): their
+   strings, or R_NilValue when the root has none; *failed on a read error. */
+static SEXP rdz_root_names(rdz_reader *r, rdz_error *e, int *failed)
+{
+    const rdz_object *root = &r->objects[0];
+    uint32_t a, object = 0;
+    int found = 0;
+    rdz_r_names s;
+    SEXP out;
+    *failed = 0;
+    for (a = 0; a < root->attribute_count && !found; a++) {
+        const rdz_attribute *at = &r->attributes[root->first_attribute + a];
+        if (at->flags == RDZ_ATTRIBUTE_FLAG_NAMES) {
+            object = at->value_object_id;
+            found = 1;
+        }
+    }
+    if (!found) return R_NilValue;
+    /* a value shared with an earlier object: that object's strings */
+    if (r->objects[object].type_tag == RDZ_TYPE_REFERENCE) object = r->objects[object].first_child;
+    if (r->objects[object].type_tag != RDZ_TYPE_CHARACTER ||
+        r->objects[object].logical_len > (uint64_t)R_XLEN_T_MAX) {
+        rdz_invalid(e, "names that are not strings");
+        *failed = 1;
+        return R_NilValue;
+    }
+    out = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)r->objects[object].logical_len));
+    s.dictionary = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)rdz_dictionary_length(r, object)));
+    s.target = out;
+    s.filled = 0;
+    s.entries = 0;
+    s.length = XLENGTH(out);
+    s.dictionary_length = XLENGTH(s.dictionary);
+    s.sink.ctx = &s;
+    s.sink.plain = rdz_r_plain;
+    s.sink.entries = rdz_r_entries;
+    s.sink.indices = rdz_r_indices;
+    if (rdz_graph_read_strings(r, object, &s.sink, e)) {
+        *failed = 1;
+    } else if (s.filled != s.length) {
+        rdz_invalid(e, "character object length mismatch");
+        *failed = 1;
+    }
+    UNPROTECT(2);
+    return *failed ? R_NilValue : out;
+}
+
+/* A request failure (rdz_request()), its data protected meanwhile. */
+static SEXP rdz_req(const char *what, SEXP data)
+{
+    SEXP out;
+    PROTECT(data);
+    out = rdz_request(what, data);
+    UNPROTECT(1);
+    return out;
+}
+
+/* select (a character or double vector, or FALSE for neither) as the
+   root's 0-based children, in R's order of checks: the root, the type,
+   then for positions their range, for names NA, the names' presence and
+   each name (match(): the first match; NA never matches), and last a part
+   named twice. *request is set to a request failure instead. */
+static SEXP rdz_select_children(rdz_reader *r, SEXP select, rdz_error *e, int *failed,
+                                SEXP *request)
+{
+    const rdz_object *root = &r->objects[0];
+    uint32_t n = root->child_count;
+    R_xlen_t j, k = XLENGTH(select), unknown = 0;
+    SEXP at = R_NilValue, names, m, missing;
+    int *ids, nprot = 0;
+    uint8_t *seen;
+    *failed = 0;
+    *request = R_NilValue;
+    if (root->type_tag != RDZ_TYPE_LIST && root->type_tag != RDZ_TYPE_DATA_FRAME) {
+        *request = rdz_req("select_root", Rf_mkString(rdz_root_type_name(r)));
+        return R_NilValue;
+    }
+    if (TYPEOF(select) != STRSXP && TYPEOF(select) != REALSXP) {
+        *request = rdz_req("select_type", R_NilValue);
+        return R_NilValue;
+    }
+    at = PROTECT(Rf_allocVector(INTSXP, k));
+    nprot++;
+    ids = INTEGER(at);
+    if (TYPEOF(select) == REALSXP) {
+        for (j = 0; j < k; j++) {
+            double x = REAL(select)[j];
+            if (!R_FINITE(x) || x != floor(x) || x < 1 || x > (double)n || x > INT_MAX) {
+                *request = rdz_req("select_range", Rf_ScalarReal((double)n));
+                goto done;
+            }
+            ids[j] = (int)x - 1;
+        }
+    } else {
+        names = PROTECT(rdz_root_names(r, e, failed));
+        nprot++;
+        if (*failed) goto done;
+        for (j = 0; j < k; j++) {
+            if (STRING_ELT(select, j) == NA_STRING) {
+                *request = rdz_req("select_na", R_NilValue);
+                goto done;
+            }
+        }
+        if (names == R_NilValue) {
+            *request = rdz_req("select_no_names", R_NilValue);
+            goto done;
+        }
+        m = PROTECT(Rf_match(names, select, 0));
+        nprot++;
+        for (j = 0; j < k; j++) unknown += INTEGER(m)[j] == 0;
+        if (unknown) {
+            R_xlen_t u = 0;
+            missing = PROTECT(Rf_allocVector(STRSXP, unknown));
+            nprot++;
+            for (j = 0; j < k; j++) {
+                if (INTEGER(m)[j] == 0) SET_STRING_ELT(missing, u++, STRING_ELT(select, j));
+            }
+            *request = rdz_req("select_unknown", missing);
+            goto done;
+        }
+        for (j = 0; j < k; j++) ids[j] = INTEGER(m)[j] - 1;
+    }
+    seen = (uint8_t *)R_alloc(n ? n : 1, 1);
+    memset(seen, 0, n ? n : 1);
+    for (j = 0; j < k; j++) {
+        if (seen[ids[j]]) {
+            *request = rdz_req("select_repeat", R_NilValue);
+            goto done;
+        }
+        seen[ids[j]] = 1;
+    }
+done:
+    UNPROTECT(nprot);
+    return *failed || *request != R_NilValue ? R_NilValue : at;
+}
+
+/* read_rdz()'s one read of an open native file: select resolved to the
+   root's children and the rows' window checked against the root, both from
+   this reader, then the value read with it (which takes the reader over).
+   The window's refusals for R's words come first: a root without rows,
+   then rows past its length; a window the plan refuses (a vector shared
+   with a part read whole; a matrix, an array, a time series) reads the
+   value whole instead, *lo 0. *failed: 0, 1 (e), or 2 (the value is a
+   request failure). */
+SEXP rdz_native_read_request(rdz_reader *opened, int threads, SEXP select, SEXP window,
+                             rdz_error *e, int *failed, double *lo)
+{
+    const rdz_object *root = &opened->objects[0];
+    SEXP index = R_NilValue, request, out;
+    *lo = 0;
+    *failed = 0;
+    if (select != R_NilValue) {
+        index = rdz_select_children(opened, select, e, failed, &request);
+        if (*failed) return R_NilValue;
+        if (request != R_NilValue) {
+            *failed = 2;
+            return request;
+        }
+    }
+    PROTECT(index);
+    if (window != R_NilValue) {
+        double wlo = REAL(window)[0], whi = REAL(window)[1];
+        uint16_t t = root->type_tag;
+        zb_buf plan;
+        if (t != RDZ_TYPE_LOGICAL && t != RDZ_TYPE_INTEGER && t != RDZ_TYPE_DOUBLE &&
+            t != RDZ_TYPE_CHARACTER && t != RDZ_TYPE_FACTOR && t != RDZ_TYPE_DATA_FRAME) {
+            UNPROTECT(1);
+            *failed = 2;
+            return rdz_req("rows_root", R_NilValue);
+        }
+        if (whi > (double)root->logical_len) {
+            UNPROTECT(1);
+            *failed = 2;
+            return rdz_req("rows_range", Rf_ScalarReal((double)root->logical_len));
+        }
+        zb_buf_alloc(&plan, 0, 0); /* empty: cannot fail */
+        if (rdz_window_fill(opened, wlo, whi, &plan, e)) {
+            zb_buf_release(&plan);
+            if (e->code != RDZ_E_UNSUPPORTED) {
+                UNPROTECT(1);
+                *failed = 1;
+                return R_NilValue;
+            }
+            window = R_NilValue; /* refused: the value whole */
+        } else {
+            zb_buf_release(&plan);
+            *lo = wlo;
+        }
+    }
+    out = rdz_native_read_in(opened, threads, index, R_NilValue, window, e, failed);
+    UNPROTECT(1);
+    return out;
 }
 
 /* ---- one root attribute, read alone ---------------------------------------------- */
@@ -1594,99 +1789,6 @@ SEXP rdz_native_attribute_names(rdz_reader *r, rdz_error *e)
     }
     out = Rf_lengthgets(out, (R_xlen_t)implied);
     UNPROTECT(1);
-    return out;
-}
-
-/* The root attribute `which` of a native file (names, levels, class or
-   row.names), reading only the blocks of the object that holds it. */
-SEXP rdz_c_read_native_attribute(SEXP path, SEXP which)
-{
-    const char *w = CHAR(STRING_ELT(which, 0));
-    rdz_reader r, view;
-    rdz_error e;
-    const rdz_object *root;
-    rdz_object only;
-    uint32_t k, object = 0;
-    int failed;
-    SEXP out;
-
-    if (rdz_open_source(&r, path, &e)) return rdz_failure(&e);
-    if (r.codec_id != RDZ_CODEC_NATIVE_V1) {
-        rdz_codec_error(&e, r.codec_id, r.codec_version);
-        rdz_reader_close(&r);
-        return rdz_failure(&e);
-    }
-    root = &r.objects[0];
-    if (strcmp(w, "levels") == 0 && root->type_tag == RDZ_TYPE_FACTOR) object = root->first_child;
-    for (k = 0; !object && k < root->attribute_count; k++) {
-        const rdz_attribute *a = &r.attributes[root->first_attribute + k];
-        char name[10001]; /* R caps a symbol at 10,000 bytes */
-        if (rdz_read_attr_name(&r, a, name, sizeof name, &e)) {
-            rdz_reader_close(&r);
-            return rdz_failure(&e);
-        }
-        if (strcmp(w, name) == 0) object = a->value_object_id;
-    }
-    /* a value shared with an earlier object: that object (validation: an
-       earlier one, never itself a reference) */
-    if (object && r.objects[object].type_tag == RDZ_TYPE_REFERENCE) {
-        object = r.objects[object].first_child;
-    }
-    if (object && (r.objects[object].child_count || r.objects[object].attribute_count)) {
-        /* a value with parts of its own: read with the whole object */
-        SEXP x, sym = Rf_install(w);
-        x = PROTECT(rdz_native_read_r(&r, 1, R_NilValue, R_NilValue, &e, &failed)); /* closes r */
-        if (failed) {
-            UNPROTECT(1);
-            return rdz_failure(&e);
-        }
-        out = Rf_getAttrib(x, sym);
-        UNPROTECT(1);
-        return out;
-    }
-    if (!object) {
-        /* attributes implied by the root rather than stored */
-        uint16_t t = root->type_tag;
-        uint32_t flags = root->flags;
-        uint64_t nrow = root->logical_len, j;
-        rdz_reader_close(&r);
-        if (strcmp(w, "class") == 0 && t == RDZ_TYPE_FACTOR) {
-            if (flags & RDZ_OBJECT_FLAG_ORDERED) {
-                out = PROTECT(Rf_allocVector(STRSXP, 2));
-                SET_STRING_ELT(out, 0, Rf_mkChar("ordered"));
-                SET_STRING_ELT(out, 1, Rf_mkChar("factor"));
-                UNPROTECT(1);
-                return out;
-            }
-            return Rf_mkString("factor");
-        }
-        if (strcmp(w, "class") == 0 && t == RDZ_TYPE_DATA_FRAME) return Rf_mkString("data.frame");
-        if (strcmp(w, "row.names") == 0 && t == RDZ_TYPE_DATA_FRAME && nrow <= (uint64_t)INT_MAX) {
-            out = PROTECT(Rf_allocVector(INTSXP, (R_xlen_t)nrow));
-            for (j = 0; j < nrow; j++) INTEGER(out)[j] = (int)(j + 1);
-            UNPROTECT(1);
-            return out;
-        }
-        return strcmp(w, "names") == 0 ? Rf_allocVector(STRSXP, 0) : R_NilValue;
-    }
-    /* a one-object view of the file: that object as the root, its blocks
-       renumbered from zero (block entries keep their file offsets) */
-    view = r;
-    only = r.objects[object];
-    view.blocks = r.blocks + only.first_block;
-    view.nblocks = only.block_count;
-    only.object_id = 0;
-    only.parent_id = RDZ_ROOT_PARENT_ID;
-    only.role = RDZ_ROLE_ROOT;
-    only.first_attribute = 0;
-    only.attribute_count = 0;
-    only.first_block = 0;
-    view.objects = &only;
-    view.nobjects = 1;
-    view.nattributes = 0;
-    out = PROTECT(rdz_native_read_r(&view, 1, R_NilValue, R_NilValue, &e, &failed)); /* closes the view's buffers */
-    UNPROTECT(1);
-    if (failed) return rdz_failure(&e);
     return out;
 }
 
