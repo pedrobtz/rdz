@@ -259,17 +259,17 @@ SEXP rdz_c_write_generic(SEXP x, SEXP synopsis, SEXP path, SEXP settings, SEXP m
 }
 
 /* The result of the three one-open reads below: a failure as it is, else
-   list(native, x), and with_lo appends the row the value starts after. */
+   list(native, x), and with_lo appends the row the value starts after. x
+   is protected by the caller (rchk counts only call-site protection). */
 static SEXP rdz_read_result(SEXP x, int native, int with_lo, double lo)
 {
     SEXP out;
     if (Rf_inherits(x, "rdz_failure")) return x;
-    PROTECT(x);
     out = PROTECT(Rf_allocVector(VECSXP, with_lo ? 3 : 2));
     SET_VECTOR_ELT(out, 0, Rf_ScalarLogical(native));
     SET_VECTOR_ELT(out, 1, x);
     if (with_lo) SET_VECTOR_ELT(out, 2, Rf_ScalarReal(lo));
-    UNPROTECT(2);
+    UNPROTECT(1);
     return out;
 }
 
@@ -283,12 +283,14 @@ SEXP rdz_c_read(SEXP path, SEXP settings, SEXP select, SEXP window)
 {
     rdz_read_args a = rdz_read_args_none();
     int native = 0;
-    SEXP x;
+    SEXP x, out;
     a.select = select;
     a.window = window;
     /* read first: native and a.lo are its outputs */
-    x = rdz_read_source(path, settings, rdz_native_read_request, NULL, &a, 1, &native);
-    return rdz_read_result(x, native, 1, a.lo);
+    x = PROTECT(rdz_read_source(path, settings, rdz_native_read_request, NULL, &a, 1, &native));
+    out = rdz_read_result(x, native, 1, a.lo);
+    UNPROTECT(1);
+    return out;
 }
 
 /* rdz_attributes()' one read: object (NULL, a list of steps, strings and
@@ -301,14 +303,18 @@ SEXP rdz_c_attributes(SEXP path, SEXP settings, SEXP object, SEXP names, SEXP al
 {
     rdz_read_args a = rdz_read_args_none();
     int native = 0, full = Rf_asLogical(allow_full) == TRUE;
-    SEXP x;
+    SEXP x, out;
     a.steps = object;
     a.names = names;
-    x = rdz_read_source(path, settings, rdz_native_read_attributes, NULL, &a, full, &native);
+    x = PROTECT(rdz_read_source(path, settings, rdz_native_read_attributes, NULL, &a, full,
+                                &native));
     if (!native && !full && !Rf_inherits(x, "rdz_failure")) {
+        UNPROTECT(1);
         return rdz_request("attributes_full", R_NilValue);
     }
-    return rdz_read_result(x, native, 0, 0);
+    out = rdz_read_result(x, native, 0, 0);
+    UNPROTECT(1);
+    return out;
 }
 
 /* A generic file's schema: rdz_info()'s fields alone, as list(info). */
@@ -346,10 +352,13 @@ SEXP rdz_c_schema(SEXP path, SEXP settings, SEXP recursive)
 {
     rdz_read_args a = rdz_read_args_none();
     int native = 0;
-    SEXP x;
+    SEXP x, out;
     a.recursive = Rf_asLogical(recursive) == TRUE;
-    x = rdz_read_source(path, settings, rdz_native_read_schema, rdz_schema_generic, &a, 0, &native);
-    return rdz_read_result(x, native, 0, 0);
+    x = PROTECT(rdz_read_source(path, settings, rdz_native_read_schema, rdz_schema_generic, &a, 0,
+                                &native));
+    out = rdz_read_result(x, native, 0, 0);
+    UNPROTECT(1);
+    return out;
 }
 
 /* The logical classifier in use; force_scalar TRUE or FALSE switches the
