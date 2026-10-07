@@ -44,39 +44,52 @@ rdz_stop <- function(..., class = "rdz_argument_error", call. = FALSE) {
 }
 
 # A request the file cannot serve (rdz_request() in src/rdz_r.c), worded as
-# R's own argument checks word it: an rdz_argument_error.
-rdz_request_stop <- function(result) {
+# R's own argument checks word it: an rdz_argument_error. `object` is
+# rdz_attributes()' path, from which a refusal of it names where it led
+# ("the root", "$sales", "$models[[2]]").
+rdz_request_stop <- function(result, object = NULL) {
   data <- attr(result, "data")
-  switch(as.character(result),
+  what <- as.character(result)
+  if (what %in% c("object_below", "object_unknown", "object_position")) {
+    steps <- as.list(object)
+    k <- data[[1L]]
+    where <- paste0(vapply(steps[seq_len(k - 1L)], function(s) {
+      if (is.character(s)) paste0("$", s) else paste0("[[", as.integer(s), "]]")
+    }, ""), collapse = "")
+    if (!nzchar(where)) where <- "the root"
+  }
+  switch(what,
     select_root = rdz_stop("`select` needs a list or a data frame; the file holds ",
-                           if (nzchar(data)) data else "neither", ".", call. = FALSE),
-    select_type = rdz_stop("`select` must be NULL, a character vector or a numeric vector.",
-                           call. = FALSE),
-    select_range = rdz_stop("`select` positions must be whole numbers from 1 to ", data, ".",
-                            call. = FALSE),
-    select_na = rdz_stop("`select` must not contain NA.", call. = FALSE),
-    select_no_names = rdz_stop("`select` names parts, but they have no names.", call. = FALSE),
-    select_unknown = rdz_stop("Unknown in `select`: ", paste(data, collapse = ", "),
-                              call. = FALSE),
-    select_repeat = rdz_stop("`select` must not repeat a part.", call. = FALSE),
+                           if (nzchar(data)) data else "neither", "."),
+    select_type = rdz_stop("`select` must be NULL, a character vector or a numeric vector."),
+    select_range = rdz_stop("`select` positions must be whole numbers from 1 to ", data, "."),
+    select_na = rdz_stop("`select` must not contain NA."),
+    select_no_names = rdz_stop("`select` names parts, but they have no names."),
+    select_unknown = rdz_stop("Unknown in `select`: ", paste(data, collapse = ", ")),
+    select_repeat = rdz_stop("`select` must not repeat a part."),
     rows_root = rdz_stop(
-      "`rows` needs a data frame or a vector; use `select` for a list's elements.",
-      call. = FALSE
+      "`rows` needs a data frame or a vector; use `select` for a list's elements."
     ),
-    rows_range = rdz_stop("`rows` must be at most ", data, ".", call. = FALSE),
-    attribute_unknown = rdz_stop("Unknown attribute: ", paste(data, collapse = ", "),
-                                 call. = FALSE),
+    rows_range = rdz_stop("`rows` must be at most ", data, "."),
+    object_shape = rdz_stop(
+      "`object` must be NULL, 0, or a path of names and positive positions."
+    ),
+    object_below = rdz_stop("`object` goes below ", where,
+                            ", which is not a list or a data frame."),
+    object_unknown = rdz_stop("No `", steps[[k]], "` in ", where, "."),
+    object_position = rdz_stop("Position ", as.integer(steps[[k]]), " is past the ",
+                               as.integer(data[[2L]]), " parts of ", where, "."),
+    attribute_unknown = rdz_stop("Unknown attribute: ", paste(unique(data), collapse = ", ")),
     attributes_full = rdz_stop(
-      "Exact generic attributes require a full read; set `allow_full = TRUE`.",
-      call. = FALSE
+      "Exact generic attributes require a full read; set `allow_full = TRUE`."
     ),
-    rdz_stop("rdz cannot serve this request.", call. = FALSE)
+    rdz_stop("rdz cannot serve this request.")
   )
 }
 
-rdz_check <- function(result) {
+rdz_check <- function(result, object = NULL) {
   if (inherits(result, "rdz_failure")) {
-    if (identical(attr(result, "kind"), "request")) rdz_request_stop(result)
+    if (identical(attr(result, "kind"), "request")) rdz_request_stop(result, object)
     class <- switch(attr(result, "kind"),
       limit = "rdz_limit_error",
       version = "rdz_version_error",

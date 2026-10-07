@@ -1573,16 +1573,6 @@ static SEXP rdz_object_names(rdz_reader *r, uint32_t owner, rdz_error *e, int *f
     return *failed ? R_NilValue : out;
 }
 
-/* A request failure (rdz_request()), its data protected meanwhile. */
-static SEXP rdz_req(const char *what, SEXP data)
-{
-    SEXP out;
-    PROTECT(data);
-    out = rdz_request(what, data);
-    UNPROTECT(1);
-    return out;
-}
-
 /* select (a character or double vector, or FALSE for neither) as the
    root's 0-based children, in R's order of checks: the root, the type,
    then for positions their range, for names NA, the names' presence and
@@ -1600,11 +1590,11 @@ static SEXP rdz_select_children(rdz_reader *r, SEXP select, rdz_error *e, int *f
     *failed = 0;
     *request = R_NilValue;
     if (root->type_tag != RDZ_TYPE_LIST && root->type_tag != RDZ_TYPE_DATA_FRAME) {
-        *request = rdz_req("select_root", Rf_mkString(rdz_root_type_name(r)));
+        *request = rdz_request("select_root", Rf_mkString(rdz_root_type_name(r)));
         return R_NilValue;
     }
     if (TYPEOF(select) != STRSXP && TYPEOF(select) != REALSXP) {
-        *request = rdz_req("select_type", R_NilValue);
+        *request = rdz_request("select_type", R_NilValue);
         return R_NilValue;
     }
     at = PROTECT(Rf_allocVector(INTSXP, k));
@@ -1614,7 +1604,7 @@ static SEXP rdz_select_children(rdz_reader *r, SEXP select, rdz_error *e, int *f
         for (j = 0; j < k; j++) {
             double x = REAL(select)[j];
             if (!R_FINITE(x) || x != floor(x) || x < 1 || x > (double)n || x > INT_MAX) {
-                *request = rdz_req("select_range", Rf_ScalarReal((double)n));
+                *request = rdz_request("select_range", Rf_ScalarReal((double)n));
                 goto done;
             }
             ids[j] = (int)x - 1;
@@ -1625,12 +1615,12 @@ static SEXP rdz_select_children(rdz_reader *r, SEXP select, rdz_error *e, int *f
         if (*failed) goto done;
         for (j = 0; j < k; j++) {
             if (STRING_ELT(select, j) == NA_STRING) {
-                *request = rdz_req("select_na", R_NilValue);
+                *request = rdz_request("select_na", R_NilValue);
                 goto done;
             }
         }
         if (names == R_NilValue) {
-            *request = rdz_req("select_no_names", R_NilValue);
+            *request = rdz_request("select_no_names", R_NilValue);
             goto done;
         }
         m = PROTECT(Rf_match(names, select, 0));
@@ -1643,7 +1633,7 @@ static SEXP rdz_select_children(rdz_reader *r, SEXP select, rdz_error *e, int *f
             for (j = 0; j < k; j++) {
                 if (INTEGER(m)[j] == 0) SET_STRING_ELT(missing, u++, STRING_ELT(select, j));
             }
-            *request = rdz_req("select_unknown", missing);
+            *request = rdz_request("select_unknown", missing);
             goto done;
         }
         for (j = 0; j < k; j++) ids[j] = INTEGER(m)[j] - 1;
@@ -1652,7 +1642,7 @@ static SEXP rdz_select_children(rdz_reader *r, SEXP select, rdz_error *e, int *f
     memset(seen, 0, n ? n : 1);
     for (j = 0; j < k; j++) {
         if (seen[ids[j]]) {
-            *request = rdz_req("select_repeat", R_NilValue);
+            *request = rdz_request("select_repeat", R_NilValue);
             goto done;
         }
         seen[ids[j]] = 1;
@@ -1694,12 +1684,12 @@ SEXP rdz_native_read_request(rdz_reader *opened, int threads, SEXP select, SEXP 
             t != RDZ_TYPE_CHARACTER && t != RDZ_TYPE_FACTOR && t != RDZ_TYPE_DATA_FRAME) {
             UNPROTECT(1);
             *failed = 2;
-            return rdz_req("rows_root", R_NilValue);
+            return rdz_request("rows_root", R_NilValue);
         }
         if (whi > (double)root->logical_len) {
             UNPROTECT(1);
             *failed = 2;
-            return rdz_req("rows_range", Rf_ScalarReal((double)root->logical_len));
+            return rdz_request("rows_range", Rf_ScalarReal((double)root->logical_len));
         }
         zb_buf_alloc(&plan, 0, 0); /* empty: cannot fail */
         if (rdz_window_fill(opened, wlo, whi, &plan, e)) {
@@ -1822,7 +1812,7 @@ static int rdz_walk(rdz_reader *r, SEXP steps, uint32_t *id, SEXP *request, rdz_
         SEXP s = VECTOR_ELT(steps, k);
         double at;
         if (o->type_tag != RDZ_TYPE_LIST && o->type_tag != RDZ_TYPE_DATA_FRAME) {
-            *request = rdz_req("object_below", Rf_ScalarReal((double)(k + 1)));
+            *request = rdz_request("object_below", Rf_ScalarReal((double)(k + 1)));
             return 0;
         }
         if (TYPEOF(s) == STRSXP) {
@@ -1836,7 +1826,7 @@ static int rdz_walk(rdz_reader *r, SEXP steps, uint32_t *id, SEXP *request, rdz_
             m = names == R_NilValue ? 0 : INTEGER(Rf_match(names, s, 0))[0];
             UNPROTECT(1);
             if (m == 0) {
-                *request = rdz_req("object_unknown", Rf_ScalarReal((double)(k + 1)));
+                *request = rdz_request("object_unknown", Rf_ScalarReal((double)(k + 1)));
                 return 0;
             }
             at = m;
@@ -1846,7 +1836,7 @@ static int rdz_walk(rdz_reader *r, SEXP steps, uint32_t *id, SEXP *request, rdz_
                 SEXP d = PROTECT(Rf_allocVector(REALSXP, 2));
                 REAL(d)[0] = (double)(k + 1);
                 REAL(d)[1] = (double)o->child_count;
-                *request = rdz_req("object_position", d);
+                *request = rdz_request("object_position", d);
                 UNPROTECT(1);
                 return 0;
             }
@@ -1866,14 +1856,14 @@ SEXP rdz_native_read_attributes(rdz_reader *opened, int threads, SEXP steps, SEX
                                 rdz_error *e, int *failed)
 {
     rdz_entries t;
-    SEXP request, requested, out, ids, missing;
+    SEXP request, requested, available, m, out, ids, missing;
     uint32_t id;
     R_xlen_t j, k, cap, nreq, nunknown = 0, nids = 0;
     int nprot = 0, *slot;
     *failed = 0;
     if (TYPEOF(steps) == LGLSXP) {
         *failed = 2;
-        return rdz_req("object_shape", R_NilValue);
+        return rdz_request("object_shape", R_NilValue);
     }
     if (rdz_walk(opened, steps, &id, &request, e)) {
         *failed = 1;
@@ -1883,7 +1873,6 @@ SEXP rdz_native_read_attributes(rdz_reader *opened, int threads, SEXP steps, SEX
         *failed = 2;
         return request;
     }
-    id = rdz_resolve_id(opened, id);
     /* every stored attribute plus five implied ones at most */
     cap = (R_xlen_t)opened->objects[id].attribute_count + 5;
     t.names = PROTECT(Rf_allocVector(STRSXP, cap));
@@ -1900,40 +1889,24 @@ SEXP rdz_native_read_attributes(rdz_reader *opened, int threads, SEXP steps, SEX
     PROTECT(requested);
     nprot++;
     nreq = XLENGTH(requested);
-    slot = (int *)R_alloc((size_t)(nreq ? nreq : 1), sizeof(int));
+    /* each requested name's entry (0: none), as entries[requested] finds it */
+    available = PROTECT(Rf_lengthgets(t.names, t.n));
+    m = PROTECT(Rf_match(available, requested, 0));
+    nprot += 2;
+    slot = INTEGER(m);
     for (j = 0; j < nreq; j++) {
-        const char *want = CHAR(STRING_ELT(requested, j));
-        slot[j] = -1;
-        for (k = 0; k < t.n; k++) {
-            if (!strcmp(CHAR(STRING_ELT(t.names, k)), want)) {
-                slot[j] = (int)k;
-                break;
-            }
-        }
-        if (slot[j] < 0) {
-            /* setdiff(): each unknown name once, in requested order */
-            R_xlen_t i;
-            int seen = 0;
-            for (i = 0; i < j && !seen; i++) seen = slot[i] < 0 && !strcmp(CHAR(STRING_ELT(requested, i)), want);
-            if (!seen) nunknown++;
-        } else if (t.object[slot[j]] >= 0) {
-            nids++;
-        }
+        if (slot[j]-- == 0) nunknown++; /* now 0-based, -1: none */
+        else if (t.object[slot[j]] >= 0) nids++;
     }
     if (nunknown) {
+        /* every unknown request; R lists each once (setdiff()) */
         R_xlen_t u = 0;
         missing = PROTECT(Rf_allocVector(STRSXP, nunknown));
         nprot++;
         for (j = 0; j < nreq; j++) {
-            R_xlen_t i;
-            int seen = 0;
-            if (slot[j] >= 0) continue;
-            for (i = 0; i < j && !seen; i++) {
-                seen = slot[i] < 0 && !strcmp(CHAR(STRING_ELT(requested, i)), CHAR(STRING_ELT(requested, j)));
-            }
-            if (!seen) SET_STRING_ELT(missing, u++, STRING_ELT(requested, j));
+            if (slot[j] < 0) SET_STRING_ELT(missing, u++, STRING_ELT(requested, j));
         }
-        out = rdz_req("attribute_unknown", missing);
+        out = rdz_request("attribute_unknown", missing);
         UNPROTECT(nprot);
         *failed = 2;
         return out;
