@@ -19,6 +19,16 @@ until the next replaces it. Each read frees its block buffers (about 3.3 MB
 of pages reclaimed per read at 5e6 rows); keeping them between reads would
 add state for about a millisecond, so they are freed, by choice.
 
+String writes: the content hash's per-string digests are now taken from the
+finished block's records (same bytes, same values), which took writes of
+5e6 unique strings from 194 to about 160 ms at level 0 and from 394 to 367
+ms at level 1, with identical hashes. A batched R string source was
+measured first and dropped: it could remove only the per-string
+`STRING_ELT()` and the callback, about 6%, since `Rf_getCharCE()`,
+`LENGTH()` and the ASCII check stay calls into R. Level-1 string writes are
+zstd's (about 245 of 367 ms): no further string-write work is planned
+without a change of compression level.
+
 ## Checkpoint 2026-10-07: one call for `rdz_schema()`
 
 `rdz_schema()` opens the file once (it opened it three times: `rdz_info()`,

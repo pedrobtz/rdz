@@ -30,6 +30,7 @@
 
 #include "rdz_alp.h"
 #include "rdz_container.h"
+#include "rdz_content.h"
 #include "rdz_graph.h"
 #include "rdz_logical.h"
 #include "rdz_native.h"
@@ -1553,6 +1554,127 @@ static void test_for_ranges(void)
     }
 }
 
+/* The content hash takes each string's digest from its record in the
+   finished block (rdz_content_records(), rdz_record_digests()): checked
+   against rdz_string_digest() of the string, record by record over every
+   tag and lengths around the one-shot branch (251 bytes), and as a whole
+   encoding against per-value rdz_content_string(), plain and dictionary,
+   with a record that ends a block exactly, one that starts the next, and a
+   last block partly filled. */
+typedef struct {
+    const rdz_str *v;
+    size_t blocks;
+} digest_src;
+
+static uintptr_t digest_key(void *ctx, size_t i)
+{
+    const rdz_str *v = &((digest_src *)ctx)->v[i];
+    uintptr_t h = (uintptr_t)v->tag * 1000003u + v->len;
+    size_t k;
+    for (k = 0; k < v->len; k++) h = h * 31u + v->bytes[k];
+    return h;
+}
+
+static int digest_value(void *ctx, size_t i, rdz_str *out, rdz_error *e)
+{
+    (void)e;
+    *out = ((digest_src *)ctx)->v[i];
+    return 0;
+}
+
+static int digest_emit(void *ctx, uint16_t encoding, uint64_t count, const uint8_t *data,
+                       size_t n, rdz_error *e)
+{
+    (void)encoding;
+    (void)count;
+    (void)data;
+    (void)n;
+    (void)e;
+    ((digest_src *)ctx)->blocks++;
+    return 0;
+}
+
+static void test_record_digests(void)
+{
+    static const size_t lens[] = {0, 1, 250, 251, 252, 256, 300, 100000};
+    static const uint8_t tags[] = {RDZ_STR_NA, RDZ_STR_NATIVE, RDZ_STR_UTF8, RDZ_STR_LATIN1,
+                                   RDZ_STR_BYTES};
+    enum { N = 1100 };
+    uint8_t *text = (uint8_t *)malloc(100000), *recs = (uint8_t *)malloc(8 * (100000 + 5));
+    rdz_str *v = (rdz_str *)malloc(N * sizeof *v);
+    /* the hasher wants 64-byte alignment, which malloc() does not promise */
+    void *mem_a = malloc(sizeof(rdz_content) + 63), *mem_b = malloc(sizeof(rdz_content) + 63);
+    rdz_content *a = (rdz_content *)(void *)(((uintptr_t)mem_a + 63) & ~(uintptr_t)63),
+                *b = (rdz_content *)(void *)(((uintptr_t)mem_b + 63) & ~(uintptr_t)63);
+    uint64_t got[8];
+    size_t t, l, i, at;
+    for (i = 0; i < 100000; i++) text[i] = (uint8_t)('a' + i % 26);
+    text[3] = 0xc3; /* a non-ASCII byte, for the encodings' tags */
+    for (t = 0; t < sizeof tags; t++) {
+        for (at = 0, l = 0; l < sizeof lens / sizeof *lens; l++) {
+            size_t len = tags[t] == RDZ_STR_NA ? 0 : lens[l];
+            recs[at] = tags[t];
+            zb_wr_u32le(recs + at + 1, (uint32_t)len);
+            memcpy(recs + at + 5, text, len);
+            at += 5 + len;
+        }
+        CHECK(rdz_record_digests(recs, 8, got) == at, "record digests: tag %u span", tags[t]);
+        for (l = 0; l < sizeof lens / sizeof *lens; l++) {
+            rdz_str s;
+            s.tag = tags[t];
+            s.bytes = text;
+            s.len = tags[t] == RDZ_STR_NA ? 0 : lens[l];
+            CHECK(got[l] == rdz_string_digest(&s), "record digest: tag %u length %zu", tags[t],
+                  s.len);
+        }
+    }
+    {
+        /* strings of 1019 bytes: records of 1024, 1024 to a block exactly;
+           then one more (a new block), and a short partial tail; repeats
+           make the dictionary path take them */
+        static const int policies[] = {RDZ_DICT_PLAIN, RDZ_DICT_GLOBAL};
+        static const size_t counts[] = {1024, 1025, 1100};
+        size_t p, c;
+        for (p = 0; p < 2; p++) {
+            for (c = 0; c < 3; c++) {
+                digest_src src_ctx;
+                rdz_str_source src;
+                rdz_error e;
+                uint8_t ha[16], hb[16];
+                for (i = 0; i < counts[c]; i++) {
+                    v[i].tag = i % 7 == 3 ? RDZ_STR_UTF8 : RDZ_STR_NATIVE;
+                    v[i].bytes = text + (policies[p] == RDZ_DICT_PLAIN ? i % 26 : (i % 5) * 7);
+                    v[i].len = i == counts[c] - 1 && c == 2 ? 3 : 1019;
+                }
+                src_ctx.v = v;
+                src_ctx.blocks = 0;
+                src.n = counts[c];
+                src.ctx = &src_ctx;
+                src.key = digest_key;
+                src.value = digest_value;
+                rdz_content_begin(a);
+                CHECK(rdz_string_encode_hashed(&src, policies[p], digest_emit, &src_ctx, a, &e) == 0,
+                      "record digests: encode: %s", e.message);
+                rdz_content_end(a, ha);
+                rdz_content_begin(b);
+                for (i = 0; i < counts[c]; i++) rdz_content_string(b, &v[i]);
+                rdz_content_end(b, hb);
+                CHECK(memcmp(ha, hb, 16) == 0, "record digests: policy %d, %zu strings: hash",
+                      policies[p], counts[c]);
+                if (policies[p] == RDZ_DICT_PLAIN) {
+                    CHECK(src_ctx.blocks == (counts[c] == 1024 ? 1u : 2u),
+                          "record digests: %zu strings in %zu blocks", counts[c], src_ctx.blocks);
+                }
+            }
+        }
+    }
+    free(text);
+    free(recs);
+    free(v);
+    free(mem_a);
+    free(mem_b);
+}
+
 int main(int argc, char **argv)
 {
     const char *tmpdir = argc > 1 ? argv[1] : ".";
@@ -1581,6 +1703,7 @@ int main(int argc, char **argv)
     test_extensions(tmpdir);
     test_empty_logical(tmpdir);
     test_for_ranges();
+    test_record_digests();
     test_level0_widths();
     test_bit_exact_ints();
     test_bit_exact_logical();

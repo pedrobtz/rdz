@@ -113,6 +113,44 @@ void rdz_content_string(rdz_content *c, const rdz_str *s)
     rdz_content_digest(c, rdz_string_digest(s));
 }
 
+/* A record is exactly the bytes rdz_string_digest() hashes (tag, u32le
+   length, the string), and XXH3-64 in one shot over them equals its
+   two-part digest: hashed where the encoder wrote them, long after, they
+   cost no copy and no load waiting on its own store. */
+static size_t record_digest(const uint8_t *rec, uint64_t *d)
+{
+    size_t len = RDZ_STRING_RECORD_HEADER + zb_rd_u32le(rec + 1);
+    *d = zuf_hash64(rec, len);
+    return len;
+}
+
+size_t rdz_record_digests(const uint8_t *records, size_t count, uint64_t *out)
+{
+    size_t at = 0, k;
+    for (k = 0; k < count; k++) at += record_digest(records + at, &out[k]);
+    return at;
+}
+
+void rdz_content_records(rdz_content *c, const uint8_t *records, size_t count)
+{
+    size_t at = 0;
+    while (count) {
+        size_t room = (sizeof c->buf - c->at) / 8, k, take = count < room ? count : room;
+        uint8_t *p = c->buf + c->at;
+        if (!take) {
+            flush(c);
+            continue;
+        }
+        for (k = 0; k < take; k++) {
+            uint64_t d;
+            at += record_digest(records + at, &d);
+            zb_wr_u64le(p + 8 * k, d);
+        }
+        c->at += 8 * take;
+        count -= take;
+    }
+}
+
 void rdz_content_attributes(rdz_content *c, const rdz_attribute *a, size_t n)
 {
     size_t i;

@@ -35,6 +35,13 @@ void rdz_content_digests(rdz_content *c, const uint64_t *digests, const uint32_t
 void rdz_content_attributes(rdz_content *c, const rdz_attribute *a, size_t n);
 void rdz_content_end(rdz_content *c, uint8_t out[16]);
 
+/* A string's digest: XXH3-64 of its record (tag, u32le length, bytes). */
 uint64_t rdz_string_digest(const rdz_str *s);
+/* The digests of `count` consecutive string records (as the string codec
+   writes them) into out; returns the bytes they span. The same values as
+   rdz_string_digest() of each string. */
+size_t rdz_record_digests(const uint8_t *records, size_t count, uint64_t *out);
+/* rdz_content_string() of each of `count` consecutive string records. */
+void rdz_content_records(rdz_content *c, const uint8_t *records, size_t count);
 
 #endif /* RDZ_CONTENT_H */

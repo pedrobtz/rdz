@@ -122,6 +122,26 @@ static int record_len(const rdz_str *v, size_t *len, rdz_error *e)
     return 0;
 }
 
+/* A finished dictionary-entry block's digests, appended to `digests` (one
+   per id, ids in entry order) for the content hash's per-index digests. */
+static int entry_digests(zb_buf *digests, const zb_buf *buf, size_t count, rdz_error *e)
+{
+    uint64_t *d = (uint64_t *)(void *)zb_put_raw(digests, count * sizeof *d);
+    if (!d) return rdz_memory(e, "dictionary digests");
+    rdz_record_digests(buf->data, count, d);
+    return 0;
+}
+
+/* A plain block of `count` records, its strings' digests first: the content
+   hash takes them from the finished block (rdz_content_records()), in the
+   order and at the place the strings come, nothing else between. */
+static int emit_plain(rdz_emit_fn emit, void *ectx, size_t count, const zb_buf *buf,
+                      rdz_content *content, rdz_error *e)
+{
+    if (content) rdz_content_records(content, buf->data, count);
+    return emit(ectx, RDZ_ENCODING_STRING_PLAIN, count, buf->data, buf->len, e);
+}
+
 static int encode_plain(const rdz_str_source *src, size_t from, rdz_emit_fn emit, void *ectx,
                         zb_buf *buf, rdz_content *content, rdz_error *e)
 {
@@ -132,9 +152,8 @@ static int encode_plain(const rdz_str_source *src, size_t from, rdz_emit_fn emit
         rdz_str v;
         size_t rec;
         if (src->value(src->ctx, i, &v, e) || record_len(&v, &rec, e)) return 1;
-        if (content) rdz_content_string(content, &v);
         if (count != 0 && buf->len + rec > RDZ_BLOCK_SIZE) {
-            if (emit(ectx, RDZ_ENCODING_STRING_PLAIN, count, buf->data, buf->len, e)) return 1;
+            if (emit_plain(emit, ectx, count, buf, content, e)) return 1;
             zb_buf_reset(buf);
             count = 0;
             emitted = 1;
@@ -142,9 +161,7 @@ static int encode_plain(const rdz_str_source *src, size_t from, rdz_emit_fn emit
         if (push_record(buf, &v, e)) return 1;
         count++;
     }
-    if (count != 0 || !emitted) {
-        return emit(ectx, RDZ_ENCODING_STRING_PLAIN, count, buf->data, buf->len, e);
-    }
+    if (count != 0 || !emitted) return emit_plain(emit, ectx, count, buf, content, e);
     return 0;
 }
 
@@ -300,15 +317,9 @@ int rdz_string_encode_hashed(const rdz_str_source *src, int policy, rdz_emit_fn 
             rdz_str v;
             size_t rec;
             if (src->value(src->ctx, fs[i], &v, e) || record_len(&v, &rec, e)) goto done;
-            if (content) { /* entries come in id order */
-                uint64_t d = rdz_string_digest(&v);
-                if (zb_put_bytes(&digests, &d, sizeof d)) {
-                    rdz_memory(e, "dictionary digests");
-                    goto done;
-                }
-            }
             if (entry_count != 0 && buf.len + rec > RDZ_BLOCK_SIZE) {
-                if (emit(ectx, RDZ_ENCODING_STRING_DICT_ENTRIES, entry_count, buf.data, buf.len, e)) {
+                if ((content && entry_digests(&digests, &buf, entry_count, e)) ||
+                    emit(ectx, RDZ_ENCODING_STRING_DICT_ENTRIES, entry_count, buf.data, buf.len, e)) {
                     goto done;
                 }
                 zb_buf_reset(&buf);
@@ -318,7 +329,8 @@ int rdz_string_encode_hashed(const rdz_str_source *src, int policy, rdz_emit_fn 
             entry_count++;
         }
         if (entry_count != 0 &&
-            emit(ectx, RDZ_ENCODING_STRING_DICT_ENTRIES, entry_count, buf.data, buf.len, e)) {
+            ((content && entry_digests(&digests, &buf, entry_count, e)) ||
+             emit(ectx, RDZ_ENCODING_STRING_DICT_ENTRIES, entry_count, buf.data, buf.len, e))) {
             goto done;
         }
         if (content) {
