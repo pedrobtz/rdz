@@ -60,13 +60,8 @@ test_that("this rdz writes every frozen native speed file's bytes again, codes a
   na <- writeBin(c(NA_real_, 0)[1L], raw(), endian = "little")
   skip_if(!identical(na, as.raw(c(0xa2, 0x07, 0, 0, 0, 0, 0xf0, 0x7f))),
           "R on this platform changes NaN payloads")
-  # The corpus's level-0 files hold frame-of-reference codes at their
-  # smallest width; level 0 now writes codes of up to 16 bits as bytes or
-  # halfwords (container-format.md, encoding 12). These files hold such
-  # codes, and are written larger and read the same; every other one is
-  # written byte for byte again.
-  wider <- c("factor_speed", "frame_speed", "frame_row_names_speed", "frame_classed_speed",
-             "attributes_speed", "metadata_speed")
+  # frozen_wider_codes are written larger and read the same; every other one
+  # byte for byte again
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
   changed <- character()
@@ -79,5 +74,5 @@ test_that("this rdz writes every frozen native speed file's bytes again, codes a
     expect_identical(read_rdz(path), read_rdz(frozen), label = spec$name)
     expect_gt(file.size(path), file.size(frozen), label = spec$name)
   }
-  expect_setequal(changed, wider)
+  expect_setequal(changed, frozen_wider_codes)
 })

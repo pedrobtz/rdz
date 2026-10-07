@@ -8,7 +8,9 @@
 # `check` requires every file to read to its spec's value, and every
 # uncompressed (speed) native file to be the same bytes on every platform
 # and the same as the frozen corpus's but the writer field: the format has
-# no platform in it. Compressed files may differ only if the platforms' zstd
+# no platform in it. The files in frozen_wider_codes (their small integer
+# codes are now stored as bytes or halfwords) must instead be larger than
+# the corpus's. Compressed files may differ only if the platforms' zstd
 # builds do, and generic files if their R versions do (R's serialization
 # header records it); that is reported, not failed.
 
@@ -65,7 +67,10 @@ for (spec in specs) {
   same <- all(vapply(bytes, identical, logical(1L), bytes[[1L]]))
   if (identical(spec$preset, "speed") && identical(spec$codec, "native_v1")) {
     if (!same) fail(file, "differs between platforms")
-    if (!identical(bytes[[1L]], but_writer(file.path(corpus, file)))) {
+    frozen <- but_writer(file.path(corpus, file))
+    if (spec$name %in% frozen_wider_codes) {
+      if (length(bytes[[1L]]) <= length(frozen)) fail(file, "is not written with wider codes")
+    } else if (!identical(bytes[[1L]], frozen)) {
       fail(file, "differs from the frozen corpus")
     }
   } else if (!same) {

@@ -49,6 +49,14 @@ frozen_frame <- function(n) {
   )
 }
 
+# The corpus's level-0 native files that hold frame-of-reference codes at
+# their smallest width; level 0 now writes codes of up to 16 bits as bytes or
+# halfwords (container-format.md, encoding 12), so this rdz writes these
+# larger, reading the same, and every other level-0 native file byte for
+# byte (test-frozen-fixtures.R, tools/exchange.R).
+frozen_wider_codes <- c("factor_speed", "frame_speed", "frame_row_names_speed",
+                        "frame_classed_speed", "attributes_speed", "metadata_speed")
+
 frozen_fixture_specs <- function() {
   native <- list(
     list(name = "lgl_kinds", value = function() {
