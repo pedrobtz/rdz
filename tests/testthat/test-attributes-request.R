@@ -1,40 +1,23 @@
 # rdz_attributes() walks `object` and reads the attributes in one call
 # (the follow-up to issue #27, F.1): one open of the file.
 
-attribute_opens <- function(code) {
-  before <- .Call(rdz:::rdz_test_opens)
-  force(code)
-  .Call(rdz:::rdz_test_opens) - before
-}
-
-attribute_value <- function() {
-  df <- data.frame(id = 1:3, f = factor(c("a", "b", "a")))
-  rownames(df) <- c("x", "y", "z")
-  attr(df, "meta") <- list(k = 1)
-  v <- seq_len(5000) + 0.5
-  x <- list(sales = df, models = list(m1 = 1, m2 = structure(1:3, foo = "bar")), u = list(1, 2))
-  attr(x, "big") <- v
-  attr(x, "big2") <- v # stored as a reference to "big"
-  x
-}
-
 test_that("rdz_attributes() opens the file once, whatever the path and the file", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
   write_rdz(attribute_value(), path, mode = "native")
-  expect_identical(attribute_opens(rdz_attributes(path)), 1)
-  expect_identical(attribute_opens(rdz_attributes(path, object = c("sales", "f"))), 1)
-  expect_identical(attribute_opens(rdz_attributes(path, object = list("models", 2))), 1)
-  expect_identical(attribute_opens(rdz_attributes(path, object = "sales",
+  expect_identical(opens_during(rdz_attributes(path)), 1)
+  expect_identical(opens_during(rdz_attributes(path, object = c("sales", "f"))), 1)
+  expect_identical(opens_during(rdz_attributes(path, object = list("models", 2))), 1)
+  expect_identical(opens_during(rdz_attributes(path, object = "sales",
                                                   names = c("meta", "row.names", "class"))), 1)
-  expect_identical(attribute_opens(rdz_attributes(path, names = "big2")), 1)
-  expect_identical(attribute_opens(try(rdz_attributes(path, object = "nope"), silent = TRUE)), 1)
+  expect_identical(opens_during(rdz_attributes(path, names = "big2")), 1)
+  expect_identical(opens_during(try(rdz_attributes(path, object = "nope"), silent = TRUE)), 1)
 
   generic <- tempfile(fileext = ".rdz")
   on.exit(unlink(generic), add = TRUE)
   write_rdz(attribute_value(), generic, mode = "r")
-  expect_identical(attribute_opens(rdz_attributes(generic, "sales", allow_full = TRUE)), 1)
-  expect_identical(attribute_opens(try(rdz_attributes(generic, "sales"), silent = TRUE)), 1)
+  expect_identical(opens_during(rdz_attributes(generic, "sales", allow_full = TRUE)), 1)
+  expect_identical(opens_during(try(rdz_attributes(generic, "sales"), silent = TRUE)), 1)
 })
 
 test_that("a repeated name gives its value each time; unknown names are listed once", {

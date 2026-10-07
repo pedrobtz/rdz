@@ -2,20 +2,14 @@
 # (issue #27, F.1): one open of the file, whatever it reads and wherever it
 # falls back to reading the value whole.
 
-opens <- function(code) {
-  before <- .Call(rdz:::rdz_test_opens)
-  force(code)
-  .Call(rdz:::rdz_test_opens) - before
-}
-
 test_that("read_rdz() opens the file once for select, rows, both and a refused window", {
   path <- tempfile(fileext = ".rdz")
   on.exit(unlink(path), add = TRUE)
   df <- data.frame(a = 1:10, b = letters[1:10], c = as.numeric(1:10))
   write_rdz(df, path)
-  expect_identical(opens(read_rdz(path, select = c("c", "a"))), 1)
-  expect_identical(opens(read_rdz(path, rows = 2:4)), 1)
-  expect_identical(opens(read_rdz(path, select = "b", rows = 2:4)), 1)
+  expect_identical(opens_during(read_rdz(path, select = c("c", "a"))), 1)
+  expect_identical(opens_during(read_rdz(path, rows = 2:4)), 1)
+  expect_identical(opens_during(read_rdz(path, select = "b", rows = 2:4)), 1)
 
   # a window the reader refuses (a column shared with an attribute) falls
   # back to the whole value without a second open
@@ -24,13 +18,13 @@ test_that("read_rdz() opens the file once for select, rows, both and a refused w
   attr(shared, "x") <- v
   write_rdz(shared, path)
   got <- NULL
-  expect_identical(opens(got <- read_rdz(path, select = "a", rows = 2:3)), 1)
+  expect_identical(opens_during(got <- read_rdz(path, select = "a", rows = 2:3)), 1)
   expect_identical(got$a, v[2:3])
 
   generic <- tempfile(fileext = ".rdz")
   on.exit(unlink(generic), add = TRUE)
   write_rdz(df, generic, mode = "r")
-  expect_identical(opens(read_rdz(generic, select = "b", rows = 2:3)), 1)
+  expect_identical(opens_during(read_rdz(generic, select = "b", rows = 2:3)), 1)
 })
 
 test_that("select and rows together on a frame with a shared column", {
