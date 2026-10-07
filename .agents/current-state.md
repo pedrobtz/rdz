@@ -5,6 +5,15 @@ A log of dated checkpoints, newest first. For what the system is, read
 a checkpoint records what changed and why, and later checkpoints can
 supersede earlier ones.
 
+## Checkpoint 2026-10-07: one path for the one-open reads
+
+The three one-open reads share `rdz_read_args` and `rdz_read_source()`
+directly: the per-read context structs, trampolines and middle wrappers
+(`rdz_generic_read()` among them, a misnomer) are gone, the three entry
+points return `list(native, x[, lo])`, `rdz_entries_of()` finds a data
+frame's own attributes through `rdz_attr_value()`, and `rdz_c_file_info()`
+(a forwarder) is gone. No user-facing change.
+
 ## Checkpoint 2026-10-07: reading benchmarks, and the logical decoder
 
 The logical decoder is store-bound: into fresh pages it writes 5e6 values

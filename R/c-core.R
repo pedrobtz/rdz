@@ -107,10 +107,6 @@ rdz_check <- function(result, object = NULL) {
   result
 }
 
-rdz_c_file_info <- function(path) {
-  rdz_check(.Call(rdz_c_info, path))
-}
-
 # The settings the C writer and reader take: c(zstd level, threads, block
 # size). Options, documented in ?write_rdz:
 #
